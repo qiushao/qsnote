@@ -1,0 +1,10 @@
+/build/
+/build-*/
+/cmake-build-*/
+/.idea/
+/.cache/
+/CMakeUserPresets.json
+/compile_commands.json
+*.user
+*.log
+.DS_Store

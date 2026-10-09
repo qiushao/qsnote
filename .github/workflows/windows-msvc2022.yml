@@ -1,0 +1,85 @@
+name: windows-msvc2022
+
+on:
+  push:
+    branches: [master, main]
+    tags: ['V*', 'v*']
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+  pull_request:
+    branches: [master, main]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.2.4'
+          arch: win64_msvc2019_64
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          $version = '1.0.0'
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $version = $env:GITHUB_REF_NAME -replace '^[Vv]', ''
+          }
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 "-DAPP_VERSION=$version"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Install
+        run: cmake --install build --config Release --prefix build/package
+
+      - name: Deploy Qt
+        run: windeployqt --release --compiler-runtime build/package/bin/qsnote.exe
+
+      - name: Smoke test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: build/package/bin/qsnote.exe --version
+
+      - name: Package
+        shell: pwsh
+        run: Compress-Archive -Path build/package/bin/* -DestinationPath build/qsnote-windows-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qsnote-windows
+          path: build/*.zip
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: qsnote-windows
+          path: packages
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: packages/*.zip
+          fail_on_unmatched_files: true
+          generate_release_notes: true

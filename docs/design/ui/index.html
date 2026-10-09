@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MDNote — Markdown 笔记原型</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- 顶部栏 -->
+  <header id="app-header">
+    <button id="toggle-left" class="icon-btn" title="收起/展开笔记本栏">
+      <svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M2 2h12v12H2z" fill-opacity=".15"/><path fill="currentColor" d="M1 1v14h14V1H1zm1 1h3v12H2V2zm4 0h8v12H6V2z"/></svg>
+    </button>
+    <span class="app-title">MDNote <span class="proto-tag">原型</span></span>
+    <span class="flex-spacer"></span>
+    <button id="site-config-btn" class="btn hidden">站点配置</button>
+    <button id="preview-site-btn" class="btn hidden">站点预览</button>
+    <button id="export-btn" class="btn hidden">导出</button>
+    <button id="toggle-right" class="icon-btn" title="收起/展开大纲栏">
+      <svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M2 2h12v12H2z" fill-opacity=".15"/><path fill="currentColor" d="M1 1v14h14V1H1zm1 1h8v12H2V2zm9 0h3v12h-3V2z"/></svg>
+    </button>
+  </header>
+
+  <main id="layout">
+    <!-- 左列：笔记本管理 -->
+    <aside id="col-left">
+      <div class="col-header">
+        <div id="nb-dropdown">
+          <button id="nb-current" type="button">
+            <span class="nb-name"></span><span class="nb-caret">▾</span>
+          </button>
+          <div id="nb-list" class="hidden"></div>
+        </div>
+        <button id="new-notebook-btn" class="icon-btn" title="新建笔记本">＋</button>
+      </div>
+      <div class="search-row">
+        <input id="search-input" type="text" placeholder="搜索当前笔记本 (Ctrl+F)" autocomplete="off" />
+      </div>
+      <div id="left-body" class="col-body"></div>
+    </aside>
+
+    <!-- 中列：笔记内容（Tab + 工具栏 + 编辑/预览） -->
+    <section id="col-center">
+      <div id="tab-bar"></div>
+      <div id="toolbar" class="hidden"></div>
+      <div id="post-meta-bar" class="hidden"></div>
+      <div id="editor-area">
+        <textarea id="editor" spellcheck="false" placeholder="开始书写 Markdown..."></textarea>
+        <div id="preview" class="markdown-body hidden"></div>
+        <div id="empty-state">
+          <p>从左侧选择一篇笔记开始</p>
+          <p class="dim">支持普通笔记本 / 静态站点 / 电子书 三种类型</p>
+        </div>
+      </div>
+      <div id="status-bar"><span id="status-text"></span></div>
+    </section>
+
+    <!-- 右列：大纲 -->
+    <aside id="col-right">
+      <div class="col-header"><span class="col-title">大纲</span></div>
+      <div id="outline-body" class="col-body"></div>
+    </aside>
+  </main>
+
+  <!-- 站点配置弹窗 -->
+  <div id="site-config-mask" class="hidden">
+    <div id="site-config-dialog">
+      <div class="dialog-bar">
+        <span>站点配置</span>
+        <span class="flex-spacer"></span>
+        <button id="site-config-close" class="btn">关闭</button>
+      </div>
+      <div id="site-config-body"></div>
+    </div>
+  </div>
+
+  <!-- 站点预览窗口 -->
+  <div id="preview-overlay" class="hidden">
+    <div id="preview-overlay-bar">
+      <span class="preview-title">站点预览</span>
+      <span class="dim" style="font-size:12px">由当前站点配置与文章实时生成</span>
+      <span class="flex-spacer"></span>
+      <button id="preview-close" class="btn">关闭</button>
+    </div>
+    <iframe id="preview-frame" title="站点预览"></iframe>
+  </div>
+
+  <!-- 新建笔记本弹窗 -->
+  <div id="modal-mask" class="hidden">
+    <div id="modal">
+      <h3>新建笔记本</h3>
+      <label>名称<input id="nb-name" type="text" placeholder="笔记本名称" /></label>
+      <label>类型
+        <select id="nb-type">
+          <option value="normal">普通笔记本（目录 + 元数据文件）</option>
+          <option value="site">静态站点（Gridea 式站点配置）</option>
+          <option value="ebook">电子书（GitBook 式 SUMMARY.md）</option>
+        </select>
+      </label>
+      <div class="modal-actions">
+        <button id="modal-cancel" class="btn">取消</button>
+        <button id="modal-ok" class="btn primary">创建</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

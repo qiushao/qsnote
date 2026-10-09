@@ -1,0 +1,68 @@
+name: linux
+
+on:
+  push:
+    branches: [master, main]
+    tags: ['V*', 'v*']
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+  pull_request:
+    branches: [master, main]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential qt6-base-dev libgl1-mesa-dev clang-tidy dpkg-dev
+
+      - name: Build
+        run: |
+          version=1.0.0
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            version="${GITHUB_REF_NAME#[Vv]}"
+          fi
+          ./scripts/linux-build.sh "$version"
+
+      - name: Smoke test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ./build/src/qsnote --version
+
+      - name: Package
+        run: cpack --config build/CPackConfig.cmake -B build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qsnote-linux
+          path: build/*.deb
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: qsnote-linux
+          path: packages
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: packages/*.deb
+          fail_on_unmatched_files: true
+          generate_release_notes: true

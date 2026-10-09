@@ -1,0 +1,72 @@
+name: macos
+
+on:
+  push:
+    branches: [master, main]
+    tags: ['V*', 'v*']
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+  pull_request:
+    branches: [master, main]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.2.4'
+          arch: clang_64
+
+      - name: Build
+        run: |
+          version=1.0.0
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            version="${GITHUB_REF_NAME#[Vv]}"
+          fi
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DAPP_VERSION="$version"
+          cmake --build build --parallel
+
+      - name: Deploy Qt and package
+        run: |
+          macdeployqt build/src/qsnote.app -dmg -always-overwrite
+          mv build/src/qsnote.dmg build/qsnote-macos-x86_64.dmg
+
+      - name: Smoke test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ./build/src/qsnote.app/Contents/MacOS/qsnote --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qsnote-macos
+          path: build/*.dmg
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: qsnote-macos
+          path: packages
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: packages/*.dmg
+          fail_on_unmatched_files: true
+          generate_release_notes: true
