@@ -2,6 +2,11 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         main.cpp
         ui/MainWindow.cpp
         ui/MainWindow.h
+        ui/FlowLayout.cpp
+        ui/FlowLayout.h
+        core/NotebookStore.cpp
+        core/NotebookStore.h
+        resources/ui.qrc
 )
 
 target_include_directories(qsnote PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -11,6 +11,10 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+if (MSVC)
+    add_compile_options(/utf-8)
+endif ()
+
 if (WIN32 AND DEFINED ENV{Qt6_DIR})
     list(PREPEND CMAKE_PREFIX_PATH "$ENV{Qt6_DIR}")
 endif ()
@@ -37,4 +41,21 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
     set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
     include(CPack)
+endif ()
+
+option(QSNOTE_BUILD_TESTS "Build UI interaction tests" OFF)
+if (QSNOTE_BUILD_TESTS)
+    enable_testing()
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+    add_executable(qsnote_ui_tests
+            tests/UiTest.cpp
+            src/ui/MainWindow.cpp
+            src/ui/FlowLayout.cpp
+            src/core/NotebookStore.cpp
+            src/resources/ui.qrc
+    )
+    target_include_directories(qsnote_ui_tests PRIVATE src)
+    target_link_libraries(qsnote_ui_tests PRIVATE Qt6::Widgets Qt6::Test)
+    add_test(NAME qsnote_ui COMMAND qsnote_ui_tests)
+    set_tests_properties(qsnote_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_DATA_HOME=${CMAKE_BINARY_DIR}/test-data")
 endif ()

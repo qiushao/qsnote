@@ -73,4 +73,17 @@ DEB 打包额外需要 `dpkg-dev`。macOS 包未签名或公证。
 - 非系统安装的 Qt 可通过 `-DCMAKE_PREFIX_PATH=/path/to/Qt` 指定。
 - Linux 上如需关闭静态检查，配置时传入 `-DQSNOTE_CLANG_TIDY_ENABLE=OFF`。
 - 应用版本可用 `-DAPP_VERSION=1.2.3` 覆盖，运行 `qsnote --version` 查看。
-- 当前骨架没有业务测试；可用干净构建、`--help` / `--version` 和主窗口启动验证。
+
+## UI 验证
+
+可选测试依赖 Qt 6 Test（Linux 的 `qt6-base-dev` 已包含）：
+
+```bash
+cmake -S . -B build -DQSNOTE_BUILD_TESTS=ON
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
+
+测试使用独立的应用名与测试数据目录，不读取正式笔记；覆盖空白启动、360～1440 像素窗口布局、新建三种笔记本、右键操作、章节层级、多标签编辑、保存重载、搜索、大纲、站点元数据、配置预览和导出内容。测试运行目录生成界面 PNG，便于与原型进行视觉对照。
+
+应用使用 Qt Widgets 和原生 Markdown 渲染，无在线字体、CDN 或 WebEngine 依赖。站点发布配置仅保存和导出，不自动上传到托管服务。
