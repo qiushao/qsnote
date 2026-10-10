@@ -275,7 +275,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     refreshEditor();
     saveTimer_ = new QTimer(this);
     saveTimer_->setSingleShot(true);
-    saveTimer_->setInterval(350);
+    saveTimer_->setInterval(5000);
     connect(saveTimer_, &QTimer::timeout, this, [this] { save(); });
     auto *find = new QShortcut(QKeySequence::Find, this);
     connect(find, &QShortcut::activated, this, [this] {
@@ -552,9 +552,12 @@ void MainWindow::buildUi() {
     connect(tree_, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *item) {
         const auto id = item->data(0, Qt::UserRole).toString();
         auto *note = store_.note(id);
+        if (!note || note->folder) item->setExpanded(!item->isExpanded());
+    });
+    connect(tree_, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item) {
+        const auto id = item->data(0, Qt::UserRole).toString();
+        auto *note = store_.note(id);
         if (note && !note->folder) openNote(id);
-        else
-            item->setExpanded(!item->isExpanded());
     });
     connect(tree_, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem *item) {
         const auto id = item->data(0, Qt::UserRole).toString();
