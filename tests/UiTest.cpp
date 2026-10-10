@@ -21,6 +21,7 @@
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
 #include <vtextedit/vtextedit.h>
@@ -45,6 +46,11 @@ QString fixturePath(const QString &name) {
 // NOLINTBEGIN(readability-convert-member-functions-to-static)
 class UiTest : public QObject {
     Q_OBJECT
+    static void openTreeNote(QTreeWidget *tree, QTreeWidgetItem *item) {
+        const auto position = tree->visualItemRect(item).center();
+        QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, position);
+        QTest::mouseDClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, position);
+    }
     static QVariant javascript(MarkdownPreview &preview, const QString &script) {
         QEventLoop loop;
         QVariant result;
@@ -303,6 +309,87 @@ st->e
         QVERIFY(!QSettings().value("reader/headingFolding").toBool());
     }
 
+    void readerSettingsAndHeadingNavigation() {
+        MarkdownPreview preview;
+        preview.resize(900, 500);
+        preview.show();
+        QString source = "# Parent\n\n";
+        for (int i = 0; i < 30; ++i) source += "Paragraph before child.\n\n";
+        source += "## Child\n\nNeedle\n\n# Other\n\n";
+        for (int i = 0; i < 30; ++i) source += "Paragraph after child.\n\n";
+        preview.setHeadingFoldingEnabled(true);
+        preview.setMarkdown(source, "reader-a");
+        QTRY_COMPARE_WITH_TIMEOUT(preview.renderedRevision(), preview.revision(), 30000);
+        const auto original = javascript(preview, "getComputedStyle(document.documentElement).fontSize").toString();
+        QTimer::singleShot(0, &preview, [&preview] {
+            auto *dialog = preview.findChild<QDialog *>("readerSettings");
+            QVERIFY(dialog);
+            dialog->findChild<QSpinBox *>("readerFontSize")->setValue(24);
+            dialog->reject();
+        });
+        preview.showSettings();
+        QCOMPARE(javascript(preview, "getComputedStyle(document.documentElement).fontSize").toString(), original);
+        QVERIFY(!QSettings().contains("reader/fontSize"));
+        QString family;
+        QTimer::singleShot(0, &preview, [&preview, &family] {
+            auto *dialog = preview.findChild<QDialog *>("readerSettings");
+            QVERIFY(dialog);
+            dialog->findChild<QComboBox *>("readerTheme")->setCurrentIndex(1);
+            auto *font = dialog->findChild<QComboBox *>("readerFont");
+            QVERIFY(font->count() > 1);
+            font->setCurrentIndex(1);
+            family = font->currentData().toString();
+            dialog->findChild<QSpinBox *>("readerFontSize")->setValue(24);
+            dialog->findChild<QDoubleSpinBox *>("readerLineHeight")->setValue(2.0);
+            dialog->findChild<QSpinBox *>("readerContentWidth")->setValue(600);
+            dialog->accept();
+        });
+        preview.showSettings();
+        QTRY_COMPARE(javascript(preview, "getComputedStyle(document.documentElement).fontSize").toString(), QString("24px"));
+        QCOMPARE(javascript(preview, "getComputedStyle(document.documentElement).lineHeight").toString(), QString("48px"));
+        QCOMPARE(javascript(preview, "getComputedStyle(document.documentElement).backgroundColor").toString(), QString("rgb(22, 27, 34)"));
+        QCOMPARE(javascript(preview, "getComputedStyle(document.querySelector('main')).maxWidth").toString(), QString("600px"));
+        QVERIFY(javascript(preview, "getComputedStyle(document.documentElement).fontFamily").toString().contains(family));
+        QCOMPARE(QSettings().value("reader/fontSize").toInt(), 24);
+        QVERIFY(preview.matchesDocument(source, "reader-a"));
+        MarkdownPreview restored;
+        restored.setMarkdown("# Restored", "reader-b");
+        QTRY_COMPARE_WITH_TIMEOUT(restored.renderedRevision(), restored.revision(), 30000);
+        QCOMPARE(javascript(restored, "getComputedStyle(document.documentElement).fontSize").toString(), QString("24px"));
+        QCOMPARE(javascript(restored, "document.documentElement.dataset.theme").toString(), QString("dark"));
+
+        javascript(preview, "window.qsnotePreview.expandAll(false)");
+        preview.activateWindow();
+        preview.setFocus();
+        QTRY_VERIFY(preview.hasFocus());
+        QTest::keyClick(preview.focusProxy(), Qt::Key_G, Qt::ControlModifier);
+        QTRY_VERIFY(preview.findChild<QDialog *>("readerHeadings"));
+        QPointer<QDialog> dialog = preview.findChild<QDialog *>("readerHeadings");
+        auto *list = dialog->findChild<QListWidget *>("readerHeadingList");
+        auto *query = dialog->findChild<QLineEdit *>("readerHeadingFilter");
+        QTRY_COMPARE(list->count(), 3);
+        query->setText("missing");
+        QVERIFY(!list->currentItem());
+        query->setText("cHiLd");
+        QCOMPARE(list->currentRow(), 1);
+        QTest::keyClick(query, Qt::Key_Return);
+        QTRY_VERIFY(!dialog);
+        QTRY_VERIFY(!javascript(preview, "document.querySelector('#parent').nextElementSibling.hidden").toBool());
+        QTRY_VERIFY(javascript(preview, "(() => { const rect = document.querySelector('#child').getBoundingClientRect(); return scrollY > 100 && rect.top >= 0 && rect.bottom <= innerHeight; })()").toBool());
+        preview.showHeadingNavigation();
+        QPointer<QDialog> stale = preview.findChild<QDialog *>("readerHeadings");
+        QVERIFY(stale);
+        preview.setMarkdown("No headings", "reader-c");
+        QTRY_VERIFY(!stale);
+        QTRY_COMPARE(preview.renderedRevision(), preview.revision());
+        QCOMPARE(javascript(preview, "window.scrollY").toInt(), 0);
+        preview.showHeadingNavigation();
+        dialog = preview.findChild<QDialog *>("readerHeadings");
+        QVERIFY(dialog);
+        QTRY_COMPARE(dialog->findChild<QLabel *>()->text(), QString("当前笔记没有标题"));
+        dialog->close();
+    }
+
     void webPreviewLatestDocumentAndScroll() {
         MarkdownPreview preview;
         preview.resize(700, 400);
@@ -345,7 +432,7 @@ st->e
         window.show();
         QVERIFY(QTest::qWaitForWindowExposed(&window));
         auto *tree = window.findChild<QTreeWidget *>("noteTree");
-        QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, tree->visualItemRect(tree->topLevelItem(0)).center());
+        openTreeNote(tree, tree->topLevelItem(0));
         QTest::mouseClick(window.findChild<QPushButton *>("splitMode"), Qt::LeftButton);
         auto *preview = window.findChild<MarkdownPreview *>("preview");
         auto *editor = window.findChild<MarkdownEditor *>("markdownEditor");
@@ -435,7 +522,7 @@ st->e
         auto *tabs = window.findChild<QTabBar *>("noteTabs");
         auto *outline = window.findChild<QTreeWidget *>("outline");
         auto clickNote = [tree](int index) {
-            QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, tree->visualItemRect(tree->topLevelItem(index)).center());
+            openTreeNote(tree, tree->topLevelItem(index));
         };
         clickNote(0);
         auto *editor = window.findChild<vte::VTextEdit *>("editor");
@@ -516,10 +603,9 @@ st->e
         QCOMPARE(tree->topLevelItem(0)->data(0, Qt::UserRole).toString(), QString("note-b"));
         QTest::qWait(40);
         window.grab().save("search-results.png");
-        QTest::qWait(400);
         NotebookStore reloaded;
-        QVERIFY2(reloaded.load(&error), qPrintable(error));
-        QVERIFY(reloaded.note("note-a")->content.contains("用户新写的内容"));
+        QTRY_VERIFY_WITH_TIMEOUT(reloaded.load(&error) && reloaded.note("note-a") &&
+                                 reloaded.note("note-a")->content.contains("用户新写的内容"), 7000);
         emit tabs->tabCloseRequested(0);
         QCOMPARE(tabs->count(), 1);
         emit tabs->tabCloseRequested(0);
@@ -544,7 +630,7 @@ st->e
         auto *tree = window.findChild<QTreeWidget *>("noteTree");
         auto *tabs = window.findChild<QTabBar *>("noteTabs");
         auto open = [tree](int index) {
-            QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, tree->visualItemRect(tree->topLevelItem(index)).center());
+            openTreeNote(tree, tree->topLevelItem(index));
         };
         open(0);
         auto *a = window.findChild<vte::VTextEdit *>("editor");
@@ -716,7 +802,7 @@ st->e
         auto *tree = window.findChild<QTreeWidget *>("noteTree");
         auto *tabs = window.findChild<QTabBar *>("noteTabs");
         QCOMPARE(notebooks->count(), 2);
-        QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, tree->visualItemRect(tree->topLevelItem(0)).center());
+        openTreeNote(tree, tree->topLevelItem(0));
         QCOMPARE(tabs->count(), 1);
         auto triggerAction = [](const QString &text) {
             auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
@@ -831,7 +917,7 @@ st->e
         window.show();
         QVERIFY(QTest::qWaitForWindowExposed(&window));
         auto *tree = window.findChild<QTreeWidget *>("noteTree");
-        QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, tree->visualItemRect(tree->topLevelItem(0)->child(0)).center());
+        openTreeNote(tree, tree->topLevelItem(0)->child(0));
         QVERIFY(window.findChild<QWidget *>("metadata")->isVisible());
         auto *category = window.findChild<QLineEdit *>("meta_category");
         category->setFocus();
@@ -852,6 +938,15 @@ st->e
         QTest::qWait(30);
         QCOMPARE(window.size(), QSize(360, 640));
         QVERIFY(window.findChild<vte::VTextEdit *>("editor")->height() > 100);
+        const auto *header = window.findChild<QWidget *>("header");
+        QList<QRect> actionRects;
+        for (const auto *action: header->findChildren<QPushButton *>()) {
+            if (!action->isVisible()) continue;
+            const QRect rect(action->mapTo(header, QPoint()), action->size());
+            QVERIFY2(header->rect().contains(rect), qPrintable(action->objectName()));
+            for (const auto &other: actionRects) QVERIFY(!rect.intersects(other));
+            actionRects.append(rect);
+        }
         window.grab().save("site-mobile.png");
         window.resize(1440, 900);
         QTimer::singleShot(30, &window, [] {

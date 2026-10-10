@@ -1,6 +1,6 @@
 :root { color-scheme: light; font: 16px/1.75 system-ui, sans-serif; color: #24292f; background: white; }
 body { margin: 0; overflow-wrap: anywhere; }
-main { padding: 16px 20px 60px; }
+main { padding: 16px 20px 60px; margin-inline: auto; }
 h1,h2,h3,h4,h5,h6 { line-height: 1.35; margin: 1.2em 0 .6em; }
 h1,h2 { padding-bottom: .25em; border-bottom: 1px solid #e3e5e8; }
 .vx-heading-fold-toggle { margin-left: .6em; border: 0; border-radius: 3px; background: transparent; color: #656d76; cursor: pointer; font-size: .75em; padding: .15em .4em; }
@@ -30,6 +30,23 @@ eq .katex-display { display: inline-block; margin: 0; vertical-align: middle; }
 .image-viewer { max-width: 95vw; max-height: 95vh; padding: 10px; border: none; }
 .image-viewer img { max-height: 90vh; object-fit: contain; cursor: zoom-out; }
 .image-viewer::backdrop { background: #000b; }
+:root[data-theme=dark] { color-scheme: dark; color: #e6edf3; background: #161b22; }
+:root[data-theme=sepia] { color: #433b30; background: #f6efdf; }
+[data-theme=dark] pre,[data-theme=dark] code,[data-theme=dark] th { background: #242c36; color: #e6edf3; }
+[data-theme=dark] a { color: #8cb4ff; }
+[data-theme=dark] blockquote,[data-theme=dark] figcaption,[data-theme=dark] .vx-heading-fold-toggle { color: #aab6c4; }
+[data-theme=dark] td,[data-theme=dark] th,[data-theme=dark] h1,[data-theme=dark] h2,[data-theme=dark] blockquote { border-color: #485463; }
+[data-theme=dark] aside { background: #25364e; }
+[data-theme=dark] .toolbar button { background: #242c36; color: #e6edf3; border-color: #485463; }
+[data-theme=dark] .vx-heading-fold-toggle:hover,[data-theme=dark] .vx-heading-fold-toggle:focus-visible { background: #344457; }
+[data-theme=dark] .token.comment,[data-theme=dark] .token.prolog,[data-theme=dark] .token.doctype { color: #aab6c4; }
+[data-theme=dark] .token.keyword,[data-theme=dark] .token.tag,[data-theme=dark] .token.boolean { color: #ff9e93; }
+[data-theme=dark] .token.string,[data-theme=dark] .token.attr-value { color: #a6d7ff; }
+[data-theme=dark] .token.function,[data-theme=dark] .token.class-name { color: #d2afff; }
+[data-theme=dark] .token.number,[data-theme=dark] .token.operator { color: #80d4ed; }
+[data-theme=dark] .render-error { color: #ff9e93; }
+[data-theme=dark] .diagram { background: white; color: #24292f; border-radius: 6px; }
+[data-theme=sepia] pre,[data-theme=sepia] code,[data-theme=sepia] th { background: #ebe2ce; }
 @media (max-width: 500px) { main { padding: 16px; } }
 @media print { main { max-width: none; padding: 0; } pre,table,.diagram { break-inside: avoid; } }
 @media print { .vx-heading-fold-toggle { display: none; } .vx-heading-fold-content[hidden] { display: block; } }

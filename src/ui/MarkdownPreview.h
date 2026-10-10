@@ -2,6 +2,7 @@
 #define QSNOTE_MARKDOWNPREVIEW_H
 
 #include <QWebEngineView>
+#include <QPointer>
 
 class QCheckBox;
 class QDialog;
@@ -33,6 +34,8 @@ public:
     void setMarkdown(const QString &markdown, const QString &documentId);
     void scrollToLine(int line);
     void showFind();
+    void showSettings();
+    void showHeadingNavigation();
     void setHeadingFoldingEnabled(bool enabled);
     bool matchesDocument(const QString &markdown, const QString &documentId) const {
         return markdown_ == markdown && documentId_ == documentId;
@@ -49,6 +52,7 @@ protected:
     void hideEvent(QHideEvent *event) override;
 
 private:
+    void applyReaderSettings();
     void findInPreview(bool backward = false, bool restart = false);
     PreviewBridge *bridge_;
     QDialog *findDialog_ = nullptr;
@@ -56,6 +60,7 @@ private:
     QCheckBox *findCase_ = nullptr;
     QLabel *findResult_ = nullptr;
     int findRequest_ = 0;
+    QPointer<QDialog> headingDialog_;
     QString markdown_;
     QString documentId_;
     int revision_ = 0;

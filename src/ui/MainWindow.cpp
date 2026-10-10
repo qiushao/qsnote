@@ -342,12 +342,18 @@ void MainWindow::buildUi() {
     headerLayout->addWidget(toggleLeft_);
     auto *title = label("MDNote", header);
     title->setObjectName("appTitle");
-    headerLayout->addWidget(title);
+    title->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    title->setMaximumWidth(title->sizeHint().width());
+    headerLayout->addWidget(title, 1);
     headerLayout->addStretch();
     siteConfig_ = button("站点配置", "siteConfig", header);
     sitePreview_ = button("站点预览", "sitePreview", header);
     export_ = button("导出", "exportNotebook", header);
-    for (auto *action: {siteConfig_, sitePreview_, export_}) headerLayout->addWidget(action);
+    auto *siteActions = new QWidget(header);
+    siteActions->setObjectName("siteActions");
+    auto *siteActionsLayout = new FlowLayout(siteActions, 0, 6);
+    for (auto *action: {siteConfig_, sitePreview_, export_}) siteActionsLayout->addWidget(action);
+    headerLayout->addWidget(siteActions, 1);
     toggleRight_ = button({}, "toggleRight", header);
     toggleRight_->setProperty("iconButton", true);
     toggleRight_->setIcon(icon("right"));
@@ -1034,6 +1040,13 @@ void MainWindow::updatePanels() {
     const auto *book = store_.notebook(currentNotebookId_);
     export_->setText(width() < 600 ? "导出" : book && book->type == "site" ? "导出站点"
                                                                            : "导出电子书");
+    int actionWidth = 0;
+    for (auto *action: {siteConfig_, sitePreview_, export_}) {
+        if (!action->isHidden()) actionWidth += action->sizeHint().width() + 6;
+    }
+    auto *siteActions = findChild<QWidget *>("siteActions");
+    siteActions->setVisible(actionWidth > 0);
+    siteActions->setMaximumWidth(qMax(0, actionWidth - 6));
     findChild<QLabel *>("appTitle")->setVisible(width() >= 420);
     const int unit = fontMetrics().horizontalAdvance('M');
     left_->setVisible(leftRequested_ && width() >= unit * 52);

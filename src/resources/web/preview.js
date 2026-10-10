@@ -35,6 +35,28 @@
     }
     window.qsnotePreview = {
         expandAll,
+        setReaderStyle(options) {
+            const line = currentLine();
+            const root = document.documentElement;
+            root.dataset.theme = options.theme;
+            root.style.fontFamily = options.fontFamily ? `${JSON.stringify(options.fontFamily)}, sans-serif` : '';
+            root.style.fontSize = `${options.fontSize}px`;
+            root.style.lineHeight = options.lineHeight;
+            content.style.maxWidth = options.contentWidth ? `${options.contentWidth}px` : '';
+            requestAnimationFrame(() => scrollToLine(line, false));
+        },
+        headings() {
+            return [...content.querySelectorAll('h1,h2,h3,h4,h5,h6')].map(node => ({
+                title: node.textContent, level: Number(node.tagName.slice(1))
+            }));
+        },
+        jumpToHeading(generation, index) {
+            if (generation !== revision || generation !== requestedRevision) return;
+            const target = content.querySelectorAll('h1,h2,h3,h4,h5,h6')[index];
+            if (!target) return;
+            folding.expandHiddenAncestors(target);
+            target.scrollIntoView();
+        },
         setHeadingFolding(enabled) {
             collapsedSections.clear();
             folding.setEnabled(enabled);
