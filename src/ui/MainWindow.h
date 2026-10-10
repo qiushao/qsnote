@@ -35,6 +35,8 @@ public:
 protected:
     void resizeEvent(QResizeEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
+    void changeEvent(QEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     void buildUi();
@@ -72,6 +74,7 @@ private:
     void removeEditor(const QString &id);
     void setPreview(bool enabled);
     void setViewMode(ViewMode mode);
+    void toggleMaximized();
     void showSiteConfig();
     void showSitePreview();
     void exportNotebook();
@@ -82,6 +85,7 @@ private:
     NotebookStore store_;
     QString currentNotebookId_;
     QSplitter *splitter_ = nullptr;
+    QWidget *header_ = nullptr;
     QWidget *left_ = nullptr;
     QWidget *right_ = nullptr;
     QWidget *toolbar_ = nullptr;
@@ -115,6 +119,7 @@ private:
     QPushButton *editMode_ = nullptr;
     QPushButton *previewMode_ = nullptr;
     QPushButton *splitMode_ = nullptr;
+    QPushButton *maximize_ = nullptr;
     QTimer *saveTimer_ = nullptr;
     bool previewModeEnabled_ = false;
     bool leftRequested_ = true;

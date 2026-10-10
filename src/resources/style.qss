@@ -13,6 +13,9 @@ QPushButton:focus { border-color: #3b6fd4; }
 QPushButton[primary="true"], QPushButton[mode="true"]:checked { background: #3b6fd4; border-color: #3b6fd4; color: white; }
 QPushButton[iconButton="true"] { border: none; background: transparent; color: #8a8f98; padding: 2px; font-size: 18px; }
 QPushButton[iconButton="true"]:hover { background: #eef0f3; color: #24292f; }
+QPushButton[windowButton="true"] { border: none; background: transparent; color: #8a8f98; padding: 2px 12px; font-size: 15px; border-radius: 4px; }
+QPushButton[windowButton="true"]:hover { background: #eef0f3; color: #24292f; }
+QPushButton#windowClose:hover { background: #e81123; color: #ffffff; }
 QPushButton[tool="true"] { border: none; background: transparent; padding: 3px 8px; font-size: 13px; border-radius: 5px; }
 QPushButton[tool="true"]:hover { background: #eef0f3; }
 QPushButton[mode="true"] { border-radius: 0; color: #8a8f98; padding: 3px 12px; }

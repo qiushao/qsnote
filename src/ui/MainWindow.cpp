@@ -23,6 +23,7 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <vtextedit/vtextedit.h>
@@ -41,6 +42,7 @@
 #include <QStyledItemDelegate>
 #include <QTabBar>
 #include <QTextBlock>
+#include <QWindow>
 #include <QTextBrowser>
 #include <QTimer>
 #include <QTreeWidget>
@@ -259,6 +261,7 @@ const QString markdownStyle = QStringLiteral(
 }// namespace
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
+    setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
     setWindowTitle(QCoreApplication::applicationName());
     QFile stylesheet(":/style.qss");
     if (stylesheet.open(QIODevice::ReadOnly)) setStyleSheet(QString::fromUtf8(stylesheet.readAll()));
@@ -326,8 +329,10 @@ void MainWindow::buildUi() {
     setCentralWidget(root);
     auto *layout = column(root);
     auto *header = new QWidget(root);
+    header_ = header;
     header->setObjectName("header");
     header->setMinimumHeight(44);
+    header->installEventFilter(this);
     auto *headerLayout = row(header, 12, 8, 10);
     toggleLeft_ = button({}, "toggleLeft", header);
     toggleLeft_->setProperty("iconButton", true);
@@ -349,6 +354,20 @@ void MainWindow::buildUi() {
     toggleRight_->setToolTip("收起/展开大纲栏");
     toggleRight_->setAccessibleName(toggleRight_->toolTip());
     headerLayout->addWidget(toggleRight_);
+    const QList<QPair<QString, QString>> windowButtons = {{"–", "windowMinimize"}, {"□", "windowMaximize"}, {"×", "windowClose"}};
+    for (const auto &entry: windowButtons) {
+        auto *windowButton = button(entry.first, entry.second, header);
+        windowButton->setProperty("windowButton", true);
+        windowButton->setToolTip(entry.second == "windowMinimize" ? "最小化" : entry.second == "windowMaximize" ? "最大化" : "关闭");
+        windowButton->setAccessibleName(windowButton->toolTip());
+        headerLayout->addWidget(windowButton);
+        if (entry.second == "windowMinimize") connect(windowButton, &QPushButton::clicked, this, [this] { showMinimized(); });
+        else if (entry.second == "windowMaximize") {
+            maximize_ = windowButton;
+            connect(windowButton, &QPushButton::clicked, this, &MainWindow::toggleMaximized);
+        } else
+            connect(windowButton, &QPushButton::clicked, this, &QWidget::close);
+    }
     layout->addWidget(header);
     splitter_ = new QSplitter(Qt::Horizontal, root);
     splitter_->setObjectName("mainSplitter");
@@ -1024,6 +1043,33 @@ void MainWindow::updatePanels() {
 void MainWindow::resizeEvent(QResizeEvent *event) {
     QMainWindow::resizeEvent(event);
     updatePanels();
+}
+
+void MainWindow::toggleMaximized() { setWindowState(windowState() ^ Qt::WindowMaximized); }
+
+void MainWindow::changeEvent(QEvent *event) {
+    QMainWindow::changeEvent(event);
+    if (event->type() == QEvent::WindowStateChange && maximize_) {
+        maximize_->setText(isMaximized() ? "❐" : "□");
+        maximize_->setToolTip(isMaximized() ? "还原" : "最大化");
+        maximize_->setAccessibleName(maximize_->toolTip());
+    }
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
+    if (watched == header_) {
+        if (event->type() == QEvent::MouseButtonPress) {
+            auto *mouse = dynamic_cast<QMouseEvent *>(event);
+            if (mouse && mouse->button() == Qt::LeftButton && windowHandle() && windowHandle()->startSystemMove()) return true;
+        } else if (event->type() == QEvent::MouseButtonDblClick) {
+            auto *mouse = dynamic_cast<QMouseEvent *>(event);
+            if (mouse && mouse->button() == Qt::LeftButton) {
+                toggleMaximized();
+                return true;
+            }
+        }
+    }
+    return QMainWindow::eventFilter(watched, event);
 }
 
 bool MainWindow::save() {
