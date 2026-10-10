@@ -2,6 +2,12 @@
 #include "FlowLayout.h"
 #include "MarkdownEditor.h"
 #include "MarkdownPreview.h"
+#include "core/HexoSite.h"
+#include <QWebEngineView>
+#include <QProgressDialog>
+#include <QTcpServer>
+#include <QTcpSocket>
+#include <QMimeDatabase>
 #include <QScopedValueRollback>
 #include <QScrollBar>
 #include <QApplication>
@@ -11,7 +17,6 @@
 #include <QComboBox>
 #include <QDate>
 #include <QDateEdit>
-#include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -45,7 +50,6 @@
 #include <QTabBar>
 #include <QTextBlock>
 #include <QWindow>
-#include <QTextBrowser>
 #include <QTimer>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -186,15 +190,35 @@ public:
     }
 };
 
-class SiteBrowser : public QTextBrowser {
+// Serve generated files over loopback so Pure's scripts and search use normal HTTP URLs.
+class SiteServer : public QTcpServer {
 public:
-    using QTextBrowser::QTextBrowser;
-
-protected:
-    void resizeEvent(QResizeEvent *event) override {
-        const int margin = qMax(0, (width() - 808) / 2);
-        setViewportMargins(margin, 0, margin, 0);
-        QTextBrowser::resizeEvent(event);
+    SiteServer(const QString &directory, const QString &root, QObject *parent) : QTcpServer(parent) {
+        connect(this, &QTcpServer::newConnection, this, [this, directory, root] {
+            while (hasPendingConnections()) {
+                auto *socket = nextPendingConnection();
+                connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+                connect(socket, &QTcpSocket::readyRead, socket, [socket, directory, root] {
+                    auto request = socket->property("request").toByteArray() + socket->readAll();
+                    if (request.size() > 65536) { socket->disconnectFromHost(); return; }
+                    if (!request.contains("\r\n\r\n")) { socket->setProperty("request", request); return; }
+                    const auto parts = request.left(request.indexOf("\r\n")).split(' ');
+                    auto path = parts.size() >= 2 ? QUrl::fromEncoded(parts[1]).path() : QString();
+                    const bool allowed = path.startsWith(root) && (parts[0] == "GET" || parts[0] == "HEAD");
+                    path = path.mid(root.size());
+                    if (path.isEmpty() || path.endsWith('/')) path += "index.html";
+                    const auto absolute = QFileInfo(directory + "/" + path).canonicalFilePath();
+                    QFile file(absolute);
+                    const bool found = allowed && absolute.startsWith(QFileInfo(directory).canonicalFilePath() + "/") && file.open(QIODevice::ReadOnly);
+                    const auto body = found ? file.readAll() : QByteArray("Not found");
+                    const auto mime = found ? QMimeDatabase().mimeTypeForFile(absolute).name().toUtf8() : QByteArray("text/plain");
+                    socket->write(found ? "HTTP/1.1 200 OK\r\n" : "HTTP/1.1 404 Not Found\r\n");
+                    socket->write("Content-Type: " + mime + "\r\nContent-Length: " + QByteArray::number(body.size()) + "\r\nConnection: close\r\n\r\n");
+                    if (parts[0] != "HEAD") socket->write(body);
+                    socket->disconnectFromHost();
+                });
+            }
+        });
     }
 };
 
@@ -1114,7 +1138,7 @@ void MainWindow::createNotebook() {
     auto *type = new QComboBox(&dialog);
     type->setObjectName("notebookType");
     type->addItem("普通笔记本（目录 + 元数据文件）", "normal");
-    type->addItem("静态站点（Gridea 式站点配置）", "site");
+    type->addItem("静态站点（Hexo · Pure）", "site");
     type->addItem("电子书（GitBook 式 SUMMARY.md）", "ebook");
     QString locationRoot = NotebookStore::defaultRoot();
     auto *location = new QLineEdit(&dialog);
@@ -1170,7 +1194,7 @@ void MainWindow::createNotebook() {
         return;
     }
     if (book.type == "site") {
-        book.config = {{"title", book.name}, {"theme", "minimal"}, {"footer", "Powered by MDNote"}, {"commentPlatform", "none"}, {"deployPlatform", "github-pages"}, {"branch", "gh-pages"}};
+        book.config = {{"title", book.name}, {"theme", "pure"}, {"footer", "Powered by Hexo"}, {"commentPlatform", "none"}};
     }
     currentNotebookId_ = book.id;
     store_.notebooks.append(book);
@@ -1508,7 +1532,7 @@ void MainWindow::showSiteConfig() {
             auto *input = new QLineEdit(book->config[key].toString(), container);
             input->setObjectName("config_" + key);
             input->setMinimumWidth(0);
-            if (key == "token" || key == "clientSecret") input->setEchoMode(QLineEdit::Password);
+            if (key == "clientSecret") input->setEchoMode(QLineEdit::Password);
             captionLabel->setBuddy(input);
             fieldLayout->addRow(captionLabel, input);
             connect(input, &QLineEdit::textEdited, &dialog, [this, book, key](const QString &value) {
@@ -1540,6 +1564,7 @@ void MainWindow::showSiteConfig() {
     field("commentRepo", "评论仓库");
     field("clientId", "Client ID");
     field("clientSecret", "Client Secret");
+    field("disqus", "Disqus Shortname");
     heading("友链");
     auto *links = new QWidget(body);
     auto *linksLayout = column(links, 0, 6);
@@ -1578,14 +1603,11 @@ void MainWindow::showSiteConfig() {
     form->addWidget(addLink, 0, Qt::AlignLeft);
     connect(addLink, &QPushButton::clicked, &dialog, [appendLink] { appendLink({}); });
     heading("主题与页脚");
-    field("theme", "主题", {"minimal", "notes", "tech"});
+    form->addWidget(label("默认主题：Pure", body));
     field("footer", "页脚文字");
-    heading("发布配置");
-    field("deployPlatform", "发布平台", {"GitHub Pages", "Coding Pages", "Gitee Pages"}, {"github-pages", "coding", "gitee"});
-    field("repo", "仓库");
-    field("branch", "分支");
-    field("token", "Token");
-    form->addWidget(label("配置随 config.json 导出；使用顶栏「导出站点」生成静态文件后按此配置部署。", body, true));
+    heading("生成与发布");
+    form->addWidget(label("文章保存在 source/_posts，主题位于 themes/pure。预览和导出使用 Hexo 生成 public 目录。", body, true));
+    form->addWidget(label("需要 Node.js 18 或更新版本及 npm；首次生成会联网安装依赖。导出后的静态文件可上传到任意静态网站托管服务。", body, true));
     form->addStretch();
     scroll->setWidget(body);
     layout->addWidget(scroll, 1);
@@ -1594,45 +1616,32 @@ void MainWindow::showSiteConfig() {
     save();
 }
 
-QString MainWindow::siteHtml(const Notebook &book, const QString &page) {
-    const auto escape = [](const QString &value) { return value.toHtmlEscaped(); };
-    const auto &config = book.config;
-    QString body = "<h1>" + escape(config["title"].toString(book.name)) + "</h1><p>" + escape(config["description"].toString()) + "</p>";
-    body += "<p><a href=\"index.html\">首页</a>&nbsp;&nbsp;&nbsp;<a href=\"archives.html\">归档</a>&nbsp;&nbsp;&nbsp;<a href=\"about.html\">关于</a>&nbsp;&nbsp;&nbsp;<a href=\"links.html\">友链</a></p><hr>";
-    if (page == "about.html") body += "<h2>关于</h2><p>" + escape(config["author"].toString()) + "</p>";
-    else if (page == "links.html") {
-        body += "<h2>友链</h2><ul>";
-        for (const auto &value: config["links"].toArray()) {
-            const auto link = value.toObject();
-            body += "<li><a href=\"" + escape(link["url"].toString()) + "\">" + escape(link["name"].toString()) + "</a></li>";
-        }
-        body += "</ul>";
-    } else {
-        bool article = false;
-        for (const auto &note: book.notes) {
-            if (page != "post-" + note.id + ".html") continue;
-            body += markdownHtml(note.content);
-            article = true;
-            break;
-        }
-        if (!article) {
-            body += page == "archives.html" ? "<h2>归档</h2>" : "";
-            for (const auto &note: book.notes) {
-                body += "<h3><a href=\"post-" + note.id + ".html\">" + escape(note.title) + "</a></h3><p style=\"color:#8a8f98\">" + escape(note.metadata["date"].toString()) + "　" + escape(note.metadata["category"].toString()) + "</p>";
-            }
-        }
-    }
-    body += "<hr><p style=\"color:#8a8f98\">" + escape(config["footer"].toString()) + "</p>";
-    const auto theme = config["theme"].toString();
-    const auto themeStyle = theme == "notes" ? QStringLiteral("body { background: #fffdf7; } h1,h2 { color: #795548; }") : theme == "tech" ? QStringLiteral("body { font-family: monospace; } h1,h2 { color: #3b6fd4; }")
-                                                                                                                                           : QString();
-    return R"(<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>)" + escape(config["title"].toString(book.name)) + "</title><style>" + markdownStyle + "body { max-width:760px; margin:0 auto; padding:24px; }" + themeStyle + "</style></head><body>" + body + "</body></html>";
+bool MainWindow::generateSite(const Notebook &book) {
+    if (!save()) return false;
+    QProgressDialog progress("正在生成 Hexo 站点（首次生成需要安装依赖）…", QString(), 0, 0, this);
+    progress.setObjectName("siteGenerateDialog");
+    progress.setWindowTitle("生成站点");
+    progress.setWindowModality(Qt::ApplicationModal);
+    progress.setCancelButton(nullptr);
+    progress.setMinimumDuration(0);
+    progress.show();
+    QString error;
+    const bool ok = HexoSite::generate(book, &error);
+    progress.close();
+    if (!ok) QMessageBox::warning(this, "站点生成失败", error);
+    return ok;
 }
 
 void MainWindow::showSitePreview() {
     auto *book = store_.notebook(currentNotebookId_);
     if (!book || book->type != "site") return;
+    if (!generateSite(*book)) return;
     OverlayDialog dialog(this, "sitePreviewDialog", true);
+    SiteServer server(book->path + "/public", HexoSite::rootPath(*book), &dialog);
+    if (!server.listen(QHostAddress::LocalHost)) {
+        QMessageBox::warning(this, "预览失败", server.errorString());
+        return;
+    }
     dialog.setMaximumSize(size());
     dialog.resize(size());
     auto *layout = column(&dialog);
@@ -1640,21 +1649,20 @@ void MainWindow::showSitePreview() {
     bar->setObjectName("dialogBar");
     auto *barLayout = row(bar, 14, 8, 10);
     barLayout->addWidget(label("站点预览", bar));
-    barLayout->addWidget(label("由当前站点配置与文章实时生成", bar, true));
+    barLayout->addWidget(label("Hexo · Pure", bar, true));
     barLayout->addStretch();
     auto *close = button("关闭", "closeSitePreview", bar);
     barLayout->addWidget(close);
     layout->addWidget(bar);
-    auto *browser = new SiteBrowser(&dialog);
+    auto *browser = new QWebEngineView(&dialog);
     browser->setObjectName("siteBrowser");
-    browser->setOpenLinks(false);
-    browser->setHtml(siteHtml(*book, "index.html"));
     layout->addWidget(browser, 1);
-    connect(browser, &QTextBrowser::anchorClicked, &dialog, [this, book, browser](const QUrl &url) {
-        if (url.isRelative()) browser->setHtml(siteHtml(*book, url.path()));
-        else if (url.scheme() == "https" || url.scheme() == "http")
-            QDesktopServices::openUrl(url);
-    });
+    QUrl url;
+    url.setScheme("http");
+    url.setHost("127.0.0.1");
+    url.setPort(server.serverPort());
+    url.setPath(HexoSite::rootPath(*book));
+    browser->load(url);
     connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
     dialog.exec();
 }
@@ -1668,9 +1676,14 @@ void MainWindow::exportNotebook() {
     const QString destination = directory + "/qsnote-" + book->id.left(8) + "-" + QString::number(QDateTime::currentMSecsSinceEpoch());
     QMap<QString, QByteArray> files;
     if (book->type == "site") {
-        for (const auto &page: {"index.html", "archives.html", "about.html", "links.html"}) files[page] = siteHtml(*book, page).toUtf8();
-        for (const auto &note: book->notes) files["post-" + note.id + ".html"] = siteHtml(*book, "post-" + note.id + ".html").toUtf8();
-        files["config.json"] = QJsonDocument(book->config).toJson();
+        if (!generateSite(*book)) return;
+        QString error;
+        if (!HexoSite::copyDirectory(book->path + "/public", destination, &error)) {
+            QMessageBox::warning(this, "导出失败", error);
+            return;
+        }
+        status_->setText("已导出至 " + destination);
+        return;
     } else {
         QString summary = "# Summary\n\n";
         QString html = R"(<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><style>)" + markdownStyle + "</style></head><body><h1>" + book->name.toHtmlEscaped() + "</h1>";

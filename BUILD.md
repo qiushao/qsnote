@@ -84,8 +84,10 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
+站点集成测试需要 Node.js 18+、npm 和首次安装依赖所需的网络连接。
+
 测试使用独立的应用名与测试数据目录，不读取正式笔记；覆盖空白启动、360～1440 像素窗口布局、新建三种笔记本、右键操作、章节层级、多标签编辑、保存重载、搜索、大纲、站点元数据、配置预览和导出内容。测试运行目录生成界面 PNG，便于与原型进行视觉对照。
 
-Markdown 编辑使用 third_party 中的 VTextEdit 源码，阅读 / 分屏预览使用 Qt WebEngine 与本地 VNote 渲染资源，站点和电子书 HTML 导出暂用 cmark 解析器；完整迁移仍在进行（见 docs/vtextedit-migration.md）。构建不下载依赖、不初始化子模块。站点发布配置仅保存和导出，不自动上传到托管服务。
+Markdown 编辑使用 third_party 中的 VTextEdit 源码，阅读 / 分屏预览使用 Qt WebEngine 与本地 VNote 渲染资源，电子书 HTML 导出暂用 cmark 解析器；完整迁移仍在进行（见 docs/vtextedit-migration.md）。构建不下载依赖、不初始化子模块。静态站点使用 Hexo 生成，详见 [Hexo 站点](docs/hexo-sites.md)；导出 public 中的文件，不自动上传到托管服务。
 
 VTextEdit 的语法高亮、Vim、拼写检查和 cmark 依赖均已放入 `third_party/vtextedit/libs`，版本记录见 `third_party/README.md`。系统 Qt 仍由包管理器或 Qt 安装器提供；不要混用不同 Qt 版本的私有头文件。

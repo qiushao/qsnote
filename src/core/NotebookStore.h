@@ -27,7 +27,7 @@ struct Notebook {
 
 // 全局 notebooks.json 只保存笔记本基本信息（id/name/type/path/config）。
 // 每个笔记本目录下的 _index.json 保存笔记结构（含相对路径，不含内容），
-// 文章内容按类型落盘：普通/电子书按目录层级保存 md，静态站点按分类建目录保存 md。
+// 文章内容按类型落盘：普通/电子书按目录层级保存 md，静态站点在 source/_posts 下按分类保存带 Hexo front matter 的 md。
 class NotebookStore {
 public:
     QList<Notebook> notebooks;

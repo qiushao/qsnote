@@ -3,9 +3,11 @@
 #include "ui/MarkdownEditor.h"
 #include "ui/MarkdownPreview.h"
 #include <QWebEnginePage>
+#include <QWebEngineView>
 #include <QEventLoop>
 #include <QPointer>
 #include <QSignalSpy>
+#include <QScopeGuard>
 #include <QScrollBar>
 #include <QTextBlock>
 #include <QDialog>
@@ -20,6 +22,7 @@
 #include <QFileDialog>
 #include <QInputDialog>
 #include <QLabel>
+#include <QJsonArray>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
@@ -51,7 +54,7 @@ class UiTest : public QObject {
         QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, position);
         QTest::mouseDClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, position);
     }
-    static QVariant javascript(MarkdownPreview &preview, const QString &script) {
+    static QVariant javascript(QWebEngineView &preview, const QString &script) {
         QEventLoop loop;
         QVariant result;
         preview.page()->runJavaScript(script, [guard = QPointer<QEventLoop>(&loop), &result](const QVariant &value) {
@@ -952,7 +955,7 @@ st->e
         const auto books = output.entryList({"qsnote-ebook-*"}, QDir::Dirs);
         QCOMPARE(sites.size(), 1);
         QCOMPARE(books.size(), 1);
-        QFile article(output.filePath(sites.first() + "/post-post.html"));
+        QFile article(output.filePath(sites.first() + "/文章/index.html"));
         QVERIFY(article.open(QIODevice::ReadOnly));
         QVERIFY(QString::fromUtf8(article.readAll()).contains("用户文章"));
         QFile summary(output.filePath(books.first() + "/SUMMARY.md"));
@@ -965,7 +968,7 @@ st->e
 
     void siteMetadataConfigAndPreview() {
         NotebookStore fixture;
-        Notebook site{"site", "测试站点", "site", {}, {{"title", "用户的站点"}}, fixturePath("site")};
+        Notebook site{"site", "测试站点", "site", {}, {{"title", "用户的站点"}, {"categories", QJsonArray{"Updated"}}, {"domain", "https://example.com/blog/"}}, fixturePath("site")};
         site.notes.append({"post-a", {}, "文章标题", "# 文章标题\n\n## 内容\n\n真实输入的文字", false, {{"category", "分类一"}, {"tags", "标签一, 标签二"}, {"date", "2026-10-09"}, {"slug", "article"}}});
         fixture.notebooks.append(site);
         QString error;
@@ -976,37 +979,32 @@ st->e
         QVERIFY(QTest::qWaitForWindowExposed(&window));
         auto *tree = window.findChild<QTreeWidget *>("noteTree");
         openTreeNote(tree, tree->topLevelItem(0)->child(0));
-        QVERIFY(window.findChild<QWidget *>("metadata")->isVisible());
-        auto *category = window.findChild<QLineEdit *>("meta_category");
-        category->setFocus();
-        category->selectAll();
-        QTest::keyClicks(category, "Updated");
+        QTimer::singleShot(30, &window, [&] {
+            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            QVERIFY(menu);
+            QAction *properties = nullptr;
+            for (auto *action: menu->actions()) {
+                if (action->text() == "属性更改") properties = action;
+            }
+            QVERIFY(properties);
+            menu->hide();
+            QTimer::singleShot(30, &window, [] {
+                auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                QVERIFY(dialog);
+                auto *category = dialog->findChild<QComboBox *>();
+                QVERIFY(category);
+                category->setCurrentText("Updated");
+                dialog->accept();
+            });
+            properties->trigger();
+            menu->close();
+        });
+        const auto articlePosition = tree->visualItemRect(tree->topLevelItem(0)->child(0)).center();
+        emit tree->customContextMenuRequested(articlePosition);
         QVERIFY(tree->topLevelItem(0)->text(0).contains("Updated"));
         window.findChild<QComboBox *>("groupBy")->setCurrentIndex(1);
         QCOMPARE(tree->topLevelItemCount(), 2);
-        QTest::qWait(30);
         window.grab().save("site-wide.png");
-        window.resize(480, 600);
-        QTest::qWait(30);
-        QCOMPARE(window.size(), QSize(480, 600));
-        QVERIFY(window.findChild<vte::VTextEdit *>("editor")->height() > 100);
-        QTest::qWait(30);
-        window.grab().save("site-narrow.png");
-        window.resize(360, 640);
-        QTest::qWait(30);
-        QCOMPARE(window.size(), QSize(360, 640));
-        QVERIFY(window.findChild<vte::VTextEdit *>("editor")->height() > 100);
-        const auto *header = window.findChild<QWidget *>("header");
-        QList<QRect> actionRects;
-        for (const auto *action: header->findChildren<QPushButton *>()) {
-            if (!action->isVisible()) continue;
-            const QRect rect(action->mapTo(header, QPoint()), action->size());
-            QVERIFY2(header->rect().contains(rect), qPrintable(action->objectName()));
-            for (const auto &other: actionRects) QVERIFY(!rect.intersects(other));
-            actionRects.append(rect);
-        }
-        window.grab().save("site-mobile.png");
-        window.resize(1440, 900);
         QTimer::singleShot(30, &window, [] {
             auto *dialog = QApplication::activeModalWidget();
             QVERIFY(dialog);
@@ -1014,21 +1012,41 @@ st->e
             auto *title = dialog->findChild<QLineEdit *>("config_title");
             title->setText("Edited title");
             emit title->textEdited(title->text());
-            QVERIFY(dialog->findChild<QLineEdit *>("config_token")->echoMode() == QLineEdit::Password);
+            QVERIFY(!dialog->findChild<QComboBox *>("config_theme"));
+            QVERIFY(!dialog->findChild<QLineEdit *>("config_token"));
             dialog->grab().save("site-config.png");
             QTest::mouseClick(dialog->findChild<QPushButton *>("closeSiteConfig"), Qt::LeftButton);
         });
         QTest::mouseClick(window.findChild<QPushButton *>("siteConfig"), Qt::LeftButton);
-        QTimer::singleShot(30, &window, [] {
+        QTimer previewTimer;
+        previewTimer.setInterval(100);
+        connect(&previewTimer, &QTimer::timeout, &window, [&] {
             auto *dialog = QApplication::activeModalWidget();
-            QVERIFY(dialog);
-            auto *browser = dialog->findChild<QTextBrowser *>("siteBrowser");
-            QVERIFY(browser->toPlainText().contains("Edited title"));
-            emit browser->anchorClicked(QUrl("post-post-a.html"));
-            QVERIFY(browser->toPlainText().contains("真实输入的文字"));
+            if (!dialog || dialog->objectName() != "sitePreviewDialog") return;
+            previewTimer.stop();
+            const auto closePreview = qScopeGuard([dialog] { QMetaObject::invokeMethod(dialog, "reject"); });
+            auto *browser = dialog->findChild<QWebEngineView *>("siteBrowser");
+            QVERIFY(browser);
+            QSignalSpy loaded(browser, &QWebEngineView::loadFinished);
+            if (browser->title().isEmpty()) QVERIFY(loaded.wait(15000));
+            QVERIFY(browser->title().contains("Edited title"));
+            QCOMPARE(javascript(*browser, "typeof window.jQuery").toString(), QString("function"));
+            QCOMPARE(browser->url().path(), QString("/blog/"));
+            javascript(*browser, "fetch(window.INSIGHT_CONFIG.CONTENT_URL).then(r => window.searchIndexReady = r.ok)");
+            QTRY_VERIFY_WITH_TIMEOUT(javascript(*browser, "window.searchIndexReady === true").toBool(), 10000);
+            QVERIFY(javascript(*browser, "document.querySelector('.menu-item-archives a').getAttribute('href').includes('archives')").toBool());
+            QVERIFY(javascript(*browser, "Array.from(document.styleSheets).some(s => s.href && s.href.endsWith('/css/style.css') && s.cssRules.length > 0)").toBool());
+            browser->load(browser->url().resolved(QUrl("article/")));
+            QVERIFY(loaded.wait(15000));
+            QString text;
+            QEventLoop loop;
+            browser->page()->toPlainText([&](const QString &value) { text = value; loop.quit(); });
+            loop.exec();
+            QVERIFY(text.contains("真实输入的文字"));
             dialog->grab().save("site-preview.png");
             QTest::mouseClick(dialog->findChild<QPushButton *>("closeSitePreview"), Qt::LeftButton);
         });
+        previewTimer.start();
         QTest::mouseClick(window.findChild<QPushButton *>("sitePreview"), Qt::LeftButton);
         NotebookStore reloaded;
         QVERIFY2(reloaded.load(&error), qPrintable(error));

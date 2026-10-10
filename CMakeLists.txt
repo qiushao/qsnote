@@ -19,7 +19,7 @@ if (WIN32 AND DEFINED ENV{Qt6_DIR})
     list(PREPEND CMAKE_PREFIX_PATH "$ENV{Qt6_DIR}")
 endif ()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets WebEngineWidgets WebChannel)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network WebEngineWidgets WebChannel)
 
 option(QSNOTE_CLANG_TIDY_ENABLE "Run clang-tidy" ON)
 if (QSNOTE_CLANG_TIDY_ENABLE AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -48,6 +48,15 @@ option(QSNOTE_BUILD_TESTS "Build UI interaction tests" OFF)
 if (QSNOTE_BUILD_TESTS)
     enable_testing()
     find_package(Qt6 REQUIRED COMPONENTS Test)
+    add_executable(qsnote_hexo_tests
+            tests/HexoSiteTest.cpp
+            src/core/NotebookStore.cpp
+            src/core/HexoSite.cpp
+            src/resources/hexo.qrc
+    )
+    target_include_directories(qsnote_hexo_tests PRIVATE src)
+    target_link_libraries(qsnote_hexo_tests PRIVATE Qt6::Core Qt6::Test)
+    add_test(NAME qsnote_hexo COMMAND qsnote_hexo_tests)
     add_executable(qsnote_ui_tests
             tests/UiTest.cpp
             src/ui/MainWindow.cpp
@@ -55,12 +64,14 @@ if (QSNOTE_BUILD_TESTS)
             src/ui/MarkdownPreview.cpp
             src/ui/FlowLayout.cpp
             src/core/NotebookStore.cpp
+            src/core/HexoSite.cpp
             src/resources/ui.qrc
+            src/resources/hexo.qrc
             third_party/vtextedit/demo/data/syntax/syntax.qrc
             third_party/vnote-web.qrc
     )
     target_include_directories(qsnote_ui_tests PRIVATE src)
-    target_link_libraries(qsnote_ui_tests PRIVATE Qt6::Widgets Qt6::Test Qt6::WebEngineWidgets Qt6::WebChannel VTextEdit)
+    target_link_libraries(qsnote_ui_tests PRIVATE Qt6::Widgets Qt6::Test Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Network VTextEdit)
     add_test(NAME qsnote_ui COMMAND qsnote_ui_tests)
     set_tests_properties(qsnote_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu;XDG_DATA_HOME=${CMAKE_BINARY_DIR}/test-data")
 endif ()

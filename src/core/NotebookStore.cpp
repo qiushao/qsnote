@@ -1,4 +1,5 @@
 #include "NotebookStore.h"
+#include "HexoSite.h"
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -20,6 +21,10 @@ bool writeFile(const QString &path, const QByteArray &data, QString *error) {
         *error = QStringLiteral("无法创建目录：") + QFileInfo(path).absolutePath();
         return false;
     }
+    // Metadata-only site saves still check every post; keep unchanged file timestamps.
+    QFile current(path);
+    if (current.open(QIODevice::ReadOnly) && current.readAll() == data) return true;
+    current.close();
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly) || file.write(data) == -1 || !file.commit()) {
         *error = file.errorString();
@@ -76,9 +81,9 @@ QString NotebookStore::relativePath(const Notebook &book, const Note &note) {
     if (name.isEmpty()) name = QStringLiteral("未命名");
     if (!note.folder && !name.endsWith(QStringLiteral(".md"))) name += QStringLiteral(".md");
     if (book.type == "site") {
-        // 站点文章按分类建目录保存，无分类时放在笔记本根目录。
+        // Hexo 文章目录；分类继续用于组织源文件。
         const auto category = sanitized(note.metadata["category"].toString());
-        return category.isEmpty() ? name : category + "/" + name;
+        return (note.metadata["draft"].toBool() ? "source/_drafts/" : "source/_posts/") + (category.isEmpty() ? name : category + "/" + name);
     }
     // 沿父链向上收集目录段：普通笔记本父级为文件夹；电子书父级章节的目录与章节文件同名（去掉 .md）。
     QStringList segments{name};
@@ -126,6 +131,7 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
         *error = QStringLiteral("无法创建笔记本目录：") + book.path;
         return false;
     }
+    if (book.type == "site" && !HexoSite::prepare(book, error)) return false;
     const QDir root(book.path);
     // 父先子后处理，移动父目录后子孙路径随前缀替换保持一致。
     QList<Note *> order;
@@ -203,8 +209,8 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
                 *error = QStringLiteral("无法创建目录：") + root.absoluteFilePath(expected);
                 return false;
             }
-        } else if (note->contentDirty || !QFileInfo::exists(root.absoluteFilePath(expected))) {
-            if (!writeFile(root.absoluteFilePath(expected), note->content.toUtf8(), error)) return false;
+        } else if (book.type == "site" || note->contentDirty || !QFileInfo::exists(root.absoluteFilePath(expected))) {
+            if (!writeFile(root.absoluteFilePath(expected), book.type == "site" ? HexoSite::postSource(*note) : note->content.toUtf8(), error)) return false;
             note->contentDirty = false;
         }
     }
@@ -261,7 +267,10 @@ bool NotebookStore::loadNotebook(Notebook &book, QString *error) {
         note.metadata = item["metadata"].toObject();
         if (!note.folder) {
             QFile content(root.absoluteFilePath(note.path));
-            if (content.open(QIODevice::ReadOnly)) note.content = QString::fromUtf8(content.readAll());
+            if (content.open(QIODevice::ReadOnly)) {
+                note.content = QString::fromUtf8(content.readAll());
+                if (book.type == "site") note.content = HexoSite::postBody(note.content);
+            }
         }
         loaded.append(note);
     }

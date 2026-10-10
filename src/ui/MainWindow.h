@@ -83,7 +83,7 @@ private:
     void exportNotebook();
     bool save();
     QString currentNoteId() const;
-    static QString siteHtml(const Notebook &book, const QString &page);
+    bool generateSite(const Notebook &book);
 
     NotebookStore store_;
     QString currentNotebookId_;
