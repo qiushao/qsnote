@@ -47,6 +47,7 @@ private:
     void refreshOutline();
     void updateStatus();
     void updatePanels();
+    void updateResizeHandles();
     void createNotebook();
     void openNotebook();
     void closeNotebook();
@@ -86,6 +87,7 @@ private:
     QString currentNotebookId_;
     QSplitter *splitter_ = nullptr;
     QWidget *header_ = nullptr;
+    QHash<QWidget *, Qt::Edges> resizeHandles_;
     QWidget *left_ = nullptr;
     QWidget *right_ = nullptr;
     QWidget *toolbar_ = nullptr;

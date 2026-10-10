@@ -445,6 +445,64 @@ st->e
         window.grab().save("split-preview.png");
     }
 
+    void framelessResizeCursors_data() { // NOLINT(readability-identifier-naming): Qt Test data-provider convention.
+        QTest::addColumn<QPoint>("position");
+        QTest::addColumn<Qt::CursorShape>("cursor");
+        QTest::newRow("left") << QPoint(0, 1) << Qt::SizeHorCursor;
+        QTest::newRow("right") << QPoint(2, 1) << Qt::SizeHorCursor;
+        QTest::newRow("top") << QPoint(1, 0) << Qt::SizeVerCursor;
+        QTest::newRow("bottom") << QPoint(1, 2) << Qt::SizeVerCursor;
+        QTest::newRow("top-left") << QPoint(0, 0) << Qt::SizeFDiagCursor;
+        QTest::newRow("top-right") << QPoint(2, 0) << Qt::SizeBDiagCursor;
+        QTest::newRow("bottom-left") << QPoint(0, 2) << Qt::SizeBDiagCursor;
+        QTest::newRow("bottom-right") << QPoint(2, 2) << Qt::SizeFDiagCursor;
+    }
+
+    void framelessResizeCursors() {
+        QFETCH(QPoint, position);
+        QFETCH(Qt::CursorShape, cursor);
+        MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        for (const QSize size: {QSize(1280, 800), QSize(480, 600)}) {
+            window.resize(size);
+            const QPoint point(position.x() * (window.width() - 1) / 2,
+                               position.y() * (window.height() - 1) / 2);
+            auto *target = window.childAt(point);
+            QVERIFY(target);
+            QTest::mouseMove(&window, point);
+            QCOMPARE(target->cursor().shape(), cursor);
+        }
+        auto *header = window.findChild<QWidget *>("header");
+        const auto point = header->mapTo(&window, QPoint(header->width() / 2, header->height() / 2));
+        QTest::mouseMove(&window, point);
+        QCOMPARE(window.childAt(point)->cursor().shape(), Qt::ArrowCursor);
+        QCOMPARE(window.findChild<QPushButton *>("windowClose")->cursor().shape(), Qt::PointingHandCursor);
+    }
+
+    void framelessResizeWindowStates() {
+        MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *corner = window.childAt(QPoint(0, 0));
+        QVERIFY(corner);
+        QCOMPARE(corner->cursor().shape(), Qt::SizeFDiagCursor);
+        auto *maximize = window.findChild<QPushButton *>("windowMaximize");
+        QTest::mouseClick(maximize, Qt::LeftButton);
+        QTRY_VERIFY(window.isMaximized());
+        QVERIFY(!corner->isVisible());
+        QTest::mouseClick(maximize, Qt::LeftButton);
+        QTRY_VERIFY(!window.isMaximized());
+        QVERIFY(corner->isVisible());
+        window.showFullScreen();
+        QTRY_VERIFY(window.isFullScreen());
+        QVERIFY(!corner->isVisible());
+        window.showNormal();
+        QTRY_VERIFY(!window.isFullScreen());
+        QVERIFY(corner->isVisible());
+        QCOMPARE(window.childAt(QPoint(0, 0)), corner);
+    }
+
     void emptyAndResponsive() {
         MainWindow window;
         window.resize(1440, 900);

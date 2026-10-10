@@ -268,6 +268,23 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     const auto available = screen()->availableGeometry().size();
     resize(available.width() * 4 / 5, available.height() * 4 / 5);
     buildUi();
+    const QList<QPair<Qt::Edges, Qt::CursorShape>> resizeEdges = {
+            {Qt::LeftEdge, Qt::SizeHorCursor},
+            {Qt::RightEdge, Qt::SizeHorCursor},
+            {Qt::TopEdge, Qt::SizeVerCursor},
+            {Qt::BottomEdge, Qt::SizeVerCursor},
+            {Qt::TopEdge | Qt::LeftEdge, Qt::SizeFDiagCursor},
+            {Qt::TopEdge | Qt::RightEdge, Qt::SizeBDiagCursor},
+            {Qt::BottomEdge | Qt::LeftEdge, Qt::SizeBDiagCursor},
+            {Qt::BottomEdge | Qt::RightEdge, Qt::SizeFDiagCursor}};
+    // Transparent children above the content receive edge input even over editors and scrollbars.
+    for (const auto &entry: resizeEdges) {
+        auto *handle = new QWidget(this);
+        handle->setCursor(entry.second);
+        handle->installEventFilter(this);
+        resizeHandles_.insert(handle, entry.first);
+    }
+    updateResizeHandles();
     QString error;
     storageReady_ = store_.load(&error);
     if (!storageReady_) {
@@ -1053,15 +1070,30 @@ void MainWindow::updatePanels() {
     right_->setVisible(rightRequested_ && width() >= unit * 80);
 }
 
+void MainWindow::updateResizeHandles() {
+    const int margin = 6;
+    for (auto it = resizeHandles_.cbegin(); it != resizeHandles_.cend(); ++it) {
+        const auto edges = it.value();
+        const bool horizontal = edges.testFlag(Qt::LeftEdge) || edges.testFlag(Qt::RightEdge);
+        const bool vertical = edges.testFlag(Qt::TopEdge) || edges.testFlag(Qt::BottomEdge);
+        const int x = edges.testFlag(Qt::LeftEdge) ? 0 : edges.testFlag(Qt::RightEdge) ? width() - margin : margin;
+        const int y = edges.testFlag(Qt::TopEdge) ? 0 : edges.testFlag(Qt::BottomEdge) ? height() - margin : margin;
+        it.key()->setGeometry(x, y, horizontal ? margin : width() - 2 * margin, vertical ? margin : height() - 2 * margin);
+        it.key()->setVisible(!isMaximized() && !isFullScreen());
+    }
+}
+
 void MainWindow::resizeEvent(QResizeEvent *event) {
     QMainWindow::resizeEvent(event);
     updatePanels();
+    updateResizeHandles();
 }
 
 void MainWindow::toggleMaximized() { setWindowState(windowState() ^ Qt::WindowMaximized); }
 
 void MainWindow::changeEvent(QEvent *event) {
     QMainWindow::changeEvent(event);
+    if (event->type() == QEvent::WindowStateChange) updateResizeHandles();
     if (event->type() == QEvent::WindowStateChange && maximize_) {
         maximize_->setText(isMaximized() ? "❐" : "□");
         maximize_->setToolTip(isMaximized() ? "还原" : "最大化");
@@ -1070,6 +1102,13 @@ void MainWindow::changeEvent(QEvent *event) {
 }
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
+    if (event->type() == QEvent::MouseButtonPress && !isMaximized() && !isFullScreen()) {
+        const auto edges = resizeHandles_.value(qobject_cast<QWidget *>(watched));
+        auto *mouse = dynamic_cast<QMouseEvent *>(event);
+        if (edges && mouse && mouse->button() == Qt::LeftButton && windowHandle()) {
+            return windowHandle()->startSystemResize(edges);
+        }
+    }
     if (watched == header_) {
         if (event->type() == QEvent::MouseButtonPress) {
             auto *mouse = dynamic_cast<QMouseEvent *>(event);
