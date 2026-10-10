@@ -494,10 +494,6 @@ void MainWindow::buildUi() {
     toolbar_->setObjectName("toolbar");
     buildToolbar();
     centerLayout->addWidget(toolbar_);
-    metadata_ = new QWidget(center);
-    metadata_->setObjectName("metadata");
-    new FlowLayout(metadata_, 6, 10);
-    centerLayout->addWidget(metadata_);
     pages_ = new QStackedWidget(center);
     pages_->setObjectName("editorPages");
     pages_->setMinimumSize(0, 0);
@@ -938,54 +934,9 @@ void MainWindow::removeEditor(const QString &id) {
 void MainWindow::refreshEditor() {
     const auto id = currentNoteId();
     const auto *note = store_.note(id);
-    const auto *book = store_.owner(id);
     toolbar_->setVisible(note);
-    metadata_->setVisible(book && book->type == "site");
-    while (auto *item = metadata_->layout()->takeAt(0)) {
-        delete item->widget();
-        delete item;
-    }
     if (note) {
         activateEditor(id);
-        if (book->type == "site") {
-            const QList<QPair<QString, QString>> fields = {{"category", "分类"}, {"tags", "标签"}, {"date", "日期"}, {"slug", "Slug"}};
-            for (const auto &field: fields) {
-                auto *container = new QWidget(metadata_);
-                auto *layout = row(container, 0, 0, 5);
-                auto *caption = label(field.second, container, true);
-                if (field.first == "date") {
-                    auto *date = new QDateEdit(QDate::fromString(note->metadata["date"].toString(), Qt::ISODate), container);
-                    date->setObjectName("meta_date");
-                    date->setAccessibleName("日期");
-                    date->setDisplayFormat("yyyy-MM-dd");
-                    date->setCalendarPopup(true);
-                    layout->addWidget(caption);
-                    layout->addWidget(date);
-                    metadata_->layout()->addWidget(container);
-                    connect(date, &QDateEdit::dateChanged, this, [this, id](const QDate &value) {
-                        if (auto *target = store_.note(id)) target->metadata["date"] = value.toString(Qt::ISODate);
-                        saveTimer_->start();
-                        refreshTree();
-                    });
-                    continue;
-                }
-                auto *input = new QLineEdit(note->metadata[field.first].toString(), container);
-                input->setObjectName("meta_" + field.first);
-                input->setAccessibleName(field.second);
-                input->setPlaceholderText(field.first == "category" ? "未分类" : field.first == "tags" ? "逗号分隔"
-                                                                         : field.first == "date"       ? "YYYY-MM-DD"
-                                                                                                       : "");
-                input->setMaximumWidth(input->fontMetrics().horizontalAdvance(QString(field.first == "tags" ? 18 : 12, 'x')) + 20);
-                layout->addWidget(caption);
-                layout->addWidget(input);
-                metadata_->layout()->addWidget(container);
-                connect(input, &QLineEdit::textEdited, this, [this, id, key = field.first](const QString &value) {
-                    if (auto *target = store_.note(id)) target->metadata[key] = value;
-                    saveTimer_->start();
-                    refreshTree();
-                });
-            }
-        }
         setViewMode(viewMode_);
     } else {
         pages_->setCurrentIndex(0);
@@ -1298,6 +1249,7 @@ void MainWindow::createNote(const QString &parentId, bool folder) {
     auto *book = store_.notebook(currentNotebookId_);
     if (!book) return;
     if (book->type == "site") {
+        const auto noteId = NotebookStore::newId();
         QDialog dialog(this);
         dialog.setWindowTitle("新建文章");
         auto *layout = new QFormLayout(&dialog);
@@ -1309,6 +1261,12 @@ void MainWindow::createNote(const QString &parentId, bool folder) {
         auto *tagsInput = new QLineEdit(&dialog);
         tagsInput->setPlaceholderText("逗号分隔");
         layout->addRow("标签：", tagsInput);
+        auto *dateInput = new QDateEdit(QDate::currentDate(), &dialog);
+        dateInput->setDisplayFormat("yyyy-MM-dd");
+        dateInput->setCalendarPopup(true);
+        layout->addRow("日期：", dateInput);
+        auto *slugInput = new QLineEdit("post-" + noteId.left(8), &dialog);
+        layout->addRow("Slug：", slugInput);
         auto *draftInput = new QCheckBox("保存为草稿", &dialog);
         layout->addRow(draftInput);
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
@@ -1317,11 +1275,11 @@ void MainWindow::createNote(const QString &parentId, bool folder) {
         layout->addRow(buttons);
         if (dialog.exec() != QDialog::Accepted || titleInput->text().trimmed().isEmpty()) return;
         Note note;
-        note.id = NotebookStore::newId();
+        note.id = noteId;
         note.parentId = parentId;
         note.title = titleInput->text().trimmed();
-        note.metadata = {{"date", QDate::currentDate().toString(Qt::ISODate)},
-                         {"slug", "post-" + note.id.left(8)},
+        note.metadata = {{"date", dateInput->date().toString(Qt::ISODate)},
+                         {"slug", slugInput->text().trimmed()},
                          {"category", categoryInput->currentText()},
                          {"tags", tagsInput->text().trimmed()},
                          {"draft", draftInput->isChecked()}};
@@ -1440,6 +1398,12 @@ void MainWindow::showTreeMenu(const QPoint &position) {
                 auto *tagsInput = new QLineEdit(target->metadata["tags"].toString(), &dialog);
                 tagsInput->setPlaceholderText("逗号分隔");
                 layout->addRow("标签：", tagsInput);
+                auto *dateInput = new QDateEdit(QDate::fromString(target->metadata["date"].toString(), Qt::ISODate), &dialog);
+                dateInput->setDisplayFormat("yyyy-MM-dd");
+                dateInput->setCalendarPopup(true);
+                layout->addRow("日期：", dateInput);
+                auto *slugInput = new QLineEdit(target->metadata["slug"].toString(), &dialog);
+                layout->addRow("Slug：", slugInput);
                 auto *draftInput = new QCheckBox("保存为草稿", &dialog);
                 draftInput->setChecked(target->metadata["draft"].toBool());
                 layout->addRow(draftInput);
@@ -1451,6 +1415,8 @@ void MainWindow::showTreeMenu(const QPoint &position) {
                 target->title = titleInput->text().trimmed();
                 target->metadata["category"] = categoryInput->currentText();
                 target->metadata["tags"] = tagsInput->text().trimmed();
+                target->metadata["date"] = dateInput->date().toString(Qt::ISODate);
+                target->metadata["slug"] = slugInput->text().trimmed();
                 target->metadata["draft"] = draftInput->isChecked();
                 save();
                 refreshTree();

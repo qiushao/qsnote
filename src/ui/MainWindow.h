@@ -93,7 +93,6 @@ private:
     QWidget *left_ = nullptr;
     QWidget *right_ = nullptr;
     QWidget *toolbar_ = nullptr;
-    QWidget *metadata_ = nullptr;
     QComboBox *notebooks_ = nullptr;
     QComboBox *groupBy_ = nullptr;
     QLineEdit *search_ = nullptr;
