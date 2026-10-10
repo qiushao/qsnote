@@ -46,6 +46,8 @@ private:
     void updateStatus();
     void updatePanels();
     void createNotebook();
+    void openNotebook();
+    void closeNotebook();
     void createNote(const QString &parentId, bool folder);
     void showTreeMenu(const QPoint &position);
     void openNote(const QString &id);

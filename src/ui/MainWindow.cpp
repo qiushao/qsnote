@@ -841,6 +841,7 @@ void MainWindow::activateEditor(const QString &id) {
             const auto text = textEdit->toPlainText();
             if (note->content == text) return;
             note->content = text;
+            note->contentDirty = true;
             for (int index = 0; index < tabs_->count(); ++index) {
                 if (tabs_->tabData(index).toString() == id) tabs_->setTabIcon(index, icon("dirty"));
             }
@@ -1072,7 +1073,30 @@ void MainWindow::createNotebook() {
     type->addItem("普通笔记本（目录 + 元数据文件）", "normal");
     type->addItem("静态站点（Gridea 式站点配置）", "site");
     type->addItem("电子书（GitBook 式 SUMMARY.md）", "ebook");
-    for (const auto &field: QList<QPair<QString, QWidget *>>{{"名称", name}, {"类型", type}}) {
+    QString locationRoot = NotebookStore::defaultRoot();
+    auto *location = new QLineEdit(&dialog);
+    location->setObjectName("notebookLocation");
+    location->setReadOnly(true);
+    location->setMinimumWidth(0);
+    auto *locationRow = new QWidget(&dialog);
+    auto *locationLayout = row(locationRow, 0, 0, 6);
+    locationLayout->addWidget(location, 1);
+    auto *browse = button("浏览…", "browseLocation", locationRow);
+    locationLayout->addWidget(browse);
+    const auto updateLocation = [&locationRoot, name, location] {
+        const auto title = name->text().trimmed();
+        location->setText(locationRoot + "/" + NotebookStore::sanitized(title.isEmpty() ? QStringLiteral("未命名笔记本") : title));
+    };
+    updateLocation();
+    connect(name, &QLineEdit::textChanged, location, updateLocation);
+    connect(browse, &QPushButton::clicked, &dialog, [&locationRoot, &dialog, updateLocation] {
+        const auto chosen = QFileDialog::getExistingDirectory(&dialog, "选择笔记本保存目录", locationRoot);
+        if (!chosen.isEmpty()) {
+            locationRoot = chosen;
+            updateLocation();
+        }
+    });
+    for (const auto &field: QList<QPair<QString, QWidget *>>{{"名称", name}, {"类型", type}, {"保存位置", locationRow}}) {
         auto *caption = label(field.first, &dialog, true);
         caption->setBuddy(field.second);
         layout->addWidget(caption);
@@ -1097,6 +1121,11 @@ void MainWindow::createNotebook() {
     book.id = NotebookStore::newId();
     book.name = name->text().trimmed().isEmpty() ? QStringLiteral("未命名笔记本") : name->text().trimmed();
     book.type = type->currentData().toString();
+    book.path = NotebookStore::uniqueDirectory(locationRoot, book.name);
+    if (!QDir().mkpath(book.path)) {
+        QMessageBox::warning(this, "无法创建笔记本", "无法创建目录：" + book.path);
+        return;
+    }
     if (book.type == "site") {
         book.config = {{"title", book.name}, {"theme", "minimal"}, {"footer", "Powered by MDNote"}, {"commentPlatform", "none"}, {"deployPlatform", "github-pages"}, {"branch", "gh-pages"}};
     }
@@ -1104,6 +1133,63 @@ void MainWindow::createNotebook() {
     store_.notebooks.append(book);
     save();
     refreshNotebooks();
+}
+
+void MainWindow::openNotebook() {
+    const auto directory = QFileDialog::getExistingDirectory(this, "打开笔记本", NotebookStore::defaultRoot());
+    if (directory.isEmpty()) return;
+    const QString path = QDir(directory).absolutePath();
+    for (const auto &book: store_.notebooks) {
+        if (QDir(book.path).absolutePath() == path) {
+            currentNotebookId_ = book.id;
+            search_->clear();
+            refreshNotebooks();
+            return;
+        }
+    }
+    Notebook book;
+    QString error;
+    if (!NotebookStore::readNotebook(path, book, &error)) {
+        QMessageBox::warning(this, "无法打开笔记本", error);
+        return;
+    }
+    currentNotebookId_ = book.id;
+    store_.notebooks.append(book);
+    save();
+    search_->clear();
+    refreshNotebooks();
+}
+
+void MainWindow::closeNotebook() {
+    const auto *book = store_.notebook(currentNotebookId_);
+    if (!book) return;
+    const auto hint = QStringLiteral("关闭笔记本「%1」？\n关闭后不再显示在列表中，磁盘上的文件会保留，之后可通过「打开笔记本」重新加入。").arg(book->name);
+    if (QMessageBox::question(this, "关闭笔记本", hint, QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
+    // 先落盘，保证笔记本目录中的索引包含最新元信息，供之后恢复。
+    if (!save()) return;
+    const QString id = book->id;
+    {
+        const QSignalBlocker blocker(tabs_);
+        for (int index = tabs_->count() - 1; index >= 0; --index) {
+            const auto noteId = tabs_->tabData(index).toString();
+            const auto *owner = store_.owner(noteId);
+            if (owner && owner->id == id) {
+                tabs_->removeTab(index);
+                removeEditor(noteId);
+            }
+        }
+    }
+    for (int index = 0; index < store_.notebooks.size(); ++index) {
+        if (store_.notebooks[index].id == id) {
+            store_.notebooks.removeAt(index);
+            break;
+        }
+    }
+    currentNotebookId_ = store_.notebooks.isEmpty() ? QString() : store_.notebooks.first().id;
+    save();
+    search_->clear();
+    refreshNotebooks();
+    refreshEditor();
 }
 
 void MainWindow::createNote(const QString &parentId, bool folder) {
@@ -1130,19 +1216,18 @@ void MainWindow::createNote(const QString &parentId, bool folder) {
 
 void MainWindow::showTreeMenu(const QPoint &position) {
     auto *book = store_.notebook(currentNotebookId_);
-    if (!book) return;
     auto *item = tree_->itemAt(position);
     const auto id = item ? item->data(0, Qt::UserRole).toString() : QString();
     auto *note = store_.note(id);
     QMenu menu(this);
-    if (!note || note->folder) {
+    if (book && (!note || note->folder)) {
         menu.addAction(book->type == "site" ? "新建文章" : book->type == "ebook" ? "添加章节"
                                                                                  : "新建笔记",
                        this, [this, id, note] { createNote(note ? id : QString(), false); });
         if (book->type == "normal") menu.addAction("新建文件夹", this, [this, id, note] { createNote(note ? id : QString(), true); });
         if (book->type == "site") menu.addAction("站点配置", this, &MainWindow::showSiteConfig);
     }
-    if (note && book->type == "ebook") {
+    if (book && note && book->type == "ebook") {
         menu.addAction("添加子章节", this, [this, id] { createNote(id, false); });
         menu.addSeparator();
         QList<int> siblings;
@@ -1189,7 +1274,7 @@ void MainWindow::showTreeMenu(const QPoint &position) {
             refreshTree();
         });
     }
-    if (note) {
+    if (book && note) {
         if (!menu.actions().isEmpty()) menu.addSeparator();
         menu.addAction("重命名", this, [this, id] {
             auto *target = store_.note(id);
@@ -1214,6 +1299,10 @@ void MainWindow::showTreeMenu(const QPoint &position) {
                     }
                 }
             }
+            for (const auto &entry: owner->notes) {
+                // 子孙随父目录递归删除，只需处理顶层被删项。
+                if (removed.contains(entry.id) && !removed.contains(entry.parentId)) NotebookStore::removeNoteFiles(*owner, entry);
+            }
             for (int index = static_cast<int>(owner->notes.size()) - 1; index >= 0; --index) {
                 if (removed.contains(owner->notes[index].id)) owner->notes.removeAt(index);
             }
@@ -1230,6 +1319,9 @@ void MainWindow::showTreeMenu(const QPoint &position) {
             refreshEditor();
         });
     }
+    if (!menu.actions().isEmpty()) menu.addSeparator();
+    menu.addAction("打开笔记本…", this, &MainWindow::openNotebook);
+    if (book) menu.addAction("关闭笔记本", this, &MainWindow::closeNotebook);
     menu.exec(tree_->viewport()->mapToGlobal(position));
 }
 

@@ -1,5 +1,6 @@
 #include "FlowLayout.h"
 #include <QWidget>
+#include <QVariant>
 
 FlowLayout::FlowLayout(QWidget *parent, int margin, int spacing) : QLayout(parent) {
     setContentsMargins(margin, margin, margin, margin);

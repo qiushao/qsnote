@@ -22,6 +22,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QMessageBox>
 #include <vtextedit/vtextedit.h>
 #include <vtextedit/texteditorconfig.h>
 #include <QPushButton>
@@ -33,6 +34,12 @@
 #include <QTextBrowser>
 #include <QTimer>
 #include <QTreeWidget>
+
+namespace {
+QString fixturePath(const QString &name) {
+    return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/notebooks/" + name;
+}
+}// namespace
 
 // Qt Test discovers non-static slots through the meta-object system.
 // NOLINTBEGIN(readability-convert-member-functions-to-static)
@@ -56,6 +63,7 @@ private slots:
         QStandardPaths::setTestModeEnabled(true);
         QVERIFY(QDir().mkpath(QFileInfo(NotebookStore::storagePath()).absolutePath()));
         QFile::remove(NotebookStore::storagePath());
+        QDir(fixturePath({})).removeRecursively();
     }
 
     void markdownFormattingAndUndo() {
@@ -325,7 +333,7 @@ st->e
 
     void splitPreviewScrollsBothWays() {
         NotebookStore fixture;
-        Notebook book{"scroll-book", "Scroll", "normal", {}, {}};
+        Notebook book{"scroll-book", "Scroll", "normal", {}, {}, fixturePath("scroll-book")};
         QString text;
         for (int i = 0; i < 80; ++i) text += QStringLiteral("## Heading %1\n\nParagraph %1\n\n").arg(i);
         book.notes.append({"scroll-note", {}, "Scroll.md", text, false, {}});
@@ -413,7 +421,7 @@ st->e
 
     void editingSearchTabsAndOutline() {
         NotebookStore fixture;
-        Notebook normal{"normal", "测试笔记本", "normal", {}, {}};
+        Notebook normal{"normal", "测试笔记本", "normal", {}, {}, fixturePath("normal")};
         normal.notes.append({"note-a", {}, "笔记 A.md", "一级标题\n===\n\n正文\n\n## 二级标题\n\n```\n# 代码内不是标题\n```\n", false, {}});
         normal.notes.append({"note-b", {}, "笔记 B.md", "# 另一篇\n\n可搜索的正文", false, {}});
         fixture.notebooks.append(normal);
@@ -520,7 +528,7 @@ st->e
 
     void independentTabSessions() {
         NotebookStore fixture;
-        Notebook book{"tabs-book", "Tabs", "normal", {}, {}};
+        Notebook book{"tabs-book", "Tabs", "normal", {}, {}, fixturePath("tabs-book")};
         QString originalA = "# A\n";
         for (int i = 0; i < 100; ++i) originalA += QStringLiteral("Line %1\n").arg(i);
         const QString originalB = "# B\nSecond note";
@@ -625,8 +633,8 @@ st->e
 
     void notebookContextActionsAndChapterHierarchy() {
         NotebookStore fixture;
-        fixture.notebooks.append({"normal", "操作验证", "normal", {}, {}});
-        fixture.notebooks.append({"ebook", "章节验证", "ebook", {}, {}});
+        fixture.notebooks.append({"normal", "操作验证", "normal", {}, {}, fixturePath("normal-ops")});
+        fixture.notebooks.append({"ebook", "章节验证", "ebook", {}, {}, fixturePath("ebook-ops")});
         QString error;
         QVERIFY2(fixture.save(&error), qPrintable(error));
         MainWindow window;
@@ -692,10 +700,88 @@ st->e
         QCOMPARE(reloaded.notebooks[1].notes.size(), 3);
     }
 
+    void closeAndReopenNotebook() {
+        NotebookStore fixture;
+        Notebook first{"book-a", "笔记本甲", "normal", {}, {}, fixturePath("book-a")};
+        first.notes.append({"note-x", {}, "笔记X.md", "内容X", false, {}});
+        fixture.notebooks.append(first);
+        fixture.notebooks.append({"book-b", "笔记本乙", "normal", {}, {}, fixturePath("book-b")});
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.resize(1280, 800);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *notebooks = window.findChild<QComboBox *>("notebooks");
+        auto *tree = window.findChild<QTreeWidget *>("noteTree");
+        auto *tabs = window.findChild<QTabBar *>("noteTabs");
+        QCOMPARE(notebooks->count(), 2);
+        QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, tree->visualItemRect(tree->topLevelItem(0)).center());
+        QCOMPARE(tabs->count(), 1);
+        auto triggerAction = [](const QString &text) {
+            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            QVERIFY(menu);
+            QAction *match = nullptr;
+            for (auto *action: menu->actions()) {
+                if (action->text() == text) match = action;
+            }
+            if (!match) {
+                menu->close();
+                QFAIL("Missing context action");
+            }
+            match->trigger();
+        };
+        QTimer::singleShot(20, &window, [triggerAction] {
+            // 触发动作会同步进入模态循环，对话框处理必须先注册。
+            QTimer::singleShot(20, qApp, [] {
+                auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+                QVERIFY(box);
+                box->button(QMessageBox::Yes)->click();
+            });
+            triggerAction("关闭笔记本");
+        });
+        emit tree->customContextMenuRequested(QPoint(20, tree->height() - 20));
+        QTRY_COMPARE(notebooks->count(), 1);
+        QCOMPARE(tabs->count(), 0);
+        QCOMPARE(notebooks->currentText(), QString("笔记本乙"));
+        // 关闭只移除登记，磁盘目录与索引保留
+        QVERIFY(QFile::exists(fixturePath("book-a") + "/_index.json"));
+        QVERIFY(QFile::exists(fixturePath("book-a") + "/笔记X.md"));
+        NotebookStore reloaded;
+        QVERIFY2(reloaded.load(&error), qPrintable(error));
+        QCOMPARE(reloaded.notebooks.size(), 1);
+        QCOMPARE(reloaded.notebooks.first().id, QString("book-b"));
+        // 存储接口可直接恢复被关闭的笔记本
+        Notebook restored;
+        QVERIFY2(NotebookStore::readNotebook(fixturePath("book-a"), restored, &error), qPrintable(error));
+        QCOMPARE(restored.id, QString("book-a"));
+        QCOMPARE(restored.name, QString("笔记本甲"));
+        QCOMPARE(restored.notes.size(), 1);
+        QCOMPARE(restored.notes.first().content, QString("内容X"));
+        // 通过界面重新打开
+        QTimer::singleShot(20, &window, [triggerAction] {
+            QTimer::singleShot(30, qApp, [] {
+                auto *dialog = qobject_cast<QFileDialog *>(QApplication::activeModalWidget());
+                QVERIFY(dialog);
+                dialog->setDirectory(fixturePath("book-a"));
+                QTimer::singleShot(80, dialog, [dialog] {
+                    dialog->findChild<QLineEdit *>("fileNameEdit")->setText(fixturePath("book-a"));
+                    QMetaObject::invokeMethod(dialog, "accept");
+                });
+            });
+            triggerAction("打开笔记本…");
+        });
+        emit tree->customContextMenuRequested(QPoint(20, tree->height() - 20));
+        QTRY_COMPARE(notebooks->count(), 2);
+        QCOMPARE(notebooks->currentText(), QString("笔记本甲"));
+        QCOMPARE(tree->topLevelItemCount(), 1);
+        QCOMPARE(tree->topLevelItem(0)->text(0), QString("笔记X.md"));
+    }
+
     void exportsContainUserContent() {
         NotebookStore fixture;
-        fixture.notebooks.append({"site", "导出站点", "site", {{"post", {}, "文章", "# 用户文章\n\n正文", false, {}}}, {{"title", "用户站点"}}});
-        fixture.notebooks.append({"ebook", "导出书籍", "ebook", {{"chapter", {}, "章节", "# 用户章节\n\n章节正文", false, {}}}, {}});
+        fixture.notebooks.append({"site", "导出站点", "site", {{"post", {}, "文章", "# 用户文章\n\n正文", false, {}}}, {{"title", "用户站点"}}, fixturePath("site-export")});
+        fixture.notebooks.append({"ebook", "导出书籍", "ebook", {{"chapter", {}, "章节", "# 用户章节\n\n章节正文", false, {}}}, {}, fixturePath("ebook-export")});
         QString error;
         QVERIFY2(fixture.save(&error), qPrintable(error));
         QTemporaryDir destination;
@@ -735,7 +821,7 @@ st->e
 
     void siteMetadataConfigAndPreview() {
         NotebookStore fixture;
-        Notebook site{"site", "测试站点", "site", {}, {{"title", "用户的站点"}}};
+        Notebook site{"site", "测试站点", "site", {}, {{"title", "用户的站点"}}, fixturePath("site")};
         site.notes.append({"post-a", {}, "文章标题", "# 文章标题\n\n## 内容\n\n真实输入的文字", false, {{"category", "分类一"}, {"tags", "标签一, 标签二"}, {"date", "2026-10-09"}, {"slug", "article"}}});
         fixture.notebooks.append(site);
         QString error;
