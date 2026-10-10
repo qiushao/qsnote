@@ -1,0 +1,142 @@
+#ifndef MARKDOWNHIGHLIGHTBLOCKDATA_H
+#define MARKDOWNHIGHLIGHTBLOCKDATA_H
+
+#include <QVector>
+
+#include <vtextedit/textblockdata.h>
+
+#include <vtextedit/markdownhighlighterdata.h>
+
+namespace vte {
+class MarkdownHighlightBlockData {
+public:
+  TimeStamp getHighlightTimeStamp() const { return m_highlightTimeStamp; }
+
+  void setHighlightTimeStamp(TimeStamp p_ts) { m_highlightTimeStamp = p_ts; }
+
+  const QVector<md::HLUnit> &getHighlight() const { return m_highlight; }
+
+  QVector<md::HLUnit> &getHighlight() { return m_highlight; }
+
+  void setHighlightOverlays(const QVector<md::HLUnitStyle> &p_overlays) {
+    m_highlightOverlays = p_overlays;
+  }
+
+  void clearHighlight() {
+    m_highlightTimeStamp = 0;
+    m_highlight.clear();
+    m_highlightOverlays.clear();
+  }
+
+  TimeStamp getCodeBlockHighlightTimeStamp() const { return m_codeBlockHighlightTimeStamp; }
+
+  void setCodeBlockHighlightTimeStamp(TimeStamp p_ts) { m_codeBlockHighlightTimeStamp = p_ts; }
+
+  const QVector<md::HLUnitStyle> &getCodeBlockHighlight() const { return m_codeBlockHighlight; }
+
+  QVector<md::HLUnitStyle> &getCodeBlockHighlight() { return m_codeBlockHighlight; }
+
+  void clearCodeBlockHighlight() {
+    m_codeBlockHighlightTimeStamp = 0;
+    m_codeBlockHighlight.clear();
+  }
+
+  bool isBlockHighlightMatched(const QVector<md::HLUnit> &p_highlight,
+                               const QVector<md::HLUnitStyle> &p_overlays) const {
+    if (m_highlightTimeStamp == 0 || p_highlight.size() != m_highlight.size() ||
+        p_overlays != m_highlightOverlays) {
+      return false;
+    }
+
+    for (int i = 0; i < p_highlight.size(); ++i) {
+      if (!(p_highlight[i] == m_highlight[i])) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  bool isCodeBlockHighlightMatched(const QVector<md::HLUnitStyle> &p_highlight) const {
+    if (p_highlight.size() != m_codeBlockHighlight.size()) {
+      return false;
+    }
+
+    for (int i = 0; i < p_highlight.size(); ++i) {
+      if (!(p_highlight[i] == m_codeBlockHighlight[i])) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  TimeStamp getMathHighlightTimeStamp() const { return m_mathHighlightTimeStamp; }
+
+  void setMathHighlightTimeStamp(TimeStamp p_ts) { m_mathHighlightTimeStamp = p_ts; }
+
+  const QVector<md::HLUnitStyle> &getMathHighlight() const { return m_mathHighlight; }
+
+  QVector<md::HLUnitStyle> &getMathHighlight() { return m_mathHighlight; }
+
+  void clearMathHighlight() {
+    m_mathHighlightTimeStamp = 0;
+    m_mathHighlight.clear();
+  }
+
+  bool isMathHighlightMatched(const QVector<md::HLUnitStyle> &p_highlight) const {
+    if (p_highlight.size() != m_mathHighlight.size()) {
+      return false;
+    }
+
+    for (int i = 0; i < p_highlight.size(); ++i) {
+      if (!(p_highlight[i] == m_mathHighlight[i])) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  int getCodeBlockIndentation() const { return m_codeBlockIndentation; }
+
+  void setCodeBlockIndentation(int p_indentation) { m_codeBlockIndentation = p_indentation; }
+
+  // Clear user data on parse result ready.
+  void clearOnResultReady() { m_codeBlockIndentation = -1; }
+
+  static QSharedPointer<MarkdownHighlightBlockData> get(const QTextBlock &p_block) {
+    auto blockData = TextBlockData::get(p_block);
+    auto highlightData = blockData->getMarkdownHighlightBlockData();
+    if (!highlightData) {
+      highlightData.reset(new MarkdownHighlightBlockData());
+      blockData->setMarkdownHighlightBlockData(highlightData);
+    }
+    return highlightData;
+  }
+
+private:
+  // TimeStamp of the highlight result which has been applied to this block.
+  TimeStamp m_highlightTimeStamp = 0;
+
+  // Highlight cache for this block.
+  QVector<md::HLUnit> m_highlight;
+
+  // Applied overlays participate in repaint decisions even when syntax is unchanged.
+  QVector<md::HLUnitStyle> m_highlightOverlays;
+
+  TimeStamp m_codeBlockHighlightTimeStamp = 0;
+
+  QVector<md::HLUnitStyle> m_codeBlockHighlight;
+
+  // Highlight cache for the display math source of this block.
+  TimeStamp m_mathHighlightTimeStamp = 0;
+
+  QVector<md::HLUnitStyle> m_mathHighlight;
+
+  // Indentation of the this code block if this block is a fenced code block.
+  int m_codeBlockIndentation = -1;
+};
+} // namespace vte
+
+#endif // MARKDOWNHIGHLIGHTBLOCKDATA_H

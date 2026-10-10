@@ -1,5 +1,9 @@
 #include "MainWindow.h"
 #include "FlowLayout.h"
+#include "MarkdownEditor.h"
+#include "MarkdownPreview.h"
+#include <QScopedValueRollback>
+#include <QScrollBar>
 #include <QApplication>
 #include <QButtonGroup>
 #include <QCloseEvent>
@@ -21,7 +25,10 @@
 #include <QMessageBox>
 #include <QPainter>
 #include <QPainterPath>
-#include <QPlainTextEdit>
+#include <vtextedit/vtextedit.h>
+#include <vtextedit/vmarkdowneditor.h>
+#include <cmark.h>
+#include <cstdlib>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSaveFile>
@@ -233,13 +240,11 @@ private:
 };
 
 QString markdownHtml(const QString &markdown) {
-    QTextDocument document;
-    document.setMarkdown(markdown);
-    const QString html = document.toHtml();
-    const auto start = html.indexOf('>', html.indexOf("<body")) + 1;
-    auto body = html.mid(start, html.lastIndexOf("</body>") - start);
-    body.remove(QRegularExpression(R"(font-size:[^;" ]+;?)"));
-    return body;
+    const auto utf8 = markdown.toUtf8();
+    auto *html = cmark_markdown_to_html(utf8.constData(), static_cast<size_t>(utf8.size()), CMARK_OPT_DEFAULT);
+    const auto result = QString::fromUtf8(html);
+    std::free(html);
+    return result;
 }
 const QString markdownStyle = QStringLiteral(
         "body { color: #24292f; font-size: 14px; line-height: 1.75; }"
@@ -272,22 +277,36 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     saveTimer_->setSingleShot(true);
     saveTimer_->setInterval(350);
     connect(saveTimer_, &QTimer::timeout, this, [this] { save(); });
-    connect(editor_, &QPlainTextEdit::textChanged, this, [this] {
-        auto *note = store_.note(currentNoteId());
-        if (!note) return;
-        note->content = editor_->toPlainText();
-        tabs_->setTabIcon(tabs_->currentIndex(), icon("dirty"));
-        refreshOutline();
-        updateStatus();
-        saveTimer_->start();
-    });
     auto *find = new QShortcut(QKeySequence::Find, this);
     connect(find, &QShortcut::activated, this, [this] {
+        if (store_.note(currentNoteId())) {
+            auto *focus = QApplication::focusWidget();
+            if (viewMode_ == ViewMode::Preview || (viewMode_ == ViewMode::Split && focus && (focus == preview_ || preview_->isAncestorOf(focus)))) {
+                preview_->showFind();
+                return;
+            }
+            markdownEditor_->showFindReplace();
+            return;
+        }
         leftRequested_ = true;
         updatePanels();
         left_->show();
         search_->setFocus();
         search_->selectAll();
+    });
+    auto *findAll = new QShortcut(QKeySequence("Ctrl+Shift+F"), this);
+    connect(findAll, &QShortcut::activated, this, [this] {
+        leftRequested_ = true;
+        updatePanels();
+        left_->show();
+        search_->setFocus();
+        search_->selectAll();
+    });
+    auto *replace = new QShortcut(QKeySequence::Replace, this);
+    connect(replace, &QShortcut::activated, this, [this] {
+        if (!store_.note(currentNoteId())) return;
+        if (viewMode_ == ViewMode::Preview) setPreview(false);
+        markdownEditor_->showFindReplace();
     });
     auto *mode = new QShortcut(QKeySequence("Ctrl+E"), this);
     connect(mode, &QShortcut::activated, this, [this] { setPreview(!previewModeEnabled_); });
@@ -296,6 +315,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     auto *escape = new QShortcut(QKeySequence(Qt::Key_Escape), search_);
     escape->setContext(Qt::WidgetShortcut);
     connect(escape, &QShortcut::activated, search_, &QLineEdit::clear);
+}
+
+MainWindow::~MainWindow() {
+    for (const auto &session: editorSessions_) session.status->setParent(nullptr);
 }
 
 void MainWindow::buildUi() {
@@ -362,7 +385,7 @@ void MainWindow::buildUi() {
     auto *searchLayout = row(searchRow);
     search_ = new QLineEdit(searchRow);
     search_->setObjectName("search");
-    search_->setPlaceholderText("搜索当前笔记本 (Ctrl+F)");
+    search_->setPlaceholderText("搜索当前笔记本 (Ctrl+Shift+F)");
     search_->setAccessibleName("搜索当前笔记本");
     search_->setMinimumWidth(0);
     searchLayout->addWidget(search_);
@@ -446,20 +469,48 @@ void MainWindow::buildUi() {
     }
     emptyLayout->addStretch();
     pages_->addWidget(empty);
-    editor_ = new QPlainTextEdit(pages_);
-    editor_->setObjectName("editor");
-    editor_->setPlaceholderText("开始书写 Markdown...");
-    editor_->setTabStopDistance(editor_->fontMetrics().horizontalAdvance(' ') * 4);
-    pages_->addWidget(editor_);
-    preview_ = new QTextBrowser(pages_);
-    preview_->setObjectName("preview");
-    preview_->setOpenExternalLinks(true);
-    preview_->document()->setDefaultStyleSheet(markdownStyle);
-    pages_->addWidget(preview_);
+    editorSplitter_ = new QSplitter(Qt::Horizontal, pages_);
+    editorSplitter_->setObjectName("editorSplitter");
+    editorSplitter_->setChildrenCollapsible(false);
+    pages_->addWidget(editorSplitter_);
+    editors_ = new QStackedWidget(editorSplitter_);
+    editors_->setObjectName("noteEditors");
+    editors_->setMinimumSize(0, 0);
+    editorSplitter_->addWidget(editors_);
+    preview_ = new MarkdownPreview(editorSplitter_);
+    editorSplitter_->addWidget(preview_);
+    preview_->hide();
+    previewTimer_ = new QTimer(this);
+    previewTimer_->setSingleShot(true);
+    previewTimer_->setInterval(180);
+    connect(previewTimer_, &QTimer::timeout, this, [this] {
+        if (const auto *note = store_.note(currentNoteId())) preview_->setMarkdown(note->content, note->id);
+    });
+    connect(preview_, &MarkdownPreview::sourceLineChanged, this, [this](int line) {
+        if (!editor_ || !preview_->matchesDocument(editor_->toPlainText(), currentNoteId())) return;
+        editorSessions_[activeEditorId_].previewLine = line;
+        if (viewMode_ != ViewMode::Split) return;
+        const QScopedValueRollback<bool> guard(syncingPreviewScroll_, true);
+        markdownEditor_->scrollToLine(line, false);
+    });
+    connect(preview_, &MarkdownPreview::taskToggled, this, [this](int line, bool checked) {
+        if (!editor_ || !preview_->matchesDocument(editor_->toPlainText(), currentNoteId())) return;
+        const auto block = editor_->document()->findBlockByNumber(line);
+        const QRegularExpression task(R"(^(?:\s*>)*\s*(?:[-*+]|\d+[.)])\s+\[([ xX])\])");
+        const auto match = task.match(block.text());
+        if (!match.hasMatch()) return;
+        QTextCursor cursor(block);
+        cursor.setPosition(block.position() + static_cast<int>(match.capturedStart(1)));
+        cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
+        cursor.insertText(checked ? "x" : " ");
+    });
     centerLayout->addWidget(pages_, 1);
     status_ = label({}, center, true);
     status_->setObjectName("status");
     centerLayout->addWidget(status_);
+    editorStatuses_ = new QStackedWidget(center);
+    editorStatuses_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Maximum);
+    centerLayout->addWidget(editorStatuses_);
 
     right_ = new QWidget(splitter_);
     right_->setObjectName("rightPanel");
@@ -528,17 +579,11 @@ void MainWindow::buildUi() {
     connect(outline_, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *item) {
         const int line = item->data(0, Qt::UserRole).toInt();
         if (previewModeEnabled_) {
-            int headingIndex = item->data(0, Qt::UserRole + 1).toInt();
-            for (auto block = preview_->document()->begin(); block.isValid(); block = block.next()) {
-                if (block.blockFormat().headingLevel() > 0 && headingIndex-- == 0) {
-                    preview_->setTextCursor(QTextCursor(block));
-                    preview_->ensureCursorVisible();
-                    break;
-                }
-            }
+            preview_->scrollToLine(line);
         } else {
             editor_->setTextCursor(QTextCursor(editor_->document()->findBlockByNumber(line)));
-            editor_->centerCursor();
+            editor_->ensureCursorVisible();
+            if (viewMode_ == ViewMode::Split) preview_->scrollToLine(line);
             editor_->setFocus();
         }
     });
@@ -546,34 +591,20 @@ void MainWindow::buildUi() {
 
 void MainWindow::buildToolbar() {
     auto *layout = new FlowLayout(toolbar_, 5, 2);
+    using Type = vte::TypeAction;
     struct Tool {
         QString title;
-        QString before;
-        QString after;
-        QString placeholder;
-        bool block = false;
+        Type action = Type::TypeBold;
+        QVariant data;
     };
     const QList<Tool> tools = {
-            {"H1", "# ", "", "标题", true},
-            {"H2", "## ", "", "标题", true},
-            {"H3", "### ", "", "标题", true},
-            {},
-            {"B", "**", "**", "粗体"},
-            {"I", "*", "*", "斜体"},
-            {"S", "~~", "~~", "删除线"},
-            {},
-            {"链接", "[", "](https://)", "链接文字"},
-            {"图片", "![", "](https://image.png)", "图片描述"},
-            {},
-            {"列表", "- ", "", "列表项", true},
-            {"有序", "1. ", "", "列表项", true},
-            {"任务", "- [ ] ", "", "任务项", true},
-            {"引用", "> ", "", "引用内容", true},
-            {},
-            {"代码", "`", "`", "code"},
-            {"代码块", "```\n", "\n```\n", "代码", true},
-            {"表格", "", "", "| 列1 | 列2 | 列3 |\n| --- | --- | --- |\n| 内容 | 内容 | 内容 |\n", true},
-            {"分割线", "\n---\n", "", "", true}};
+        {"H1", Type::TypeHeading, 1}, {"H2", Type::TypeHeading, 2}, {"H3", Type::TypeHeading, 3}, {},
+        {"B", Type::TypeBold}, {"I", Type::TypeItalic}, {"S", Type::TypeStrikethrough}, {"高亮", Type::TypeMark}, {},
+        {"链接", Type::TypeLink}, {"图片", Type::TypeImage}, {},
+        {"列表", Type::TypeUnorderedList}, {"有序", Type::TypeOrderedList},
+        {"任务", Type::TypeTodoList, false}, {"引用", Type::TypeQuote}, {},
+        {"代码", Type::TypeCode}, {"代码块", Type::TypeCodeBlock},
+        {"公式", Type::TypeMath}, {"公式块", Type::TypeMathBlock}, {"表格", Type::TypeTable}};
     for (const auto &tool: tools) {
         if (tool.title.isEmpty()) {
             auto *separator = new QFrame(toolbar_);
@@ -585,7 +616,7 @@ void MainWindow::buildToolbar() {
         }
         auto *action = button(tool.title, "tool" + tool.title, toolbar_);
         action->setProperty("tool", true);
-        action->setToolTip(tool.title == "B" || tool.title == "I" || tool.title == "S" ? tool.placeholder : tool.title);
+        action->setToolTip(tool.title);
         action->setFocusPolicy(Qt::NoFocus);
         auto font = action->font();
         font.setBold(tool.title == "B");
@@ -593,15 +624,30 @@ void MainWindow::buildToolbar() {
         font.setStrikeOut(tool.title == "S");
         action->setFont(font);
         layout->addWidget(action);
-        connect(action, &QPushButton::clicked, this, [this, tool] { insertMarkdown(tool.before, tool.after, tool.placeholder, tool.block); });
+        connect(action, &QPushButton::clicked, this, [this, tool] {
+            if (!store_.note(currentNoteId())) return;
+            setPreview(false);
+            markdownEditor_->type(tool.action, tool.data);
+        });
     }
+    auto *rule = button("分割线", "tool分割线", toolbar_);
+    rule->setFocusPolicy(Qt::NoFocus);
+    connect(rule, &QPushButton::clicked, this, [this] {
+        if (!store_.note(currentNoteId())) return;
+        setPreview(false);
+        markdownEditor_->insertText("\n\n---\n\n");
+    });
+    layout->addWidget(rule);
+    auto *more = button("更多", "editorOptions", toolbar_);
+    layout->addWidget(more);
     auto *modes = new QWidget(toolbar_);
     modes->setProperty("alignRight", true);
     auto *modeLayout = row(modes, 0, 0, 0);
     editMode_ = button("编辑", "editMode", modes);
     previewMode_ = button("预览", "previewMode", modes);
+    splitMode_ = button("分屏", "splitMode", modes);
     auto *group = new QButtonGroup(modes);
-    for (auto *mode: {editMode_, previewMode_}) {
+    for (auto *mode: {editMode_, previewMode_, splitMode_}) {
         mode->setProperty("mode", true);
         mode->setCheckable(true);
         group->addButton(mode);
@@ -610,6 +656,7 @@ void MainWindow::buildToolbar() {
     layout->addWidget(modes);
     connect(editMode_, &QPushButton::clicked, this, [this] { setPreview(false); });
     connect(previewMode_, &QPushButton::clicked, this, [this] { setPreview(true); });
+    connect(splitMode_, &QPushButton::clicked, this, [this] { setViewMode(ViewMode::Split); });
 }
 
 void MainWindow::refreshNotebooks() {
@@ -722,7 +769,6 @@ void MainWindow::openNote(const QString &id) {
     for (int index = 0; index < tabs_->count(); ++index) {
         if (tabs_->tabData(index).toString() == id) {
             tabs_->setCurrentIndex(index);
-            setPreview(false);
             return;
         }
     }
@@ -741,8 +787,115 @@ void MainWindow::openNote(const QString &id) {
 
 void MainWindow::closeTab(int index) {
     if (!save()) return;
-    tabs_->removeTab(index);
+    const auto id = tabs_->tabData(index).toString();
+    {
+        const QSignalBlocker blocker(tabs_);
+        tabs_->removeTab(index);
+    }
+    removeEditor(id);
     refreshEditor();
+}
+
+void MainWindow::activateEditor(const QString &id) {
+    if (activeEditorId_ == id) return;
+    if (editorSessions_.contains(activeEditorId_)) {
+        auto &previous = editorSessions_[activeEditorId_];
+        previous.verticalScroll = editor_->verticalScrollBar()->value();
+        previous.horizontalScroll = editor_->horizontalScrollBar()->value();
+        markdownEditor_->setObjectName("inactiveMarkdownEditor");
+        editor_->setObjectName("inactiveEditor");
+    }
+    previewTimer_->stop();
+    if (!editorSessions_.contains(id)) {
+        EditorSession session;
+        auto *documentEditor = new MarkdownEditor(editors_);
+        auto *textEdit = documentEditor->getTextEdit();
+        textEdit->setPlaceholderText("开始书写 Markdown...");
+        textEdit->setProperty("noteId", id);
+        session.editor = documentEditor;
+        session.status = documentEditor->statusWidget();
+        session.status->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        session.menu = documentEditor->createEditorMenu(documentEditor);
+        connect(session.menu, &QMenu::aboutToShow, this, [this] { setPreview(false); });
+        editors_->addWidget(documentEditor);
+        editorStatuses_->addWidget(session.status.data());
+        editorSessions_.insert(id, session);
+        connect(documentEditor, &MarkdownEditor::settingsChanged, this, [this, documentEditor] {
+            for (const auto &session: editorSessions_) {
+                if (session.editor != documentEditor) session.editor->reloadSettings();
+            }
+        });
+        connect(documentEditor, &vte::VMarkdownEditor::headingsUpdated, this,
+                [this, id, textEdit](const QVector<vte::md::HeadingInfo> &headings, bool) {
+            auto &cached = editorSessions_[id].headings;
+            cached.clear();
+            for (const auto &heading: headings) {
+                cached.append({heading.m_title, heading.m_level, textEdit->document()->findBlock(heading.m_startPos).blockNumber()});
+            }
+            if (activeEditorId_ == id) refreshOutline();
+        });
+        documentEditor->setText(store_.note(id)->content);
+        connect(textEdit, &QTextEdit::textChanged, this, [this, id, textEdit] {
+            auto *note = store_.note(id);
+            if (!note) return;
+            const auto text = textEdit->toPlainText();
+            if (note->content == text) return;
+            note->content = text;
+            for (int index = 0; index < tabs_->count(); ++index) {
+                if (tabs_->tabData(index).toString() == id) tabs_->setTabIcon(index, icon("dirty"));
+            }
+            if (activeEditorId_ == id) {
+                updateStatus();
+                if (viewMode_ != ViewMode::Edit) previewTimer_->start();
+            }
+            saveTimer_->start();
+        });
+        connect(textEdit->verticalScrollBar(), &QScrollBar::valueChanged, this, [this, id, documentEditor] {
+            if (activeEditorId_ == id && viewMode_ == ViewMode::Split && !syncingPreviewScroll_) {
+                preview_->scrollToLine(documentEditor->getTopLine());
+            }
+        });
+    }
+    auto &session = editorSessions_[id];
+    activeEditorId_ = id;
+    markdownEditor_ = session.editor;
+    editor_ = markdownEditor_->getTextEdit();
+    markdownEditor_->setObjectName("markdownEditor");
+    editor_->setObjectName("editor");
+    editors_->setCurrentWidget(markdownEditor_);
+    editorStatuses_->setCurrentWidget(session.status.data());
+    findChild<QPushButton *>("editorOptions")->setMenu(session.menu);
+    setViewMode(session.mode);
+    // Layout changes on show can scroll QTextEdit to its caret. Restore the
+    // viewport after that layout without moving the retained cursor/selection.
+    QTimer::singleShot(0, markdownEditor_, [this, id, vertical = session.verticalScroll, horizontal = session.horizontalScroll] {
+        if (activeEditorId_ != id) return;
+        const QScopedValueRollback<bool> guard(syncingPreviewScroll_, true);
+        editor_->verticalScrollBar()->setValue(vertical);
+        editor_->horizontalScrollBar()->setValue(horizontal);
+        if (viewMode_ != ViewMode::Edit) {
+            preview_->scrollToLine(viewMode_ == ViewMode::Split ? markdownEditor_->getTopLine() : editorSessions_[id].previewLine);
+        }
+    });
+}
+
+void MainWindow::removeEditor(const QString &id) {
+    if (!editorSessions_.contains(id)) return;
+    auto session = editorSessions_.take(id);
+    if (activeEditorId_ == id) {
+        activeEditorId_.clear();
+        markdownEditor_ = nullptr;
+        editor_ = nullptr;
+        findChild<QPushButton *>("editorOptions")->setMenu(nullptr);
+    }
+    editorStatuses_->removeWidget(session.status.data());
+    session.status->setParent(nullptr);
+    session.status.clear();
+    editors_->removeWidget(session.editor);
+    disconnect(session.editor, nullptr, this, nullptr);
+    disconnect(session.editor->getTextEdit(), nullptr, this, nullptr);
+    disconnect(session.editor->getTextEdit()->verticalScrollBar(), nullptr, this, nullptr);
+    delete session.editor;
 }
 
 void MainWindow::refreshEditor() {
@@ -756,12 +909,7 @@ void MainWindow::refreshEditor() {
         delete item;
     }
     if (note) {
-        if (editor_->property("noteId").toString() != id) {
-            const QSignalBlocker blocker(editor_);
-            editor_->setPlainText(note->content);
-            editor_->setProperty("noteId", id);
-            previewModeEnabled_ = false;
-        }
+        activateEditor(id);
         if (book->type == "site") {
             const QList<QPair<QString, QString>> fields = {{"category", "分类"}, {"tags", "标签"}, {"date", "日期"}, {"slug", "Slug"}};
             for (const auto &field: fields) {
@@ -801,10 +949,12 @@ void MainWindow::refreshEditor() {
                 });
             }
         }
-        setPreview(previewModeEnabled_);
+        setViewMode(viewMode_);
     } else {
         pages_->setCurrentIndex(0);
-        editor_->setProperty("noteId", QString());
+        previewTimer_->stop();
+        if (preview_->revision() > 0) preview_->setMarkdown({}, {});
+        editorStatuses_->hide();
         status_->clear();
     }
     refreshOutline();
@@ -812,70 +962,46 @@ void MainWindow::refreshEditor() {
 }
 
 void MainWindow::setPreview(bool enabled) {
-    const auto *note = store_.note(currentNoteId());
-    if (!note) return;
-    previewModeEnabled_ = enabled;
-    editMode_->setChecked(!enabled);
-    previewMode_->setChecked(enabled);
-    if (enabled) preview_->setHtml(markdownHtml(note->content));
-    pages_->setCurrentIndex(enabled ? 2 : 1);
-    updateStatus();
+    setViewMode(enabled ? ViewMode::Preview : ViewMode::Edit);
 }
 
-void MainWindow::insertMarkdown(const QString &before, const QString &after, const QString &placeholder, bool block) {
-    if (!store_.note(currentNoteId())) return;
-    setPreview(false);
-    auto cursor = editor_->textCursor();
-    const auto selected = cursor.selectedText().replace(QChar::ParagraphSeparator, '\n');
-    QString prefix = before;
-    if (block && cursor.selectionStart() > 0 && editor_->toPlainText().at(cursor.selectionStart() - 1) != '\n') prefix.prepend('\n');
-    const int start = cursor.selectionStart();
-    const auto content = selected.isEmpty() ? placeholder : selected;
-    cursor.beginEditBlock();
-    cursor.insertText(prefix + content + after);
-    if (selected.isEmpty() && !placeholder.isEmpty()) {
-        cursor.setPosition(start + static_cast<int>(prefix.size()));
-        cursor.setPosition(start + static_cast<int>(prefix.size() + content.size()), QTextCursor::KeepAnchor);
+void MainWindow::setViewMode(ViewMode mode) {
+    const auto *note = store_.note(currentNoteId());
+    if (!note) return;
+    const auto oldMode = viewMode_;
+    viewMode_ = mode;
+    previewModeEnabled_ = mode == ViewMode::Preview;
+    editMode_->setChecked(mode == ViewMode::Edit);
+    previewMode_->setChecked(mode == ViewMode::Preview);
+    splitMode_->setChecked(mode == ViewMode::Split);
+    editors_->setVisible(mode != ViewMode::Preview);
+    editorSessions_[activeEditorId_].mode = mode;
+    preview_->setVisible(mode != ViewMode::Edit);
+    pages_->setCurrentIndex(1);
+    if (mode != ViewMode::Edit) preview_->setMarkdown(note->content, note->id);
+    else previewTimer_->stop();
+    if (mode == ViewMode::Split && oldMode != ViewMode::Split) {
+        editorSplitter_->setSizes({editorSplitter_->width() / 2, editorSplitter_->width() / 2});
+        preview_->scrollToLine(markdownEditor_->getTopLine());
     }
-    cursor.endEditBlock();
-    editor_->setTextCursor(cursor);
-    editor_->setFocus();
+    editorStatuses_->setVisible(mode != ViewMode::Preview);
+    updateStatus();
 }
 
 void MainWindow::refreshOutline() {
     outline_->clear();
     const auto *note = store_.note(currentNoteId());
     outlineHint_->setText(note ? "本文暂无标题" : "打开一篇笔记后自动生成大纲");
-    if (note) {
-        const auto lines = note->content.split('\n');
-        const QRegularExpression heading(R"(^ {0,3}(#{1,6})\s+(.+?)(?:\s+#+)?\s*$)");
-        const QRegularExpression fence("^ {0,3}(`{3,}|~{3,})");
-        QString fenceMarker;
+    if (note && editorSessions_.contains(note->id)) {
         QList<QPair<int, QTreeWidgetItem *>> parents;
-        int headingIndex = 0;
-        for (int line = 0; line < lines.size(); ++line) {
-            const auto code = fence.match(lines[line]);
-            if (code.hasMatch()) {
-                const auto marker = code.captured(1);
-                if (fenceMarker.isEmpty()) fenceMarker = marker;
-                else if (marker.front() == fenceMarker.front() && marker.size() >= fenceMarker.size())
-                    fenceMarker.clear();
-                continue;
-            }
-            if (!fenceMarker.isEmpty()) continue;
-            const auto match = heading.match(lines[line]);
-            if (!match.hasMatch()) continue;
-            const int level = static_cast<int>(match.captured(1).size());
-            while (!parents.isEmpty() && parents.last().first >= level) parents.removeLast();
+        for (const auto &heading: editorSessions_[note->id].headings) {
+            while (!parents.isEmpty() && parents.last().first >= heading.level) parents.removeLast();
             auto *item = new QTreeWidgetItem;
-            item->setText(0, match.captured(2));
-            item->setToolTip(0, match.captured(2));
-            item->setData(0, Qt::UserRole, line);
-            item->setData(0, Qt::UserRole + 1, headingIndex++);
+            item->setText(0, heading.title);
+            item->setData(0, Qt::UserRole, heading.line);
             if (parents.isEmpty()) outline_->addTopLevelItem(item);
-            else
-                parents.last().second->addChild(item);
-            parents.append({level, item});
+            else parents.last().second->addChild(item);
+            parents.append({heading.level, item});
         }
         outline_->expandAll();
     }
@@ -885,7 +1011,7 @@ void MainWindow::refreshOutline() {
 void MainWindow::updateStatus() {
     const auto *note = store_.note(currentNoteId());
     if (!note) return;
-    status_->setText(QStringLiteral("%1 字 · %2 行 · %3").arg(note->content.size()).arg(note->content.count('\n') + 1).arg(previewModeEnabled_ ? "预览" : "编辑中"));
+    status_->setText(QStringLiteral("%1 字 · %2 行 · %3").arg(note->content.size()).arg(note->content.count('\n') + 1).arg(viewMode_ == ViewMode::Split ? "分屏" : previewModeEnabled_ ? "预览" : "编辑中"));
 }
 
 void MainWindow::updatePanels() {
@@ -1091,8 +1217,14 @@ void MainWindow::showTreeMenu(const QPoint &position) {
             for (int index = static_cast<int>(owner->notes.size()) - 1; index >= 0; --index) {
                 if (removed.contains(owner->notes[index].id)) owner->notes.removeAt(index);
             }
-            for (int index = tabs_->count() - 1; index >= 0; --index) {
-                if (removed.contains(tabs_->tabData(index).toString())) tabs_->removeTab(index);
+            {
+                const QSignalBlocker blocker(tabs_);
+                for (int index = tabs_->count() - 1; index >= 0; --index) {
+                    const auto noteId = tabs_->tabData(index).toString();
+                    if (!removed.contains(noteId)) continue;
+                    tabs_->removeTab(index);
+                    removeEditor(noteId);
+                }
             }
             save();
             refreshEditor();

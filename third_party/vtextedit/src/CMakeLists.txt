@@ -1,0 +1,251 @@
+cmake_minimum_required(VERSION 3.16)
+# This nested project() overrides PROJECT_VERSION for this directory scope, so it
+# — not the root CMakeLists.txt — is what the SOVERSION at the bottom of this file
+# actually reads. The two declarations MUST be bumped together; bumping only the
+# root leaves the installed library carrying the previous soname.
+project(VTextEdit VERSION 8.0.0 LANGUAGES C CXX)
+
+set(CMAKE_INCLUDE_CURRENT_DIR ON)
+
+set(QT_DEFAULT_MAJOR_VERSION 6 CACHE STRING "Qt version to use (5 or 6), defaults to 6")
+find_package(Qt${QT_DEFAULT_MAJOR_VERSION} REQUIRED COMPONENTS Core Gui Network Svg Widgets LinguistTools)
+find_package(Qt${QT_DEFAULT_MAJOR_VERSION} OPTIONAL_COMPONENTS Core5Compat)
+
+# The source-indexed concealment adapter requires version-matched private headers.
+if(QT_DEFAULT_MAJOR_VERSION GREATER 5 AND NOT TARGET Qt6::GuiPrivate)
+    find_package(Qt6GuiPrivate QUIET)
+endif()
+if(NOT TARGET Qt${QT_DEFAULT_MAJOR_VERSION}::GuiPrivate)
+    message(FATAL_ERROR "VTextEdit requires matching Qt Gui private development headers for inline concealment.")
+endif()
+
+if ((QT_DEFAULT_MAJOR_VERSION GREATER 5))
+    qt_standard_project_setup()
+else()
+    set(CMAKE_AUTOMOC ON)
+    set(CMAKE_AUTORCC ON)
+    set(CMAKE_AUTOUIC ON)
+endif()
+
+set(LIBS_FOLDER "../libs")
+
+set(TRANS_FILES
+    data/translations/vtextedit_zh_CN.ts
+    data/translations/vtextedit_ja.ts
+    data/translations/vtextedit_ko.ts
+)
+qt_add_translation(QM_FILES ${TRANS_FILES})
+
+# Explicitly-invoked target to refresh the .ts catalogs from the sources.
+# Not part of ALL: run it deliberately with
+#   cmake --build <builddir> --target update_translations
+if (TARGET Qt${QT_DEFAULT_MAJOR_VERSION}::lupdate)
+    add_custom_target(update_translations
+        COMMAND Qt${QT_DEFAULT_MAJOR_VERSION}::lupdate
+                -locations relative -no-obsolete
+                ${CMAKE_CURRENT_SOURCE_DIR}
+                -ts ${TRANS_FILES}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Updating .ts translation catalogs"
+        VERBATIM)
+endif()
+
+add_library(VTextEdit SHARED
+    ${QM_FILES}
+    data/themes/theme.qrc
+    ${LIBS_FOLDER}/sonnet/src/core/trigrams.qrc
+    include/vtextedit/blocksegment.h
+    include/vtextedit/codeblockhighlighter.h
+    include/vtextedit/global.h
+    include/vtextedit/htmlimgscanner.h
+    include/vtextedit/htmltablescanner.h
+    include/vtextedit/lrucache.h
+    include/vtextedit/markdowneditorconfig.h
+    include/vtextedit/markdownutils.h
+    include/vtextedit/orderedintset.h
+    include/vtextedit/markdownhighlighter.h
+    include/vtextedit/markdownhighlighterdata.h
+    include/vtextedit/preview.h
+    include/vtextedit/previewdata.h
+    include/vtextedit/previewmgr.h
+    include/vtextedit/previewwidget.h
+    include/vtextedit/richtexteditorconfig.h
+    include/vtextedit/spellchecker.h
+    include/vtextedit/textblockdata.h
+    include/vtextedit/texteditorconfig.h
+    include/vtextedit/texteditutils.h
+    include/vtextedit/textrange.h
+    include/vtextedit/textutils.h
+    include/vtextedit/theme.h
+    include/vtextedit/viconfig.h
+    include/vtextedit/vmarkdowneditor.h
+    include/vtextedit/vrichtexteditor.h
+    include/vtextedit/vsyntaxhighlighter.h
+    include/vtextedit/vtextedit.h
+    include/vtextedit/vtextedit_export.h
+    include/vtextedit/vtexteditor.h
+    inputmode/abstractinputmode.cpp inputmode/abstractinputmode.h
+    inputmode/abstractinputmodefactory.h
+    inputmode/inputmodeeditorinterface.h
+    inputmode/inputmodemgr.cpp inputmode/inputmodemgr.h
+    inputmode/normalinputmode.cpp inputmode/normalinputmode.h
+    inputmode/normalinputmodefactory.cpp inputmode/normalinputmodefactory.h
+    inputmode/texteditinputmode.cpp inputmode/texteditinputmode.h
+    inputmode/viinputmode.cpp inputmode/viinputmode.h
+    inputmode/viinputmodefactory.cpp inputmode/viinputmodefactory.h
+    inputmode/vscodeinputmode.cpp inputmode/vscodeinputmode.h
+    inputmode/vscodeinputmodefactory.cpp inputmode/vscodeinputmodefactory.h
+    markdowneditor/codeblockhighlighter.cpp
+    markdowneditor/documentresourcemgr.cpp markdowneditor/documentresourcemgr.h
+    markdowneditor/editormarkdownhighlighter.cpp markdowneditor/editormarkdownhighlighter.h
+    markdowneditor/editorpreviewmgr.cpp markdowneditor/editorpreviewmgr.h
+    markdowneditor/headingsourcenumberer.cpp markdowneditor/headingsourcenumberer.h
+    markdowneditor/markdownfoldingprovider.cpp markdowneditor/markdownfoldingprovider.h
+    markdowneditor/ksyntaxcodeblockhighlighter.cpp markdowneditor/ksyntaxcodeblockhighlighter.h
+    markdowneditor/markdowneditorconfig.cpp
+    markdowneditor/markdownhighlightblockdata.h
+    markdowneditor/markdownhighlighterresult.cpp markdowneditor/markdownhighlighterresult.h
+    markdowneditor/markdownhighlighter.cpp
+    markdowneditor/markdownparser.cpp markdowneditor/markdownparser.h
+    markdowneditor/cmarkadapter.cpp markdowneditor/cmarkadapter.h
+    markdowneditor/markdownastwalker.cpp markdowneditor/markdownastwalker.h
+    markdowneditor/hlformatresolver.cpp markdowneditor/hlformatresolver.h
+    markdowneditor/interactivepreviewhost.cpp markdowneditor/interactivepreviewhost.h
+    markdowneditor/preview.cpp
+    markdowneditor/previewbuilder.h
+    markdowneditor/previewfromast.cpp markdowneditor/previewfromast.h
+    markdowneditor/previewlogging.cpp markdowneditor/previewlogging.h
+    markdowneditor/previewdata.cpp
+    markdowneditor/previewmgr.cpp
+    markdowneditor/previewwidget.cpp
+    markdowneditor/tablepreviewwidget.cpp markdowneditor/tablepreviewwidget.h
+    markdowneditor/tablepreviewinputmode.cpp markdowneditor/tablepreviewinputmode.h
+    markdowneditor/textdocumentlayout.cpp markdowneditor/textdocumentlayout.h
+    markdowneditor/textdocumentlayoutdata.h
+    markdowneditor/vmarkdowneditor.cpp
+    markdowneditor/webcodeblockhighlighter.cpp markdowneditor/webcodeblockhighlighter.h
+    markdowneditor/mathblockhighlighter.cpp markdowneditor/mathblockhighlighter.h
+    richtexteditor/vrichtexteditor.cpp
+    spellcheck/spellchecker.cpp
+    spellcheck/spellcheckhighlighthelper.cpp spellcheck/spellcheckhighlighthelper.h
+    textedit/autoindenthelper.cpp textedit/autoindenthelper.h
+    textedit/scrollbar.cpp textedit/scrollbar.h
+    textedit/textblockdata.cpp
+    textedit/theme.cpp
+    textedit/vtextedit.cpp
+    texteditor/blockspellcheckdata.h
+    texteditor/completer.cpp texteditor/completer.h
+    texteditor/editorcompleter.cpp texteditor/editorcompleter.h
+    texteditor/editorextraselection.cpp texteditor/editorextraselection.h
+    texteditor/editorindicatorsborder.cpp texteditor/editorindicatorsborder.h
+    texteditor/editorinputmode.cpp texteditor/editorinputmode.h
+    texteditor/extraselectionmgr.cpp texteditor/extraselectionmgr.h
+    texteditor/formatcache.cpp texteditor/formatcache.h
+    texteditor/indicatorsborder.cpp texteditor/indicatorsborder.h
+    texteditor/inputmodestatuswidget.h
+    texteditor/ksyntaxhighlighterwrapper.cpp texteditor/ksyntaxhighlighterwrapper.h
+    texteditor/plaintexthighlighter.cpp texteditor/plaintexthighlighter.h
+    texteditor/statusindicator.cpp texteditor/statusindicator.h
+    texteditor/syntaxhighlighter.cpp texteditor/syntaxhighlighter.h
+    texteditor/texteditorconfig.cpp
+    texteditor/textfolding.cpp texteditor/textfolding.h
+    texteditor/viconfig.cpp
+    texteditor/vsyntaxhighlighter.cpp
+    texteditor/vtexteditor.cpp
+    utils/htmlimgscanner.cpp
+    utils/htmltablescanner.cpp
+    utils/htmltagparse.cpp utils/htmltagparse.h
+    utils/markdownutils.cpp
+    # networkutils is INTERNAL: the header lives next to the .cpp (not under
+    # include/vtextedit) so it is neither installed nor consumable by users of
+    # the library. It stays listed here so AUTOMOC still processes NetworkAccess.
+    utils/networkutils.cpp utils/networkutils.h
+    utils/noncopyable.h
+    utils/texteditutils.cpp
+    utils/textutils.cpp
+    utils/utils.cpp utils/utils.h
+)
+target_include_directories(VTextEdit PUBLIC
+    include
+)
+
+target_compile_definitions(VTextEdit PRIVATE
+    VTEXTEDIT_LIB
+)
+
+target_include_directories(VTextEdit PUBLIC
+    ${LIBS_FOLDER}/syntax-highlighting/src/lib
+    ${LIBS_FOLDER}/syntax-highlighting/autogenerated
+    ${LIBS_FOLDER}/syntax-highlighting/autogenerated/src/lib
+    ${LIBS_FOLDER}/katevi/src
+    ${LIBS_FOLDER}/katevi/src/include
+    ${LIBS_FOLDER}/cmark/src
+    ${LIBS_FOLDER}/sonnet/src/core
+)
+target_link_directories(VTextEdit PUBLIC
+    ${LIBS_FOLDER}/syntax-highlighting
+    ${LIBS_FOLDER}/katevi
+    ${LIBS_FOLDER}/sonnet/src/core
+    ${LIBS_FOLDER}/hunspell
+)
+
+target_link_libraries(VTextEdit PUBLIC
+    Qt::Core
+    Qt::Gui
+    Qt::Network
+    Qt::Svg
+    Qt::Widgets
+    VSyntaxHighlighting
+    KateVi
+    cmark
+    sonnet-core
+    sonnet-hunspell
+    Hunspell
+)
+target_link_libraries(VTextEdit PRIVATE Qt${QT_DEFAULT_MAJOR_VERSION}::GuiPrivate)
+
+if((QT_DEFAULT_MAJOR_VERSION GREATER 5))
+    target_link_libraries(VTextEdit PUBLIC
+        Qt::Core5Compat
+    )
+endif()
+
+# 2.0: VMarkdownEditor::tablePreviewVisibleRows()/setTablePreviewVisibleRows()
+# were removed, so an already-linked consumer must not resolve against this
+# build. Without a SOVERSION that failure would surface as a missing symbol at
+# load time instead of at link time.
+#
+# 3.0: MarkdownEditorConfig gained m_autoFoldPreviewedBlocksEnabled. Applications
+# allocate that struct themselves, so its layout is part of the ABI; and the new
+# member defaults to true, which changes what an unmodified application does.
+# Both failures are silent without a SOVERSION bump.
+#
+# 4.0: the image channel changed shape. MarkdownUtils::hasImageLink() and
+# fetchImageLinkUrl() were removed (their regular expression could not match an
+# `=WxH` size and silently dropped every sized image);
+# MarkdownHighlighter::getImageRegions() became getImageLinks() and
+# imageLinksUpdated() / PreviewMgr::updateImageLinks() now carry
+# md::ImageLinkInfo rather than md::ElementRegion. An already-linked consumer
+# would otherwise resolve against a signature that no longer exists.
+#
+# 6.0: MarkdownEditorConfig gained m_alignTableSourceEnabled. Same reasoning as
+# the 3.0 entry: applications allocate that struct themselves, so its layout is
+# part of the ABI, and an already-linked consumer would write its other members
+# at the wrong offsets.
+#
+# 7.0: ListItemGuide and ActiveListItem enlarge Theme::m_editorStyles,
+# shifting subsequent members of the exported Theme object. Consumers must
+# rebuild against the new layout.
+#
+# 8.0: concealment settings enlarge MarkdownEditorConfig and ConcealedText
+# enlarges Theme::m_editorStyles. All consumers must rebuild.
+set_target_properties(VTextEdit PROPERTIES
+    VERSION ${PROJECT_VERSION}
+    SOVERSION ${PROJECT_VERSION_MAJOR}
+)
+
+install(TARGETS VTextEdit
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    FRAMEWORK DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)

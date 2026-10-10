@@ -1,0 +1,139 @@
+#ifndef VTEXTEDIT_GLOBAL_H
+#define VTEXTEDIT_GLOBAL_H
+
+#include <QKeySequence>
+#include <QObject>
+
+#include <vtextedit/vtextedit_export.h>
+
+namespace vte {
+enum InputMode { NormalMode = 0, ViMode, VscodeMode, MaxInputMode };
+
+// Must align with KateViEditorInterface::ViewMode.
+enum EditorMode {
+  NormalModeInsert = 0,    /**< Insert mode. Characters will be added. */
+  NormalModeOverwrite = 1, /**< Overwrite mode. Characters will be replaced. */
+
+  ViModeNormal = 10,
+  ViModeInsert = 11,
+  ViModeVisual = 12,
+  ViModeVisualLine = 13,
+  ViModeVisualBlock = 14,
+  ViModeReplace = 15
+};
+
+class VTEXTEDIT_EXPORT VTextEditTranslate : public QObject {
+  Q_OBJECT
+};
+
+inline QString editorModeToString(EditorMode p_mode) {
+  switch (p_mode) {
+  case EditorMode::NormalModeInsert:
+    return VTextEditTranslate::tr("Insert");
+
+  case EditorMode::NormalModeOverwrite:
+    return VTextEditTranslate::tr("Overwrite");
+
+  case EditorMode::ViModeNormal:
+    return VTextEditTranslate::tr("Normal (Vi)");
+
+  case EditorMode::ViModeInsert:
+    return VTextEditTranslate::tr("Insert (Vi)");
+
+  case EditorMode::ViModeVisual:
+    return VTextEditTranslate::tr("Visual (Vi)");
+
+  case EditorMode::ViModeVisualLine:
+    return VTextEditTranslate::tr("Visual Line (Vi)");
+
+  case EditorMode::ViModeVisualBlock:
+    return VTextEditTranslate::tr("Visual Block (Vi)");
+
+  case EditorMode::ViModeReplace:
+    return VTextEditTranslate::tr("Replace (Vi)");
+
+  default:
+    return VTextEditTranslate::tr("Unknown");
+  }
+}
+
+enum CaretStyle { Line, Block, Underline, Half, MaxCaretStyle };
+
+// Whether a key press in @p_mode inserts text rather than issuing a command.
+//
+// THE input method rule, spelled once. Vi's normal and visual modes turn every
+// printable key into a command, so an input method would swallow the keystroke
+// and compose with it instead; every other mode is ordinary typing. Three
+// widgets answer Qt::ImEnabled from this - VTextEditor, VRichTextEditor and the
+// table preview sheet - and they used to carry three verbatim copies of the
+// switch, which is exactly how one of them ends up disagreeing with the others
+// about where CJK input works.
+inline bool isTextInsertingEditorMode(EditorMode p_mode) {
+  switch (p_mode) {
+  case EditorMode::ViModeNormal:
+    Q_FALLTHROUGH();
+  case EditorMode::ViModeVisual:
+    Q_FALLTHROUGH();
+  case EditorMode::ViModeVisualLine:
+    Q_FALLTHROUGH();
+  case EditorMode::ViModeVisualBlock:
+    return false;
+
+  default:
+    return true;
+  }
+}
+
+typedef unsigned long long TimeStamp;
+
+enum CenterCursor { NeverCenter, AlwaysCenter, CenterOnBottom };
+
+enum WrapMode { NoWrap, WordWrap, WrapAnywhere, WordWrapOrAnywhere };
+
+enum FindFlag {
+  None = 0,
+  FindBackward = 0x1,
+  CaseSensitive = 0x2,
+  WholeWordOnly = 0x4,
+  RegularExpression = 0x8
+};
+Q_DECLARE_FLAGS(FindFlags, FindFlag);
+
+enum class MarkdownConcealElement { None = 0, ImageUrl = 0x1, LinkUrl = 0x2, ReferenceUrl = 0x4 };
+Q_DECLARE_FLAGS(MarkdownConcealElements, MarkdownConcealElement);
+
+enum class LineEndingPolicy { Platform, File, LF, CRLF, CR };
+
+enum class LineEnding { LF, CRLF, CR };
+
+struct Key {
+  Key() = default;
+
+  Key(int p_key, Qt::KeyboardModifiers p_modifiers) : m_key(p_key), m_modifiers(p_modifiers) {}
+
+  Key(const QString &p_key) {
+    QKeySequence seq(p_key);
+    if (seq.count() == 0) {
+      return;
+    }
+
+    const int keyMask = 0x01FFFFFF;
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
+    const int keyModifiers = seq[0];
+#else
+    const int keyModifiers = seq[0].toCombined();
+#endif
+    m_key = keyModifiers & keyMask;
+    m_modifiers = static_cast<Qt::KeyboardModifiers>(keyModifiers & (~keyMask));
+  }
+
+  int m_key = 0;
+
+  Qt::KeyboardModifiers m_modifiers = Qt::NoModifier;
+};
+} // namespace vte
+
+Q_DECLARE_OPERATORS_FOR_FLAGS(vte::FindFlags)
+Q_DECLARE_OPERATORS_FOR_FLAGS(vte::MarkdownConcealElements)
+
+#endif // VTEXTEDIT_GLOBAL_H

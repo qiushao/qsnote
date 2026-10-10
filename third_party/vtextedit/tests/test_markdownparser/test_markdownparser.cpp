@@ -1,0 +1,3777 @@
+#include "test_markdownparser.h"
+
+#include <QApplication>
+#include <QDir>
+#include <QDirIterator>
+#include <QElapsedTimer>
+#include <QFile>
+#include <QHash>
+#include <QPaintEvent>
+#include <QRegion>
+#include <QSignalSpy>
+#include <QTemporaryDir>
+#include <QTextBlock>
+#include <QTextLayout>
+#include <algorithm>
+
+#include <vtextedit/htmlimgscanner.h>
+#include <vtextedit/htmltablescanner.h>
+#include <vtextedit/markdowneditorconfig.h>
+#include <vtextedit/markdownhighlighter.h>
+#include <vtextedit/markdownutils.h>
+#include <vtextedit/texteditorconfig.h>
+#include <vtextedit/theme.h>
+#include <vtextedit/vmarkdowneditor.h>
+#include <vtextedit/vtextedit.h>
+
+#include "cmarkadapter.h"
+#include "markdownastwalker.h"
+#include "markdownparser.h"
+
+using namespace tests;
+using vte::escapePayload;
+using vte::HtmlTable;
+using vte::MarkdownLink;
+using vte::MarkdownUtils;
+using vte::RawTextState;
+using vte::rewriteHtmlTagAttr;
+using vte::scanHtmlTables;
+using vte::unescapePayload;
+
+// Highlight type ordinals (matching pmh_element_type / MarkdownSyntaxStyle values
+// used by the cmark adapter).
+enum {
+  HLT_LINK = 0,
+  HLT_AUTO_LINK_URL = 1,
+  HLT_AUTO_LINK_EMAIL = 2,
+  HLT_IMAGE = 3,
+  HLT_CODE = 4,
+  HLT_HTML = 5,
+  HLT_HTML_ENTITY = 6,
+  HLT_EMPH = 7,
+  HLT_STRONG = 8,
+  HLT_LIST_BULLET = 9,
+  HLT_LIST_ENUMERATOR = 10,
+  HLT_COMMENT = 11,
+  HLT_H1 = 12,
+  HLT_H2 = 13,
+  HLT_H3 = 14,
+  HLT_H4 = 15,
+  HLT_H5 = 16,
+  HLT_H6 = 17,
+  HLT_BLOCKQUOTE = 18,
+  HLT_VERBATIM = 19,
+  HLT_HTMLBLOCK = 20,
+  HLT_HRULE = 21,
+  HLT_REFERENCE = 22,
+  HLT_FENCEDCODEBLOCK = 23,
+  HLT_NOTE = 24,
+  HLT_STRIKE = 25,
+  HLT_FRONTMATTER = 26,
+  HLT_DISPLAYFORMULA = 27,
+  HLT_INLINEEQUATION = 28,
+  HLT_MARK = 29,
+  HLT_TABLE = 30,
+  HLT_TABLEHEADER = 31,
+  HLT_TABLEBORDER = 32
+};
+
+// Helper: count blocks (newlines + 1) in UTF-8 text.
+static int countBlocks(const QByteArray &p_utf8) {
+  int n = 1;
+  for (int i = 0; i < p_utf8.size(); ++i) {
+    if (p_utf8[i] == '\n')
+      ++n;
+  }
+  return n;
+}
+
+// Helper: parse text and return ASTWalkResult.
+static vte::md::ASTWalkResult parse(const QString &p_text) {
+  QByteArray utf8 = p_text.toUtf8();
+  int numBlocks = countBlocks(utf8);
+  return vte::md::walkAndConvert(utf8, numBlocks, 0, 0, false, true);
+}
+
+// Helper: count HLUnits with given style across all blocks.
+static int countElements(const vte::md::ASTWalkResult &p_result, int p_style) {
+  int count = 0;
+  for (const auto &block : p_result.blocksHighlights) {
+    for (const auto &unit : block) {
+      if (unit.styleIndex == (unsigned int)p_style)
+        ++count;
+    }
+  }
+  return count;
+}
+
+// Helper: find all HLUnits with given style, returning doc-absolute (start, end) pairs.
+// Elements are returned in the order they appear in blocksHighlights (block order, then
+// unit order within block). The old parseCmark prepended elements (reverse order within
+// a style bucket). We sort by position ascending here for consistent comparison.
+static QVector<QPair<unsigned long, unsigned long>>
+findElements(const vte::md::ASTWalkResult &p_result, int p_style, const QString &p_text) {
+  QVector<QPair<unsigned long, unsigned long>> elems;
+  // Build block start positions from text.
+  QVector<int> blockStarts;
+  blockStarts.append(0);
+  for (int i = 0; i < p_text.size(); ++i) {
+    if (p_text[i] == '\n')
+      blockStarts.append(i + 1);
+  }
+  for (int blockNum = 0; blockNum < p_result.blocksHighlights.size(); ++blockNum) {
+    for (const auto &unit : p_result.blocksHighlights[blockNum]) {
+      if (unit.styleIndex == (unsigned int)p_style) {
+        unsigned long absStart =
+            (blockNum < blockStarts.size() ? blockStarts[blockNum] : 0) + unit.start;
+        unsigned long absEnd = absStart + unit.length;
+        elems.append(qMakePair(absStart, absEnd));
+      }
+    }
+  }
+  return elems;
+}
+
+static QString readFixture(const QString &p_name) {
+  QFile f(QStringLiteral(FIXTURES_DIR) + "/" + p_name);
+  if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    return QString();
+  }
+  return QString::fromUtf8(f.readAll());
+}
+
+static QTextCharFormat formatAt(const QTextBlock &p_block, int p_position) {
+  const auto ranges = p_block.layout()->formats();
+  for (const auto &range : ranges) {
+    if (range.start <= p_position && p_position < range.start + range.length) {
+      return range.format;
+    }
+  }
+
+  return QTextCharFormat();
+}
+
+void TestMarkdownParser::initTestCase() {}
+
+void TestMarkdownParser::cleanupTestCase() {}
+
+// ============================================================
+// T5: Block Element Tests
+// ============================================================
+
+void TestMarkdownParser::testHeadings() {
+  const QString input = QStringLiteral("# H1\n## H2\n### H3\n#### H4\n##### H5\n###### H6\n");
+  auto result = parse(input);
+
+  QCOMPARE(countElements(result, HLT_H1), 1);
+  QCOMPARE(countElements(result, HLT_H2), 1);
+  QCOMPARE(countElements(result, HLT_H3), 1);
+  QCOMPARE(countElements(result, HLT_H4), 1);
+  QCOMPARE(countElements(result, HLT_H5), 1);
+  QCOMPARE(countElements(result, HLT_H6), 1);
+
+  // cmark heading positions exclude trailing newline (unlike pmh).
+  // Use headerRegions for doc-absolute position checks.
+  QCOMPARE(result.headerRegions.size(), 6);
+
+  // headerRegions are sorted by position.
+  QCOMPARE(result.headerRegions[0].m_startPos, 0);
+  QCOMPARE(result.headerRegions[0].m_endPos, 4);
+
+  QCOMPARE(result.headerRegions[1].m_startPos, 5);
+  QCOMPARE(result.headerRegions[1].m_endPos, 10);
+
+  QCOMPARE(result.headerRegions[2].m_startPos, 11);
+  QCOMPARE(result.headerRegions[2].m_endPos, 17);
+
+  QCOMPARE(result.headerRegions[3].m_startPos, 18);
+  QCOMPARE(result.headerRegions[3].m_endPos, 25);
+
+  QCOMPARE(result.headerRegions[4].m_startPos, 26);
+  QCOMPARE(result.headerRegions[4].m_endPos, 34);
+
+  QCOMPARE(result.headerRegions[5].m_startPos, 35);
+  QCOMPARE(result.headerRegions[5].m_endPos, 44);
+}
+
+void TestMarkdownParser::testBlockquotes() {
+  const QString input = QStringLiteral("> quoted text\n> more quoted\n");
+  auto result = parse(input);
+
+  // Walker produces 1 HLUnit per block line for blockquote (2 lines = 2 units).
+  QCOMPARE(countElements(result, HLT_BLOCKQUOTE), 2);
+
+  auto elems = findElements(result, HLT_BLOCKQUOTE, input);
+  QVERIFY(!elems.isEmpty());
+  // Sort by position — first element starts at 0.
+  std::sort(elems.begin(), elems.end());
+  QCOMPARE((int)elems[0].first, 0);
+  QVERIFY((int)elems[0].second > 0);
+}
+
+void TestMarkdownParser::testBlockquoteNestingDepth() {
+  // Pins the contract the Enter continuation relies on: the number of
+  // STYLE_BLOCKQUOTE units on a block equals its quote nesting depth.
+  const QString input = QStringLiteral("> a\n\n> > b\n");
+  auto result = parse(input);
+
+  auto quoteUnits = [&result](int p_blockNumber) {
+    int count = 0;
+    for (const auto &unit : result.blocksHighlights.at(p_blockNumber)) {
+      if ((int)unit.styleIndex == HLT_BLOCKQUOTE) {
+        ++count;
+      }
+    }
+    return count;
+  };
+
+  QVERIFY(result.blocksHighlights.size() >= 3);
+  QCOMPARE(quoteUnits(0), 1);
+  QCOMPARE(quoteUnits(2), 2);
+}
+
+void TestMarkdownParser::testHorizontalRules() {
+  // Use *** instead of --- to avoid cmark frontmatter extension consuming it.
+  const QString input = QStringLiteral("***\n");
+  auto result = parse(input);
+
+  QCOMPARE(countElements(result, HLT_HRULE), 1);
+
+  QCOMPARE(result.hruleRegions.size(), 1);
+  QCOMPARE(result.hruleRegions[0].m_startPos, 0);
+  QCOMPARE(result.hruleRegions[0].m_endPos, 3);
+}
+
+void TestMarkdownParser::testFencedCodeBlocks() {
+  const QString input = QStringLiteral("```cpp\ncode here\n```\n");
+  auto result = parse(input);
+
+  // Walker produces 1 HLUnit per block line (3 lines = 3 units). Use region for logical count.
+  QCOMPARE(countElements(result, HLT_FENCEDCODEBLOCK), 3);
+
+  QCOMPARE(result.codeBlockRegions.size(), 1);
+  auto it = result.codeBlockRegions.constBegin();
+  QCOMPARE(it.value().m_startPos, 0);
+  QCOMPARE(it.value().m_endPos, 20);
+
+  const QString nestedInput =
+      QStringLiteral("1. Nested code block\n\n    ```cpp\n    code here\n    ```\n2. List item\n");
+  auto nestedResult = parse(nestedInput);
+
+  QCOMPARE(nestedResult.codeBlockRegions.size(), 1);
+  const auto &openingFenceHighlights = nestedResult.blocksHighlights.at(2);
+  const auto openingFence = std::find_if(
+      openingFenceHighlights.cbegin(), openingFenceHighlights.cend(),
+      [](const vte::md::HLUnit &p_unit) { return p_unit.styleIndex == HLT_FENCEDCODEBLOCK; });
+  QVERIFY(openingFence != openingFenceHighlights.cend());
+  // The list indentation is intentionally outside the AST range and must be formatted by the
+  // highlighter's second pass.
+  QCOMPARE(openingFence->start, 4UL);
+}
+
+void TestMarkdownParser::testFencedCodeBlockIndentationFormat() {
+  const QString themeJson = QStringLiteral(R"({
+    "metadata": {"type": "vtextedit", "name": "FencedCodeTest"},
+    "editor": {"font-family": "Arial", "font-size": 11},
+    "markdown-syntax-styles": {
+      "FENCEDCODEBLOCK": {
+        "font-family": "Courier New",
+        "font-size": 19,
+        "background-color": "#123456"
+      }
+    }
+  })");
+  auto theme = vte::Theme::createThemeFromContent(themeJson);
+  QVERIFY(!theme.isNull());
+
+  auto textConfig = QSharedPointer<vte::TextEditorConfig>::create();
+  textConfig->m_theme = theme;
+  auto markdownConfig = QSharedPointer<vte::MarkdownEditorConfig>::create(textConfig);
+  markdownConfig->m_inplacePreviewSources = vte::MarkdownEditorConfig::NoInplacePreview;
+  auto parameters = QSharedPointer<vte::TextEditorParameters>::create();
+  vte::VMarkdownEditor editor(markdownConfig, parameters);
+  auto highlighter = editor.getHighlighter();
+  QVERIFY(highlighter);
+
+  QSignalSpy completed(highlighter, &vte::MarkdownHighlighter::highlightCompleted);
+  editor.setText(
+      QStringLiteral("1. Nested code block\n\n    ```cpp\n    code here\n    ```\n2. List item\n"));
+  completed.clear();
+  highlighter->updateHighlight();
+  QTRY_VERIFY(completed.count() > 0);
+
+  const QTextBlock openingFence = editor.document()->findBlockByNumber(2);
+  QCOMPARE(openingFence.userState(),
+           static_cast<int>(vte::md::HighlightBlockState::CodeBlockStart));
+  const auto expected = highlighter->codeBlockStyle();
+  const auto indentationFormat = formatAt(openingFence, 0);
+  const auto lastIndentationFormat = formatAt(openingFence, 3);
+  const auto fenceFormat = formatAt(openingFence, 4);
+  QCOMPARE(indentationFormat.fontPointSize(), expected.fontPointSize());
+  QCOMPARE(indentationFormat.background().color(), expected.background().color());
+  QCOMPARE(lastIndentationFormat.fontPointSize(), expected.fontPointSize());
+  QCOMPARE(lastIndentationFormat.background().color(), expected.background().color());
+  QCOMPARE(fenceFormat.fontPointSize(), expected.fontPointSize());
+  QCOMPARE(fenceFormat.background().color(), expected.background().color());
+
+  const QTextBlock nextListItem = editor.document()->findBlockByNumber(5);
+  QVERIFY(formatAt(nextListItem, 0).background().color() != expected.background().color());
+}
+
+// HTML gets the same monospace treatment as code, both inline and as a block -
+// and the block's continuation lines must not drag that monospace over their
+// leading indentation, the way a table's and a display formula's already must
+// not.
+void TestMarkdownParser::testHTMLNodesAreStyledLikeCode() {
+  // A distinguishing font SIZE and background rather than the family: the
+  // family is resolved against QFontDatabase at parse time and a headless box
+  // need not have any particular one.
+  const QString themeJson = QStringLiteral(R"({
+    "metadata": {"type": "vtextedit", "name": "HtmlStyleTest"},
+    "editor": {"font-family": "Arial", "font-size": 11},
+    "markdown-syntax-styles": {
+      "HTML": {
+        "font-family": "Courier New",
+        "font-size": 19,
+        "background-color": "#123456"
+      },
+      "HTMLBLOCK": {
+        "font-family": "Courier New",
+        "font-size": 21,
+        "background-color": "#654321"
+      }
+    }
+  })");
+  auto theme = vte::Theme::createThemeFromContent(themeJson);
+  QVERIFY(!theme.isNull());
+
+  const auto styles = theme->markdownSyntaxStyles();
+  QVERIFY(styles);
+  // The theme keys already existed; what is new is that they carry a family.
+  QCOMPARE(styles->at(vte::Theme::HTML).m_fontFamilies, QStringList()
+                                                            << QStringLiteral("Courier New"));
+  QCOMPARE(styles->at(vte::Theme::HTMLBLOCK).m_fontFamilies, QStringList()
+                                                                 << QStringLiteral("Courier New"));
+
+  auto textConfig = QSharedPointer<vte::TextEditorConfig>::create();
+  textConfig->m_theme = theme;
+  auto markdownConfig = QSharedPointer<vte::MarkdownEditorConfig>::create(textConfig);
+  markdownConfig->m_inplacePreviewSources = vte::MarkdownEditorConfig::NoInplacePreview;
+  auto parameters = QSharedPointer<vte::TextEditorParameters>::create();
+  vte::VMarkdownEditor editor(markdownConfig, parameters);
+  auto highlighter = editor.getHighlighter();
+  QVERIFY(highlighter);
+
+  QSignalSpy completed(highlighter, &vte::MarkdownHighlighter::highlightCompleted);
+  editor.setText(QStringLiteral("a <b>c</b> d\n"
+                                "\n"
+                                "1. item\n"
+                                "\n"
+                                "    <div>\n"
+                                "    inner\n"
+                                "    </div>\n"));
+  completed.clear();
+  highlighter->updateHighlight();
+  QTRY_VERIFY(completed.count() > 0);
+
+  // Inline: the tags are monospace, the prose around them is not.
+  const QTextBlock inlineBlock = editor.document()->findBlockByNumber(0);
+  QCOMPARE(formatAt(inlineBlock, 2).fontPointSize(), 19.0);
+  QCOMPARE(formatAt(inlineBlock, 2).background().color(), QColor(QStringLiteral("#123456")));
+  QVERIFY(formatAt(inlineBlock, 0).background().color() != QColor(QStringLiteral("#123456")));
+  // "c" between the tags is content, not markup.
+  QVERIFY(formatAt(inlineBlock, 5).background().color() != QColor(QStringLiteral("#123456")));
+
+  // Block: styled from the first non-space character of its opening line.
+  const QTextBlock open = editor.document()->findBlockByNumber(4);
+  QCOMPARE(formatAt(open, 4).fontPointSize(), 21.0);
+  QCOMPARE(formatAt(open, 4).background().color(), QColor(QStringLiteral("#654321")));
+
+  // The CONTINUATION lines keep their list indentation out of it. Monospace
+  // whitespace is wider than body-font whitespace, so styling it would step
+  // the block sideways relative to the list item it belongs to.
+  const QTextBlock inner = editor.document()->findBlockByNumber(5);
+  QVERIFY2(formatAt(inner, 0).background().color() != QColor(QStringLiteral("#654321")),
+           "the block style bled into the continuation line's indentation");
+  QCOMPARE(formatAt(inner, 4).background().color(), QColor(QStringLiteral("#654321")));
+}
+
+void TestMarkdownParser::testFontColorHighlighting_data() {
+  QTest::addColumn<QString>("source");
+  QTest::addColumn<QStringList>("tokens");
+  QTest::addColumn<QStringList>("colors");
+
+  QTest::newRow("attribute-syntax")
+      << QStringLiteral("<font color=red>named</font> "
+                        "<FONT COLOR = '&#35;008000' title='a>b'>hexadecimal</FONT> "
+                        "<font color=\"#00f\">shorthex</font> outside")
+      << QStringList({"named", "hexadecimal", "shorthex", "outside", "<font", "</FONT>"})
+      << QStringList({"red", "#008000", "blue", "", "", ""});
+  QTest::newRow("nested-inheritance")
+      << QStringLiteral("<font color=red>outer <font color=blue>inner</font> restored "
+                        "<font color=invalid>inherited</font> "
+                        "<font size=4>unspecified</font></font> outside")
+      << QStringList({"outer", "inner", "restored", "inherited", "unspecified", "outside"})
+      << QStringList({"red", "blue", "red", "red", "red", ""});
+  QTest::newRow("multiline-and-unicode")
+      << QString::fromUtf8("\xF0\x9F\x98\x80 <font color=red>first\n"
+                           "middle\nsecond</font> outside\n\n"
+                           "<font color=blue>\nblockcontent\n</font>\n\noutsideblock")
+      << QStringList({"first", "middle", "second", "outside", "blockcontent", "outsideblock"})
+      << QStringList({"red", "red", "red", "", "blue", ""});
+  QTest::newRow("lazy-quote-continuation")
+      << QStringLiteral("> lead <font color=red>first\n"
+                        "lazy <font color=blue>inner</font> restored</font> outside")
+      << QStringList({"first", "lazy", "inner", "restored", "outside"})
+      << QStringList({"red", "red", "blue", "red", ""});
+  QTest::newRow("code-is-literal")
+      << QStringLiteral("`<font color=red>inlinecode</font>`\n\n"
+                        "```html\n<font color=red>fencedcode</font>\n```\n\n"
+                        "    <font color=red>indentedcode</font>\n\n"
+                        "<font color=red>prose `codeinside` aftercode</font>")
+      << QStringList(
+             {"inlinecode", "fencedcode", "indentedcode", "prose", "codeinside", "aftercode"})
+      << QStringList({"", "", "", "red", "", "red"});
+  QTest::newRow("html-is-not-source-code")
+      << QStringLiteral("<!-- <font color=red>comment</font> -->\n\n"
+                        "<script>let s = '<font color=red>scripttext</font>';</script>\n\n"
+                        "prefix <textarea><font color=red>rawtext</font></textarea>\n\n"
+                        "<div title='<font color=red>attribute</font>'>ordinary</div>\n\n"
+                        "<font color=red>before <b>boldhtml</b> "
+                        "<!-- hiddencomment --> after</font>")
+      << QStringList({"comment", "scripttext", "rawtext", "attribute", "ordinary", "before",
+                      "boldhtml", "<b>", "hiddencomment", "after"})
+      << QStringList({"", "", "", "", "", "red", "red", "", "", "red"});
+  QTest::newRow("invalid-and-unmatched")
+      << QStringLiteral("<font color=invalid>invalidcolor</font> "
+                        "<font>missingcolor</font> "
+                        "&lt;font color=red&gt;escaped&lt;/font&gt;\n\n"
+                        "<font color=red>unfinished\n\ntrailing")
+      << QStringList({"invalidcolor", "missingcolor", "escaped", "unfinished", "trailing"})
+      << QStringList({"", "", "", "", ""});
+}
+
+void TestMarkdownParser::testFontColorHighlighting() {
+  QFETCH(QString, source);
+  QFETCH(QStringList, tokens);
+  QFETCH(QStringList, colors);
+  auto textConfig = QSharedPointer<vte::TextEditorConfig>::create();
+  auto config = QSharedPointer<vte::MarkdownEditorConfig>::create(textConfig);
+  config->m_inplacePreviewSources = vte::MarkdownEditorConfig::NoInplacePreview;
+  auto parameters = QSharedPointer<vte::TextEditorParameters>::create();
+  vte::VMarkdownEditor editor(config, parameters);
+  QSignalSpy completed(editor.getHighlighter(), &vte::MarkdownHighlighter::highlightCompleted);
+  editor.setText(source);
+  editor.getHighlighter()->updateHighlight();
+  QTRY_VERIFY(completed.count() > 0);
+
+  for (int i = 0; i < tokens.size(); ++i) {
+    const int start = source.indexOf(tokens[i]);
+    QVERIFY(start >= 0);
+    for (int pos = start; pos < start + tokens[i].size(); ++pos) {
+      const auto block = editor.document()->findBlock(pos);
+      const auto actual = formatAt(block, pos - block.position()).foreground();
+      if (colors[i].isEmpty()) {
+        QVERIFY2(actual.style() == Qt::NoBrush ||
+                     (actual.color() != QColor(Qt::red) && actual.color() != QColor(Qt::blue) &&
+                      actual.color() != QColor(QStringLiteral("#008000"))),
+                 qPrintable(tokens[i]));
+      } else {
+        QCOMPARE(actual.color(), QColor(colors[i]));
+      }
+    }
+  }
+  QCOMPARE(editor.getText(), source);
+}
+
+void TestMarkdownParser::testFontColorPreservesMarkdownAndUpdates() {
+  auto theme = vte::Theme::createThemeFromContent(QStringLiteral(R"({
+    "metadata": {"type": "vtextedit", "name": "FontColorTest"},
+    "markdown-syntax-styles": {
+      "STRONG": {"bold": true, "background-color": "#123456"},
+      "EMPH": {"italic": true}
+    }
+  })"));
+  QVERIFY(theme);
+  auto textConfig = QSharedPointer<vte::TextEditorConfig>::create();
+  textConfig->m_theme = theme;
+  auto config = QSharedPointer<vte::MarkdownEditorConfig>::create(textConfig);
+  config->m_inplacePreviewSources = vte::MarkdownEditorConfig::NoInplacePreview;
+  auto parameters = QSharedPointer<vte::TextEditorParameters>::create();
+  vte::VMarkdownEditor editor(config, parameters);
+  const QString source = QStringLiteral("**bold <font color=red>colored** plain *italic*"
+                                        "</font> outside");
+  QSignalSpy completed(editor.getHighlighter(), &vte::MarkdownHighlighter::highlightCompleted);
+  editor.setText(source);
+  editor.getHighlighter()->updateHighlight();
+  QTRY_VERIFY(completed.count() > 0);
+  auto at = [&editor](const QString &p_token) {
+    const int pos = editor.getText().indexOf(p_token);
+    const auto block = editor.document()->findBlock(pos);
+    return formatAt(block, pos - block.position());
+  };
+  QCOMPARE(at(QStringLiteral("colored")).foreground().color(), QColor(Qt::red));
+  QCOMPARE(at(QStringLiteral("colored")).fontWeight(), int(QFont::Bold));
+  QCOMPARE(at(QStringLiteral("colored")).background().color(), QColor(QStringLiteral("#123456")));
+  QVERIFY(at(QStringLiteral("plain")).fontWeight() != QFont::Bold);
+  QVERIFY(at(QStringLiteral("plain")).background().style() == Qt::NoBrush);
+  QCOMPARE(at(QStringLiteral("italic")).foreground().color(), QColor(Qt::red));
+  QVERIFY(at(QStringLiteral("italic")).fontItalic());
+  QVERIFY(!at(QStringLiteral("outside")).fontItalic());
+
+  // Same-length attribute edits must invalidate the cached highlights, not just ranges.
+  QTextCursor cursor(editor.document());
+  cursor.setPosition(source.indexOf(QStringLiteral("red")));
+  cursor.setPosition(cursor.position() + 3, QTextCursor::KeepAnchor);
+  cursor.insertText(QStringLiteral("tan"));
+  QTRY_COMPARE(at(QStringLiteral("colored")).foreground().color(), QColor(QStringLiteral("tan")));
+  QCOMPARE(at(QStringLiteral("colored")).fontWeight(), int(QFont::Bold));
+  editor.getTextEdit()->undo();
+  QTRY_COMPARE(at(QStringLiteral("colored")).foreground().color(), QColor(Qt::red));
+
+  cursor.setPosition(source.indexOf(QStringLiteral("</font>")));
+  cursor.setPosition(cursor.position() + 7, QTextCursor::KeepAnchor);
+  cursor.removeSelectedText();
+  QTRY_VERIFY(at(QStringLiteral("colored")).foreground().color() != QColor(Qt::red));
+  QCOMPARE(at(QStringLiteral("colored")).fontWeight(), int(QFont::Bold));
+}
+
+void TestMarkdownParser::testFontColorUpdatesUneditedContinuation() {
+  auto textConfig = QSharedPointer<vte::TextEditorConfig>::create();
+  auto config = QSharedPointer<vte::MarkdownEditorConfig>::create(textConfig);
+  config->m_inplacePreviewSources = vte::MarkdownEditorConfig::NoInplacePreview;
+  auto parameters = QSharedPointer<vte::TextEditorParameters>::create();
+  vte::VMarkdownEditor editor(config, parameters);
+  // Exceed the bounded fast-parse window: only a full result can repaint the
+  // unedited continuation blocks whose ordinary highlights remain identical.
+  const QString source = QStringLiteral("<font color=red>first\n") +
+                         QStringLiteral("continuation\n").repeated(20) +
+                         QStringLiteral("last</font> outside");
+  editor.setText(source);
+  editor.getHighlighter()->updateHighlight();
+  const QTextBlock middle = editor.document()->findBlockByNumber(10);
+  auto color = [&middle]() { return formatAt(middle, 0).foreground().color(); };
+  QTRY_COMPARE(color(), QColor(Qt::red));
+  const int revision = middle.revision();
+
+  QTextCursor cursor(editor.document());
+  cursor.setPosition(source.indexOf(QStringLiteral("red")));
+  cursor.setPosition(cursor.position() + 3, QTextCursor::KeepAnchor);
+  cursor.insertText(QStringLiteral("tan"));
+  QTRY_COMPARE(color(), QColor(QStringLiteral("tan")));
+  QCOMPARE(middle.revision(), revision);
+  editor.getTextEdit()->undo();
+  QTRY_COMPARE(color(), QColor(Qt::red));
+
+  // Removing the closing tag must clear overlays from the same unchanged blocks.
+  cursor.setPosition(source.indexOf(QStringLiteral("</font>")));
+  cursor.setPosition(cursor.position() + 7, QTextCursor::KeepAnchor);
+  cursor.removeSelectedText();
+  QTRY_VERIFY(color() != QColor(Qt::red));
+  QCOMPARE(middle.revision(), revision);
+}
+
+void TestMarkdownParser::testIndentedCodeBlocks() {
+  const QString input = QStringLiteral("    indented code\n");
+  auto result = parse(input);
+
+  QCOMPARE(countElements(result, HLT_VERBATIM), 1);
+
+  auto elems = findElements(result, HLT_VERBATIM, input);
+  QVERIFY(!elems.isEmpty());
+  // cmark starts indented code block position at content (after indent).
+  QCOMPARE((int)elems[0].first, 4);
+  QVERIFY((int)elems[0].second > 4);
+}
+
+void TestMarkdownParser::testHTMLBlocks() {
+  const QString input = QStringLiteral("<div>\nhtml content\n</div>\n");
+  auto result = parse(input);
+
+  // Walker produces 1 HLUnit per block line (3 lines = 3 units).
+  QCOMPARE(countElements(result, HLT_HTMLBLOCK), 3);
+
+  auto elems = findElements(result, HLT_HTMLBLOCK, input);
+  QVERIFY(!elems.isEmpty());
+  QCOMPARE((int)elems[0].first, 0);
+  QVERIFY((int)elems[0].second > 0);
+}
+
+// A `<pre>`, `<script>`, `<textarea>` or `<style>` block is terminated by its
+// CLOSING TAG, and cmark reports end_line as the last line consumed BEFORE that
+// condition matched -- i.e. the line before `</pre>`. Highlighting from the raw
+// span therefore left the closing tag in the prose face while every other line
+// of the block was monospace. The corrected end comes from
+// resolveHtmlNodeSpan(), the same one extractHtmlNode() and the snapshot API
+// use, so the font and the element extraction cannot disagree.
+void TestMarkdownParser::testHtmlBlockClosingTagIsStyled() {
+  const QString input = QStringLiteral("<pre>\nhello\n</pre>\n");
+  auto result = parse(input);
+
+  auto elems = findElements(result, HLT_HTMLBLOCK, input);
+  QCOMPARE(elems.size(), 3);
+  std::sort(elems.begin(), elems.end());
+
+  // The last unit is the closing tag's own line, whole.
+  const int closingStart = input.indexOf(QStringLiteral("</pre>"));
+  QCOMPARE((int)elems[2].first, closingStart);
+  QCOMPARE((int)elems[2].second, closingStart + 6);
+}
+
+// Only the END is corrected. resolveHtmlNodeSpan() ignores columns and slices
+// whole LINES, which is right for a scanner reading source back but wrong for a
+// highlight: a container prefix belongs to the quote or the list item, and
+// painting it in the monospace face would step the marker sideways.
+void TestMarkdownParser::testHtmlBlockKeepsContainerPrefixUnstyled() {
+  const QString input = QStringLiteral("> <div>\n\n- <div>\n");
+  auto result = parse(input);
+
+  auto elems = findElements(result, HLT_HTMLBLOCK, input);
+  QCOMPARE(elems.size(), 2);
+  std::sort(elems.begin(), elems.end());
+
+  QCOMPARE((int)elems[0].first, input.indexOf(QStringLiteral("<div>")));
+  QCOMPARE((int)elems[1].first, input.lastIndexOf(QStringLiteral("<div>")));
+}
+
+void TestMarkdownParser::testLists() {
+  const QString input = QStringLiteral("- item 1\n- item 2\n\n1. first\n2. second\n");
+  auto result = parse(input);
+
+  QCOMPARE(countElements(result, HLT_LIST_BULLET), 2);
+  QCOMPARE(countElements(result, HLT_LIST_ENUMERATOR), 2);
+
+  // Find bullet elements sorted by position.
+  auto bullets = findElements(result, HLT_LIST_BULLET, input);
+  QCOMPARE(bullets.size(), 2);
+  // Sort by position ascending.
+  std::sort(bullets.begin(), bullets.end());
+  QCOMPARE((int)bullets[0].first, 0);
+  QCOMPARE((int)bullets[0].second, 1);
+  QCOMPARE((int)bullets[1].first, 9);
+  QCOMPARE((int)bullets[1].second, 10);
+
+  // Find enumerator elements sorted by position.
+  auto enums = findElements(result, HLT_LIST_ENUMERATOR, input);
+  QCOMPARE(enums.size(), 2);
+  std::sort(enums.begin(), enums.end());
+  QCOMPARE((int)enums[0].first, 19);
+  QCOMPARE((int)enums[0].second, 21);
+  QCOMPARE((int)enums[1].first, 28);
+  QCOMPARE((int)enums[1].second, 30);
+
+  // Authored marker width is independent of the list's start plus ordinal.
+  const QString irregular = QStringLiteral("98. first\n1. repeated\n0007. padded\n1. again\n\n"
+                                           "0) zero\n999999999) limit\n1) repeated\n");
+  auto irregularEnums = findElements(parse(irregular), HLT_LIST_ENUMERATOR, irregular);
+  std::sort(irregularEnums.begin(), irregularEnums.end());
+  const QStringList markers{QStringLiteral("98."),   QStringLiteral("1."),
+                            QStringLiteral("0007."), QStringLiteral("1."),
+                            QStringLiteral("0)"),    QStringLiteral("999999999)"),
+                            QStringLiteral("1)")};
+  QCOMPARE(irregularEnums.size(), markers.size());
+  int searchFrom = 0;
+  for (int i = 0; i < markers.size(); ++i) {
+    const int start = irregular.indexOf(markers[i], searchFrom);
+    QCOMPARE((int)irregularEnums[i].first, start);
+    QCOMPARE((int)irregularEnums[i].second, start + markers[i].size());
+    searchFrom = start + markers[i].size();
+  }
+}
+
+void TestMarkdownParser::testListStructureSourceSpans() {
+  using namespace vte::md;
+
+  struct Item {
+    int block;
+    int column;
+    const char *marker;
+    const char *content;
+    const char *prefix;
+    int number = 0;
+    bool task = false;
+    bool empty = false;
+  };
+  struct Case {
+    const char *markdown;
+    QVector<Item> items;
+  };
+  const QVector<Case> cases{
+      {"98. first\n1. repeated\n0007. padded\n1. again\n",
+       {{0, 0, "98.", "first", "", 98},
+        {1, 0, "1.", "repeated", "", 1},
+        {2, 0, "0007.", "padded", "", 7},
+        {3, 0, "1.", "again", "", 1}}},
+      {"0) zero\n999999999) limit\n",
+       {{0, 0, "0)", "zero", "", 0}, {1, 0, "999999999)", "limit", "", 999999999}}},
+      {"> - [x] done\n>   + [ ] pending\n> - [X] literal\n",
+       {{0, 2, "-", "done", "> ", 0, true},
+        {1, 4, "+", "pending", ">   ", 0, true},
+        {2, 2, "-", "[X] literal", "> "}}},
+      // ITEM-enter order, including two markers on one line, not all outer siblings first.
+      {"- - a\n  - b\n- c\n",
+       {{0, 0, "-", "- a", ""},
+        {0, 2, "-", "a", "  "},
+        {1, 2, "-", "b", "  "},
+        {2, 0, "-", "c", ""}}},
+      {"- > - deep\n", {{0, 0, "-", "> - deep", ""}, {0, 4, "-", "deep", "  > "}}},
+      // Keep untouched tabs; replace the same-line parent opener with indentation.
+      {"-\t- one\n\t- two\n",
+       {{0, 0, "-", "- one", ""}, {0, 2, "-", "one", " \t"}, {1, 1, "-", "two", "\t"}}},
+      // The quote consumes only one column of this tab, not the whole byte.
+      {">\t- tabbed\n", {{0, 2, "-", "tabbed", ">\t"}}},
+      {"\xF0\x9F\x98\x80 preface\n\n- \xF0\x9F\x98\x80 body\n- after\n",
+       {{2, 0, "-", "\xF0\x9F\x98\x80 body", ""}, {3, 0, "-", "after", ""}}},
+      // A marker-only parent with a child must not be offered as an empty-item exit.
+      {"-\n  - child\n\n- [ ] \t\n",
+       {{0, 0, "-", "", ""}, {1, 2, "-", "child", "  "}, {3, 0, "-", "", "", 0, true, true}}},
+      {"  - \t\n", {{0, 2, "-", "", "  ", 0, false, true}}},
+  };
+
+  for (const auto &c : cases) {
+    const QString input = QString::fromUtf8(c.markdown);
+    const auto structure = parse(input).listStructure;
+    QVERIFY2(structure.m_valid, c.markdown);
+    QCOMPARE(structure.m_items.size(), c.items.size());
+    const QStringList lines = input.split(QLatin1Char('\n'));
+    for (int i = 0; i < c.items.size(); ++i) {
+      const auto &expected = c.items[i];
+      const auto &item = structure.m_items[i];
+      int blockStart = 0;
+      for (int block = 0; block < expected.block; ++block) {
+        blockStart += lines[block].size() + 1;
+      }
+      const QString marker = QString::fromUtf8(expected.marker);
+      const QString content = QString::fromUtf8(expected.content);
+      QVERIFY2(item.m_sourceValid, c.markdown);
+      QCOMPARE(item.m_startBlock, expected.block);
+      QCOMPARE(item.m_markerStart, blockStart + expected.column);
+      QCOMPARE(input.mid(item.m_markerStart, item.m_markerEnd - item.m_markerStart), marker);
+      QCOMPARE(item.m_contentStart, blockStart + lines[expected.block].size() - content.size());
+      QCOMPARE(item.m_marker, marker.back());
+      QCOMPARE(item.m_sourceNumber, expected.number);
+      QCOMPARE(item.m_task, expected.task);
+      QCOMPARE(item.m_empty, expected.empty);
+      QString prefix;
+      QVERIFY2(listContinuationPrefix(structure, i, prefix), c.markdown);
+      QCOMPARE(prefix, QString::fromUtf8(expected.prefix));
+    }
+  }
+
+  // Only direct-item paragraphs offer markerless continuation: not a nested quote or code.
+  const QString paragraphs = QStringLiteral("> - head\nlazy\n>   indented\n>\n>   > quote\n>\n"
+                                            ">   ```\n>   - code\n>   ```\n>\n"
+                                            ">   - child\n>     continuation\n> - tail\n");
+  const auto structure = parse(paragraphs).listStructure;
+  QVERIFY(structure.m_valid);
+  QCOMPARE(structure.m_items.size(), 3);
+  QCOMPARE(structure.m_lists.size(), 2);
+  QCOMPARE(structure.m_lists[0].m_items, QVector<int>({0, 2}));
+  QCOMPARE(structure.m_lists[1].m_items, QVector<int>({1}));
+  QCOMPARE(structure.m_items[0].m_endBlock, 11);
+  QCOMPARE(structure.m_paragraphs.size(), 3);
+  const QVector<QPair<int, int>> ranges{{0, 2}, {10, 11}, {12, 12}};
+  const QStringList prefixes{QStringLiteral("> "), QStringLiteral(">   "), QStringLiteral("> ")};
+  for (int i = 0; i < ranges.size(); ++i) {
+    const auto &paragraph = structure.m_paragraphs[i];
+    QCOMPARE(paragraph.m_startBlock, ranges[i].first);
+    QCOMPARE(paragraph.m_endBlock, ranges[i].second);
+    QString prefix;
+    QVERIFY(listContinuationPrefix(structure, paragraph.m_item, prefix));
+    QCOMPARE(prefix, prefixes[i]);
+  }
+
+  // The standalone worker projection uses document UTF-16 coordinates, including slices.
+  const QString preceding = QString::fromUtf8("\xF0\x9F\x98\x80 preface\n\n");
+  const QString slice = QStringLiteral("  07) value\n");
+  const QString document = preceding + slice;
+  const auto sliced = parseListStructure(slice.toUtf8(), preceding.size(), 2);
+  QVERIFY(sliced.m_valid);
+  QCOMPARE(sliced.m_items.size(), 1);
+  const auto &item = sliced.m_items.first();
+  QVERIFY(item.m_sourceValid);
+  QCOMPARE(item.m_startBlock, 2);
+  QCOMPARE(item.m_markerStart, preceding.size() + 2);
+  QCOMPARE(document.mid(item.m_markerStart, item.m_markerEnd - item.m_markerStart),
+           QStringLiteral("07)"));
+  QCOMPARE(document.mid(item.m_contentStart, 5), QStringLiteral("value"));
+  QString prefix;
+  QVERIFY(listContinuationPrefix(sliced, 0, prefix));
+  QCOMPARE(prefix, QStringLiteral("  "));
+  QVERIFY(!listContinuationPrefix(sliced, -1, prefix));
+  QVERIFY(!listContinuationPrefix(sliced, sliced.m_items.size(), prefix));
+
+  const QVector<const char *> nonLists{
+      "",
+      "ordinary prose\n",
+      "```\n1. fenced\n- marker\n```\n",
+      "    1. indented\n    - marker\n",
+      "\t- code\n",
+      "<div>\n1. html\n- marker\n</div>\n",
+      "- - -\n",
+      "***\n",
+      "1000000000. too wide\n",
+      "\xD9\xA1. Unicode digit\n",
+      "1.no gap\n",
+      "-no gap\n",
+  };
+  for (const auto *input : nonLists) {
+    const auto empty = parseListStructure(QByteArray(input));
+    QVERIFY2(empty.m_valid, input);
+    QVERIFY2(empty.m_lists.isEmpty(), input);
+    QVERIFY2(empty.m_items.isEmpty(), input);
+    QVERIFY2(empty.m_paragraphs.isEmpty(), input);
+  }
+
+  // The stale-line lexer is anchored and enforces the same ASCII/nine-digit boundary.
+  ListItemInfo marker;
+  const QString line = QStringLiteral("> 999999999) body");
+  QVERIFY(!scanListMarker(line, 0, marker));
+  QVERIFY(scanListMarker(line, 2, marker));
+  QCOMPARE(line.mid(marker.m_markerStart, marker.m_markerEnd - marker.m_markerStart),
+           QStringLiteral("999999999)"));
+  QCOMPARE(marker.m_sourceNumber, 999999999);
+  QCOMPARE(line.mid(marker.m_contentStart), QStringLiteral("body"));
+  for (const auto *invalid : {"1000000000. body", "\xD9\xA1. body", "1.no gap", "-no gap"}) {
+    QVERIFY2(!scanListMarker(QString::fromUtf8(invalid), 0, marker), invalid);
+  }
+  QVERIFY(scanListMarker(QStringLiteral("9)"), 0, marker));
+  QCOMPARE(marker.m_contentStart, 2);
+  QVERIFY(marker.m_empty);
+}
+
+// Compare cmark's public block tree and rendering, not a second source-list parser.
+// Parent indexes plus source lines distinguish the owner of every original block;
+// columns intentionally change when marker widths and container indentation change.
+struct ListNumberingObservation {
+  bool m_valid = false;
+  QByteArray m_html;
+  QVector<QVector<int>> m_blocks;
+};
+
+static ListNumberingObservation observeListNumbering(const QString &p_source,
+                                                     const QHash<int, int> &p_starts = {}) {
+  ListNumberingObservation result;
+  const QByteArray utf8 = p_source.toUtf8();
+  cmark_node *document = cmark_parse_document(utf8.constData(), utf8.size(), CMARK_OPT_DEFAULT);
+  if (!document) {
+    return result;
+  }
+
+  bool valid = true;
+  int listIndex = 0;
+  int changedStarts = 0;
+  QHash<cmark_node *, int> blockIndexes;
+  cmark_iter *iter = cmark_iter_new(document);
+  cmark_event_type event;
+  while ((event = cmark_iter_next(iter)) != CMARK_EVENT_DONE) {
+    cmark_node *node = cmark_iter_get_node(iter);
+    if (event != CMARK_EVENT_ENTER || !cmark_node_is_block(node)) {
+      continue;
+    }
+    const auto type = cmark_node_get_type(node);
+    if (type == CMARK_NODE_LIST) {
+      const auto start = p_starts.constFind(listIndex++);
+      if (start != p_starts.constEnd()) {
+        valid = cmark_node_set_list_start(node, start.value()) && valid;
+        ++changedStarts;
+      }
+    }
+    QVector<int> block{int(type), blockIndexes.value(cmark_node_parent(node), -1),
+                       cmark_node_get_start_line(node), cmark_node_get_end_line(node)};
+    if (type == CMARK_NODE_LIST) {
+      block.append(int(cmark_node_get_list_type(node)));
+      block.append(int(cmark_node_get_list_delim(node)));
+      block.append(cmark_node_get_list_start(node));
+      block.append(cmark_node_get_list_tight(node));
+    }
+    blockIndexes.insert(node, result.m_blocks.size());
+    result.m_blocks.append(block);
+  }
+  cmark_iter_free(iter);
+  char *html = cmark_render_html(document, CMARK_OPT_UNSAFE);
+  if (html) {
+    result.m_html = QByteArray(html);
+    cmark_get_default_mem_allocator()->free(html);
+  } else {
+    valid = false;
+  }
+  cmark_node_free(document);
+  result.m_valid = valid && changedStarts == p_starts.size();
+  return result;
+}
+
+// A consumer applies the immutable, source-ordered replacements in one forward pass.
+static bool applyListNumberEdits(const QString &p_source,
+                                 const QVector<vte::md::ListSourceEdit> &p_edits,
+                                 QString &p_output) {
+  p_output.clear();
+  int cursor = 0;
+  for (const auto &edit : p_edits) {
+    if (edit.m_start < cursor || edit.m_end < edit.m_start || edit.m_end > p_source.size() ||
+        p_source.mid(edit.m_start, edit.m_end - edit.m_start) != edit.m_before) {
+      return false;
+    }
+    p_output += p_source.mid(cursor, edit.m_start - cursor);
+    p_output += edit.m_after;
+    cursor = edit.m_end;
+  }
+  p_output += p_source.mid(cursor);
+  return true;
+}
+
+void TestMarkdownParser::testListNumberEditsPreserveStructure() {
+  using namespace vte::md;
+
+  auto verify = [](const char *p_name, const QString &p_input, const QHash<int, int> &p_starts,
+                   const QString &p_expected, const QHash<int, int> &p_expectedStarts) {
+    const auto structure = parseListStructure(p_input.toUtf8());
+    QVERIFY2(structure.m_valid, p_name);
+    QVector<ListSourceEdit> edits;
+    ListStructure after;
+    QVERIFY2(buildListNumberEdits(p_input, structure, p_starts, edits, after), p_name);
+    QString output;
+    QVERIFY2(applyListNumberEdits(p_input, edits, output), p_name);
+    QCOMPARE(output, p_expected);
+    QCOMPARE(edits.isEmpty(), p_input == p_expected);
+
+    const auto intended = observeListNumbering(p_input, p_expectedStarts);
+    const auto actual = observeListNumbering(output);
+    QVERIFY2(intended.m_valid && actual.m_valid, p_name);
+    QCOMPARE(actual.m_html, intended.m_html);
+    QCOMPARE(actual.m_blocks, intended.m_blocks);
+
+    // The returned candidate must be safe to use as the next normalization baseline.
+    QVector<ListSourceEdit> repeatedEdits;
+    ListStructure repeatedAfter;
+    QVERIFY2(buildListNumberEdits(output, after, p_expectedStarts, repeatedEdits, repeatedAfter),
+             p_name);
+    QVERIFY2(repeatedEdits.isEmpty(), p_name);
+  };
+
+  struct Case {
+    const char *name;
+    const char *input;
+    const char *expected;
+    QHash<int, int> starts;
+  };
+  const QVector<Case> cases{
+      {"growth keeps paragraph, task child, blank lines and fenced bytes under the second item",
+       "9. first\n9. second \xF0\x9F\x98\x80\n   continued paragraph\nlazy continuation\n"
+       "   \t\n   - [x] child\n     child continuation\n\n   ```cpp\n"
+       "   auto text = \"9. code\";\t// unchanged\n   ```\n9. tail\n",
+       "9. first\n10. second \xF0\x9F\x98\x80\n    continued paragraph\nlazy continuation\n"
+       "   \t\n    - [x] child\n      child continuation\n\n    ```cpp\n"
+       "    auto text = \"9. code\";\t// unchanged\n    ```\n11. tail\n",
+       {{0, 9}}},
+      {"shrink keeps child and fenced code under their original item",
+       "10. first\n10. second\n    - child\n      continuation\n\n"
+       "    ```text\n    10. code\tstill code\n    ```\n",
+       "8. first\n9. second\n   - child\n     continuation\n\n"
+       "   ```text\n   10. code\tstill code\n   ```\n",
+       {{0, 8}}},
+      {"partial continuation tabs retain indentation relative to item content",
+       "9. first\n9. second\n\t- child\n\t  continuation\n",
+       "9. first\n10. second\n     - child\n       continuation\n",
+       {{0, 9}}},
+      {"opening tab absorbs digit growth without increasing required padding",
+       "9.\tfirst\n9.\tsecond\n\t- child\n\t  continuation\n",
+       "9.\tfirst\n10.\tsecond\n\t- child\n\t  continuation\n",
+       {{0, 9}}},
+      {"quote partial tab is expanded only where changed item indentation splits it",
+       ">\t9. first\n>\t9. second\n>\t   - child\n",
+       ">\t9. first\n>\t10. second\n>       - child\n",
+       {{0, 9}}},
+      {"quote markers and quote-only blank lines remain authored bytes",
+       "> 9) first\n> 9) second\n>    > quote\n>    > continuation\n>\n"
+       ">    - child\n>      body\n",
+       "> 9) first\n> 10) second\n>     > quote\n>     > continuation\n>\n"
+       ">     - child\n>       body\n",
+       {{0, 9}}},
+      {"simultaneous parent and child width growth composes on original coordinates",
+       "9. first\n9. parent\n\n   9. child first\n   9. child second\n"
+       "      - grandchild\n        continuation\n",
+       "9. first\n10. parent\n\n    9. child first\n    10. child second\n"
+       "        - grandchild\n          continuation\n",
+       {{0, 9}, {1, 9}}},
+      {"same-line nested openers compose both affected list widths",
+       "9. 9. child first\n   9. child second\n      - grandchild\n9. tail\n",
+       "10. 9. child first\n    10. child second\n        - grandchild\n11. tail\n",
+       {{0, 10}, {1, 9}}},
+      {"nested quote list preserves its own delimiter and child ownership",
+       "9. first\n9. parent\n   > 9) quoted first\n   > 9) quoted second\n"
+       "   >    - child\n",
+       "9. first\n10. parent\n    > 9) quoted first\n    > 10) quoted second\n"
+       "    >     - child\n",
+       {{0, 9}, {1, 9}}},
+      {"padded repeated zero starts normalize and retain task checkbox spelling",
+       "000) first\n000) second\n     - [ ] child\n000) third\n",
+       "0) first\n1) second\n   - [ ] child\n2) third\n",
+       {{0, 0}}},
+      {"UTF-16 edits normalize repeated ones without touching an independent list",
+       "\xF0\x9F\x98\x80 preface\n\n1. first\n1. second\n1. third\n\n---\n\n"
+       "7) separate\n07) remains padded\n",
+       "\xF0\x9F\x98\x80 preface\n\n1. first\n2. second\n3. third\n\n---\n\n"
+       "7) separate\n07) remains padded\n",
+       {{0, 1}}},
+      {"last representable ordinal succeeds without crossing the nine-digit bound",
+       "999999998. first\n1. last\n   - child\n",
+       "999999998. first\n999999999. last\n           - child\n",
+       {{0, 999999998}}},
+      {"already consecutive source is an unchanged no-op",
+       "0) first\n1) second\n   - child\n",
+       "0) first\n1) second\n   - child\n",
+       {{0, 0}}},
+  };
+  for (const auto &c : cases) {
+    verify(c.name, QString::fromUtf8(c.input), c.starts, QString::fromUtf8(c.expected), c.starts);
+  }
+
+  // Reject the connected parent/child unit before proposing any of its edits,
+  // but do not discard an independent list whose complete sequence is representable.
+  const QString connected = QStringLiteral("9. parent\n   1. child first\n   1. child second\n"
+                                           "9. tail\n\n---\n\n7) safe first\n7) safe second\n");
+  verify("overflowing child rejects its targeted parent, not the independent list", connected,
+         {{0, 9}, {1, 999999999}, {2, 7}},
+         QStringLiteral("9. parent\n   1. child first\n   1. child second\n"
+                        "9. tail\n\n---\n\n7) safe first\n8) safe second\n"),
+         {{2, 7}});
+  verify("overflowing parent rejects its targeted descendant, not the independent list", connected,
+         {{0, 999999999}, {1, 5}, {2, 7}},
+         QStringLiteral("9. parent\n   1. child first\n   1. child second\n"
+                        "9. tail\n\n---\n\n7) safe first\n8) safe second\n"),
+         {{2, 7}});
+
+  const auto verifyRefusal = [](const QString &p_input, const QHash<int, int> &p_starts) {
+    // Seed real successful outputs so failure must clear a previous usable proposal,
+    // not merely leave default-constructed containers empty.
+    const QString seed = QStringLiteral("1. seed first\n1. seed second\n");
+    QVector<ListSourceEdit> edits;
+    ListStructure after;
+    QVERIFY(buildListNumberEdits(seed, parseListStructure(seed.toUtf8()), {{0, 1}}, edits, after));
+    const auto structure = parseListStructure(p_input.toUtf8());
+    QVERIFY(structure.m_valid);
+    QVERIFY(!buildListNumberEdits(p_input, structure, p_starts, edits, after));
+    QVERIFY(edits.isEmpty());
+    QVERIFY(!after.m_valid);
+  };
+  verifyRefusal(QStringLiteral("999999999. first\n1. second\n"), {{0, 999999999}});
+
+  // Only 1 can interrupt this paragraph. Changing its start to 2 has valid source
+  // spans and arithmetic but would turn the item into prose. Semantic refusal must
+  // discard the whole batch, including the independently safe second list's edits.
+  verifyRefusal(QStringLiteral("paragraph\n1. interrupting item\n\n---\n\n"
+                               "9) safe first\n9) safe second\n"),
+                {{0, 2}, {1, 9}});
+}
+
+void TestMarkdownParser::testFrontmatter() {
+  const QString input = QStringLiteral("---\ntitle: test\n---\n\nContent\n");
+  auto result = parse(input);
+
+  // Walker produces 1 HLUnit per block line (3 lines = 3 units).
+  QCOMPARE(countElements(result, HLT_FRONTMATTER), 3);
+
+  auto elems = findElements(result, HLT_FRONTMATTER, input);
+  QVERIFY(!elems.isEmpty());
+  QCOMPARE((int)elems[0].first, 0);
+  QVERIFY((int)elems[0].second > 0);
+}
+
+void TestMarkdownParser::testDisplayFormula() {
+  const QString input = QStringLiteral("$$\nE = mc^2\n$$\n");
+  auto result = parse(input);
+
+  // Walker produces 1 HLUnit per block line (3 lines = 3 units). Use region for logical count.
+  QCOMPARE(countElements(result, HLT_DISPLAYFORMULA), 3);
+
+  QCOMPARE(result.displayFormulaRegions.size(), 1);
+  QCOMPARE(result.displayFormulaRegions[0].m_startPos, 0);
+  QCOMPARE(result.displayFormulaRegions[0].m_endPos, input.size() - 1);
+  QCOMPARE(result.mathElements.size(), 1);
+  const auto &math = result.mathElements.first();
+  QVERIFY(math.m_display);
+  QVERIFY(math.m_block);
+  QCOMPARE(math.m_startPos, 0);
+  QCOMPARE(math.m_endPos, input.size() - 1);
+  QCOMPARE(math.m_expression.trimmed(), QStringLiteral("E = mc^2"));
+  QVERIFY(result.inlineEquationRegions.isEmpty());
+}
+
+void TestMarkdownParser::testTables() {
+  const QString input = QStringLiteral("| h1 | h2 |\n|---|---|\n| a | b |\n");
+  auto result = parse(input);
+
+  // Walker produces 1 HLUnit per block line for TABLE (3 lines = 3 units).
+  // Use region count for logical element count.
+  QCOMPARE(countElements(result, HLT_TABLE), 3);
+  // TABLEHEADER is only the header row (1 line = 1 unit).
+  QCOMPARE(countElements(result, HLT_TABLEHEADER), 1);
+
+  QVERIFY(!result.tableRegions.isEmpty());
+  QCOMPARE(result.tableRegions[0].m_startPos, 0);
+  QVERIFY(result.tableRegions[0].m_endPos > 0);
+
+  QVERIFY(!result.tableHeaderRegions.isEmpty());
+  QCOMPARE(result.tableHeaderRegions[0].m_startPos, 0);
+  QVERIFY(result.tableHeaderRegions[0].m_endPos > 0);
+}
+
+// ============================================================
+// T6: Inline Element Tests
+// ============================================================
+
+void TestMarkdownParser::testEmphasis() {
+  const QString input = QStringLiteral("*emph*\n");
+  auto result = parse(input);
+
+  QCOMPARE(countElements(result, HLT_EMPH), 1);
+
+  auto elems = findElements(result, HLT_EMPH, input);
+  QVERIFY(!elems.isEmpty());
+  QCOMPARE((int)elems[0].first, 0);
+  QCOMPARE((int)elems[0].second, 6);
+}
+
+void TestMarkdownParser::testStrong() {
+  const QString input = QStringLiteral("**strong**\n");
+  auto result = parse(input);
+
+  QCOMPARE(countElements(result, HLT_STRONG), 1);
+
+  auto elems = findElements(result, HLT_STRONG, input);
+  QVERIFY(!elems.isEmpty());
+  QCOMPARE((int)elems[0].first, 0);
+  QCOMPARE((int)elems[0].second, 10);
+}
+
+void TestMarkdownParser::testInlineCode() {
+  const QString input = QStringLiteral("`code`\n");
+  auto result = parse(input);
+
+  QCOMPARE(countElements(result, HLT_CODE), 1);
+
+  auto elems = findElements(result, HLT_CODE, input);
+  QVERIFY(!elems.isEmpty());
+  QCOMPARE((int)elems[0].first, 0);
+  QCOMPARE((int)elems[0].second, 6);
+}
+
+void TestMarkdownParser::testLinks() {
+  const QString input = QStringLiteral("[text](url)\n");
+  auto result = parse(input);
+
+  QCOMPARE(countElements(result, HLT_LINK), 1);
+
+  auto elems = findElements(result, HLT_LINK, input);
+  QVERIFY(!elems.isEmpty());
+  QCOMPARE((int)elems[0].first, 0);
+  QCOMPARE((int)elems[0].second, 11);
+}
+
+void TestMarkdownParser::testAutoLinks() {
+  // URL auto link — cmark maps to LINK (not AUTO_LINK_URL). Count = 1.
+  {
+    const QString input = QStringLiteral("<http://example.com>\n");
+    auto result = parse(input);
+
+    QCOMPARE(countElements(result, HLT_AUTO_LINK_URL), 0);
+    QCOMPARE(countElements(result, HLT_LINK), 1);
+
+    auto elems = findElements(result, HLT_LINK, input);
+    QVERIFY(!elems.isEmpty());
+    QCOMPARE((int)elems[0].first, 0);
+    QCOMPARE((int)elems[0].second, 20);
+  }
+
+  // Email auto link — cmark produces 1 AUTO_LINK_EMAIL (pmh produced 2 duplicates).
+  {
+    const QString input = QStringLiteral("<user@example.com>\n");
+    auto result = parse(input);
+
+    QCOMPARE(countElements(result, HLT_AUTO_LINK_EMAIL), 1);
+
+    auto elems = findElements(result, HLT_AUTO_LINK_EMAIL, input);
+    QVERIFY(!elems.isEmpty());
+    QCOMPARE((int)elems[0].first, 0);
+    QCOMPARE((int)elems[0].second, 18);
+  }
+}
+
+void TestMarkdownParser::testImages() {
+  const QString input = QStringLiteral("![alt](img.png)\n");
+  auto result = parse(input);
+
+  QCOMPARE(countElements(result, HLT_IMAGE), 1);
+
+  QCOMPARE(result.imageRegions.size(), 1);
+  QCOMPARE(result.imageRegions[0].m_startPos, 0);
+  QCOMPARE(result.imageRegions[0].m_endPos, 15);
+}
+
+void TestMarkdownParser::testHTMLInline() {
+  const QString input = QStringLiteral("text <span>html</span> text\n");
+  auto result = parse(input);
+
+  // cmark produces 2 HTML_INLINE elements for <span> and </span>.
+  QCOMPARE(countElements(result, HLT_HTML), 2);
+
+  // Find elements and sort by position.
+  auto elems = findElements(result, HLT_HTML, input);
+  QCOMPARE(elems.size(), 2);
+  std::sort(elems.begin(), elems.end());
+
+  // <span> at positions 5-11, </span> at positions 15-22.
+  QCOMPARE((int)elems[0].first, 5);
+  QCOMPARE((int)elems[0].second, 11);
+  QCOMPARE((int)elems[1].first, 15);
+  QCOMPARE((int)elems[1].second, 22);
+}
+
+void TestMarkdownParser::testHTMLEntities() {
+  const QString input = QStringLiteral("&amp; &lt;\n");
+  auto result = parse(input);
+
+  // cmark does not produce HTML_ENTITY elements.
+  QCOMPARE(countElements(result, HLT_HTML_ENTITY), 0);
+}
+
+void TestMarkdownParser::testComments() {
+  const QString input = QStringLiteral("<!-- comment -->\n");
+  auto result = parse(input);
+
+  // cmark maps HTML comments to HTMLBLOCK, not COMMENT.
+  QCOMPARE(countElements(result, HLT_COMMENT), 0);
+  QCOMPARE(countElements(result, HLT_HTMLBLOCK), 1);
+}
+
+void TestMarkdownParser::testReferences() {
+  const QString input = QStringLiteral("[id]: http://example.com\n\n[text][id]\n");
+  auto result = parse(input);
+
+  // cmark resolves references during parsing — no REFERENCE elements.
+  QCOMPARE(countElements(result, HLT_REFERENCE), 0);
+  // The link reference [text][id] should produce a LINK element.
+  QCOMPARE(countElements(result, HLT_LINK), 1);
+}
+
+struct ConcealExpectation {
+  int start;
+  QString payload;
+  vte::MarkdownConcealElement element;
+};
+
+static void checkConcealRanges(const QString &p_source,
+                               const QVector<ConcealExpectation> &p_expected, int p_offset = 0,
+                               int p_startBlock = 0) {
+  const QByteArray utf8 = p_source.toUtf8();
+  const int numBlocks = countBlocks(utf8) + p_startBlock;
+  const auto result = vte::md::walkAndConvert(utf8, numBlocks, p_offset, p_startBlock, false, true);
+  QVERIFY2(result.concealRanges.size() == p_expected.size(), qPrintable(p_source));
+  for (int i = 0; i < p_expected.size(); ++i) {
+    const auto &range = result.concealRanges.at(i);
+    const auto &expected = p_expected.at(i);
+    QCOMPARE(range.m_element, expected.element);
+    QCOMPARE(range.m_startPos, p_offset + expected.start);
+    QCOMPARE(range.m_endPos, p_offset + expected.start + int(expected.payload.size()));
+    QCOMPARE(p_source.mid(range.m_startPos - p_offset, range.m_endPos - range.m_startPos),
+             expected.payload);
+  }
+
+  const auto fast = vte::md::walkAndConvert(utf8, numBlocks, p_offset, p_startBlock, true, true);
+  QVERIFY2(fast.concealRanges.isEmpty(), qPrintable(p_source));
+}
+
+void TestMarkdownParser::testConcealUrlSpans() {
+  using Element = vte::MarkdownConcealElement;
+  struct Case {
+    const char *prefix;
+    const char *payload;
+    const char *suffix;
+    Element element;
+  };
+  const QVector<Case> cases{
+      {"[x](", "abcdefghijklmnopqrstuvwxyz", ")\n", Element::LinkUrl},
+      {"![x](", "abcdefghijklmnopqrstuvwxyz", " \"title\" =500x300)\n", Element::ImageUrl},
+      {"[x](<", "a b&amp;c", "> \"title\")\n", Element::LinkUrl},
+      {"![x](<", "a b.png", "> =64x64)\n", Element::ImageUrl},
+      {"[x](", "a\\(b\\)&amp;c", ")\n", Element::LinkUrl},
+      {"![x](", "a\\_b&amp;c.png", " =500x)\n", Element::ImageUrl},
+      {"\xf0\x9f\x92\x8e \xc3\xa9 [x](", "path/\xf0\x9f\x92\x8e", ")\n", Element::LinkUrl},
+      // The same text in a label/title must not attract the destination span.
+      {"[abcdefghijklmnopqrstuvwxyz](", "abcdefghijklmnopqrstuvwxyz",
+       " \"abcdefghijklmnopqrstuvwxyz\")\n", Element::LinkUrl},
+      {"[multi\nline](\n", "abcdefghijklmnopqrstuvwxyz", ")\n", Element::LinkUrl},
+      {"> ![x](\n> ", "abcdefghijklmnopqrstuvwxyz", ")\n", Element::ImageUrl},
+      {"<", "https://example.test/abcdefghijklmnopqrstuvwxyz", ">\n", Element::LinkUrl},
+      {"<", "abcdefghijklmnopqrstuvwxyz@example.test", ">\n", Element::LinkUrl},
+      // Autolink coordinates must account for stripped and lazy container lines.
+      {"> lead\n> <", "https://example.test/abcdefghijklmnopqrstuvwxyz", ">\n", Element::LinkUrl},
+      {"- lead\n  <", "abcdefghijklmnopqrstuvwxyz@example.test", ">\n", Element::LinkUrl},
+      {"> lead\n<", "https://example.test/abcdefghijklmnopqrstuvwxyz", ">\n", Element::LinkUrl},
+      {"- lead\n<", "abcdefghijklmnopqrstuvwxyz@example.test", ">\n", Element::LinkUrl},
+      {"> a `co\n> de` <", "https://example.test/abcdefghijklmnopqrstuvwxyz", ">\n",
+       Element::LinkUrl},
+      // Attribute values are raw, quote-free, and exclude titles and dimensions.
+      {"<img src=\"", "a b&amp;c.png", "\" title=\"title\" width=500 height=300>\n",
+       Element::ImageUrl},
+      {"text <img src='", "abcdefghijklmnopqrstuvwxyz", "' alt='alt'> tail\n", Element::ImageUrl},
+      {"<img src=", "a&amp;b.png", " width=500>\n", Element::ImageUrl},
+      {"<IMG SRC=\"", "abcdefghijklmnopqrstuvwxyz", "\">\n", Element::ImageUrl},
+      {"<img src=\"", "first.png", "\" src=\"ignored.png\">\n", Element::ImageUrl},
+      {"> <div>\n> <img src=\"", "abcdefghijklmnopqrstuvwxyz", "\">\n> </div>\n",
+       Element::ImageUrl},
+      {"- lead\n<img src=\"", "abcdefghijklmnopqrstuvwxyz", "\">\n", Element::ImageUrl},
+      {"a `co\nde` <img src=\"", "abcdefghijklmnopqrstuvwxyz", "\">\n", Element::ImageUrl},
+      {"para <script>'<img src=\"ignored.png\">'</script><img src=\"", "abcdefghijklmnopqrstuvwxyz",
+       "\">\n", Element::ImageUrl},
+  };
+  for (const auto &c : cases) {
+    const QString prefix = QString::fromUtf8(c.prefix);
+    const QString payload = QString::fromUtf8(c.payload);
+    const QString source = prefix + payload + QString::fromUtf8(c.suffix);
+    checkConcealRanges(source, {{int(prefix.size()), payload, c.element}});
+    // A sliced parse must not confuse UTF-8 columns, UTF-16 offsets and block numbers.
+    checkConcealRanges(source, {{int(prefix.size()), payload, c.element}}, 37, 3);
+  }
+
+  // Nested image traversal sees the outer URL first, but consumers need source order.
+  // Identical payloads at different positions must remain separate candidates.
+  const QString mixed = QStringLiteral("![outer ![inner](same.png)](outer.png) [x](same.png)\n"
+                                       "<img src='same.png'><img src='same.png'>\n");
+  checkConcealRanges(mixed,
+                     {{17, QStringLiteral("same.png"), Element::ImageUrl},
+                      {28, QStringLiteral("outer.png"), Element::ImageUrl},
+                      {43, QStringLiteral("same.png"), Element::LinkUrl},
+                      {63, QStringLiteral("same.png"), Element::ImageUrl},
+                      {83, QStringLiteral("same.png"), Element::ImageUrl}},
+                     19, 2);
+
+  const QVector<const char *> excluded{
+      "```markdown\n[x](abcdefghijklmnopqrstuvwxyz)\n![x](abcdefghijklmnopqrstuvwxyz)\n"
+      "<img "
+      "src='abcdefghijklmnopqrstuvwxyz'>\n<https://example.test/abcdefghijklmnopqrstuvwxyz>\n```\n",
+      "    [x](abcdefghijklmnopqrstuvwxyz)\n    ![x](abcdefghijklmnopqrstuvwxyz)\n"
+      "    <img src='abcdefghijklmnopqrstuvwxyz'>\n",
+      "`[x](abcdefghijklmnopqrstuvwxyz) ![x](abcdefghijklmnopqrstuvwxyz) "
+      "<https://example.test/abcdefghijklmnopqrstuvwxyz> <img src='abcdefghijklmnopqrstuvwxyz'>`\n",
+      "<!-- [x](abcdefghijklmnopqrstuvwxyz) <img src='abcdefghijklmnopqrstuvwxyz'> -->\n",
+      "<script>\n[x](abcdefghijklmnopqrstuvwxyz)\n<img "
+      "src='abcdefghijklmnopqrstuvwxyz'>\n</script>\n",
+      "<style>\n<img src='abcdefghijklmnopqrstuvwxyz'>\n</style>\n",
+      "<textarea>\n<img src='abcdefghijklmnopqrstuvwxyz'>\n</textarea>\n",
+      "<title>\n<img src='abcdefghijklmnopqrstuvwxyz'>\n</title>\n",
+      "> lead <script>\n'<img src='abcdefghijklmnopqrstuvwxyz'>'\n</script>\n",
+      "<span title=\"<img src='abcdefghijklmnopqrstuvwxyz'>\">x</span>\n",
+      "[x]() ![x](<>) <img src=''>\n",
+      "[x](unterminated\n",
+      "[x](<abcdefghijklm\nnopqrstuvwxyz>)\n",
+      "![x](abcdefghijklm\nnopqrstuvwxyz)\n",
+      "<img src='abcdefghijklm\nnopqrstuvwxyz'>\n",
+      "https://example.test/abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz@example.test\n",
+      "<a href='abcdefghijklmnopqrstuvwxyz'>label</a>\n",
+  };
+  for (const char *source : excluded) {
+    checkConcealRanges(QString::fromUtf8(source), {});
+  }
+}
+
+void TestMarkdownParser::testConcealReferenceDestinations() {
+  using Element = vte::MarkdownConcealElement;
+  struct Case {
+    const char *prefix;
+    const char *payload;
+    const char *suffix;
+  };
+  const QVector<Case> cases{
+      // Unused definitions are still authored destinations.
+      {"[r]: ", "abcdefghijklmnopqrstuvwxyz", " \"title\"\n"},
+      {"[r]: ", "abcdefghijklmnopqrstuvwxyz",
+       " \"title\"\n\n[x][r] ![x][r] [r][] ![r][] [r] ![r]\n"},
+      {"[r]:\n  ", "abcdefghijklmnopqrstuvwxyz", "\n  \"title\"\n\n[r]\n"},
+      {"> [r]: ", "abcdefghijklmnopqrstuvwxyz", "\n>\n> [r]\n"},
+      {"- [r]: ", "abcdefghijklmnopqrstuvwxyz", "\n\n  [r]\n"},
+      {"> - [r]: ", "abcdefghijklmnopqrstuvwxyz", "\n"},
+      {"> [r]:\n>   ", "abcdefghijklmnopqrstuvwxyz", "\n"},
+      {"- [r]:\n  ", "abcdefghijklmnopqrstuvwxyz", "\n"},
+      {"[r]:\t", "abcdefghijklmnopqrstuvwxyz", "\n"},
+      {"   [r]: ", "abcdefghijklmnopqrstuvwxyz", "\n"},
+      // Container stripping can consume only part of a tab and synthesize spaces.
+      {">\t[r]:\n>\t", "abcdefghijklmnopqrstuvwxyz", "\n"},
+      {"- item\n\n\t[r]: ", "abcdefghijklmnopqrstuvwxyz", "\n"},
+      {"[abcdefghijklmnopqrstuvwxyz]: ", "abcdefghijklmnopqrstuvwxyz",
+       " \"abcdefghijklmnopqrstuvwxyz\"\n\n[abcdefghijklmnopqrstuvwxyz]\n"},
+      {"[r]: <", "a b&amp;c", "> \"title\"\n"},
+      {"[r]: ", "a\\(b\\)&amp;c", "\n"},
+      {"\xf0\x9f\x92\x8e \xc3\xa9\n\n[r]: ", "path/\xf0\x9f\x92\x8e", "\n"},
+      {"[r]: ", "abcdefghijklmnopqrstuvwxyz", "\nParagraph with [r].\n"},
+      {"[r]: ", "abcdefghijklmnopqrstuvwxyz", "\nHeading\n---\n"},
+      {"[r]:\r\n  ", "abcdefghijklmnopqrstuvwxyz", "\r\n\r\n[r]\r\n"},
+      {"[r]: ", "abcdefghijklmnopqrstuvwxyz", ""},
+  };
+  for (const auto &c : cases) {
+    const QString prefix = QString::fromUtf8(c.prefix);
+    const QString payload = QString::fromUtf8(c.payload);
+    const QString source = prefix + payload + QString::fromUtf8(c.suffix);
+    const QVector<ConcealExpectation> expected{
+        {int(prefix.size()), payload, Element::ReferenceUrl}};
+    checkConcealRanges(source, expected);
+    checkConcealRanges(source, expected, 53, 4);
+  }
+
+  // Definitions can disappear during parsing, while inline candidates arrive later.
+  // Keep every authored duplicate, without inventing ranges at reference usages.
+  QString mixed;
+  QVector<ConcealExpectation> expected;
+  auto append = [&](const QString &p_prefix, const QString &p_payload, const QString &p_suffix,
+                    Element p_element) {
+    mixed += p_prefix;
+    expected.append({int(mixed.size()), p_payload, p_element});
+    mixed += p_payload + p_suffix;
+  };
+  append(QStringLiteral("[inline]("), QStringLiteral("inline-url"), QStringLiteral(")\n\n"),
+         Element::LinkUrl);
+  append(QStringLiteral("[r]: "), QStringLiteral("first-url"), QStringLiteral(" \"title\"\n"),
+         Element::ReferenceUrl);
+  append(QStringLiteral("[r]: "), QStringLiteral("second-url"), QStringLiteral("\n"),
+         Element::ReferenceUrl);
+  append(QStringLiteral("[s]:\n  <"), QStringLiteral("first-url"), QStringLiteral(">\n"),
+         Element::ReferenceUrl);
+  append(QStringLiteral("[r]: "), QStringLiteral("first-url"),
+         QStringLiteral("\nHeading\n---\n\n[r] [s] ![x][r]\n\n"), Element::ReferenceUrl);
+  append(QStringLiteral("<img src='"), QStringLiteral("image-url"), QStringLiteral("'>\n"),
+         Element::ImageUrl);
+  checkConcealRanges(mixed, expected, 71, 5);
+
+  // Dropping a definition must not leave the surviving paragraph/heading's
+  // inline destinations on the definition's original source line.
+  struct RetainedCase {
+    const char *definitionPrefix;
+    const char *between;
+    const char *suffix;
+  };
+  const QVector<RetainedCase> retainedCases{
+      {"[r]: ", "\nParagraph [x](", ")\n"},
+      {"[r]: ", "\nHeading [x](", ")\n---\n"},
+      {"> [r]: ", "\n[x](", ")\n"},
+      {"> [r]: ", "\n> Paragraph\n[x](", ")\n"},
+  };
+  for (const auto &c : retainedCases) {
+    const QString definitionPrefix = QString::fromUtf8(c.definitionPrefix);
+    const QString referencePayload = QStringLiteral("reference-destination");
+    const QString inlinePrefix = definitionPrefix + referencePayload + QString::fromUtf8(c.between);
+    const QString inlinePayload = QStringLiteral("inline-destination");
+    const QString source = inlinePrefix + inlinePayload + QString::fromUtf8(c.suffix);
+    const QVector<ConcealExpectation> retainedExpected{
+        {int(definitionPrefix.size()), referencePayload, Element::ReferenceUrl},
+        {int(inlinePrefix.size()), inlinePayload, Element::LinkUrl}};
+    checkConcealRanges(source, retainedExpected);
+    checkConcealRanges(source, retainedExpected, 83, 6);
+  }
+
+  const QVector<const char *> excluded{
+      "```markdown\n[r]: abcdefghijklmnopqrstuvwxyz\n```\n\n[r]\n",
+      "    [r]: abcdefghijklmnopqrstuvwxyz\n\n[r]\n",
+      "`[r]: abcdefghijklmnopqrstuvwxyz`\n\n[r]\n",
+      "<!--\n[r]: abcdefghijklmnopqrstuvwxyz\n-->\n\n[r]\n",
+      "<script>\n[r]: abcdefghijklmnopqrstuvwxyz\n</script>\n\n[r]\n",
+      "[r] abcdefghijklmnopqrstuvwxyz\n",
+      "[r]: abcdefghijklmnopqrstuvwxyz trailing garbage\n",
+      "[r]: abcdefghijklmnopqrstuvwxyz \"unclosed title\n",
+      "[r]:\n\n[r]\n",
+      "[r]: <>\n\n[r] ![r]\n",
+      "[r]: <abcdefghijklm\nnopqrstuvwxyz>\n\n[r]\n",
+      "> [r]: <abcdefghijklm\n> nopqrstuvwxyz>\n",
+      "[missing] [x][missing] ![x][missing]\n",
+  };
+  for (const char *source : excluded) {
+    checkConcealRanges(QString::fromUtf8(source), {});
+  }
+}
+
+void TestMarkdownParser::testStrikethrough() {
+  const QString input = QStringLiteral("~~strike~~\n");
+  auto result = parse(input);
+
+  QCOMPARE(countElements(result, HLT_STRIKE), 1);
+
+  auto elems = findElements(result, HLT_STRIKE, input);
+  QVERIFY(!elems.isEmpty());
+  QCOMPARE((int)elems[0].first, 0);
+  QCOMPARE((int)elems[0].second, 10);
+}
+
+void TestMarkdownParser::testMark() {
+  const QString input = QStringLiteral("==marked==\n");
+  auto result = parse(input);
+
+  // cmark produces MARK elements (pmh did not).
+  int markCount = countElements(result, HLT_MARK);
+  qDebug() << "MARK count:" << markCount;
+  QVERIFY(markCount >= 1);
+
+  auto elems = findElements(result, HLT_MARK, input);
+  QVERIFY(!elems.isEmpty());
+  QCOMPARE((int)elems[0].first, 0);
+  QCOMPARE((int)elems[0].second, 10);
+}
+
+void TestMarkdownParser::testFootnotes() {
+  const QString input = QStringLiteral("[^1]: footnote\n\nText [^1]\n");
+  auto result = parse(input);
+
+  // Walker produces HLUnits for footnote definition and reference.
+  // "[^1]: footnote\n" is 1 block, "\n" is empty, "Text [^1]\n" has 1 reference.
+  // The walker may produce more units depending on how footnote nodes are structured.
+  QVERIFY(countElements(result, HLT_NOTE) >= 2);
+}
+
+void TestMarkdownParser::testInlineEquation() {
+  const QString input = QStringLiteral("$E=mc^2$\n");
+  auto result = parse(input);
+
+  QCOMPARE(countElements(result, HLT_INLINEEQUATION), 1);
+
+  QCOMPARE(result.inlineEquationRegions.size(), 1);
+  // cmark adapter adjusts FORMULA_INLINE to re-include $ delimiters.
+  QCOMPARE(result.inlineEquationRegions[0].m_startPos, 0);
+  QCOMPARE(result.inlineEquationRegions[0].m_endPos, 8);
+}
+
+void TestMarkdownParser::testInlineDisplayEquation_data() {
+  QTest::addColumn<QString>("prefix");
+  QTest::addColumn<QString>("suffix");
+  QTest::newRow("paragraph") << QStringLiteral("before ") << QStringLiteral(" after\nnext $z$\n");
+  QTest::newRow("list") << QStringLiteral("- before ") << QStringLiteral(" after\n- next $z$\n");
+  QTest::newRow("table") << QStringLiteral("| head | other |\n| --- | --- |\n| ")
+                         << QStringLiteral(" | $z$ |\nfollowing\n");
+}
+
+void TestMarkdownParser::testInlineDisplayEquation() {
+  QFETCH(QString, prefix);
+  QFETCH(QString, suffix);
+  const QString cell = QString::fromUtf8("\xF0\x9F\x9A\x80 $$x$$ and $$x$$ plus $y$");
+  const QString input = prefix + cell + suffix;
+  const auto result = parse(input);
+  const QVector<QString> sources{QStringLiteral("$$x$$"), QStringLiteral("$$x$$"),
+                                 QStringLiteral("$y$"), QStringLiteral("$z$")};
+  const QVector<QString> expressions{QStringLiteral("x"), QStringLiteral("x"), QStringLiteral("y"),
+                                     QStringLiteral("z")};
+  QCOMPARE(result.mathElements.size(), sources.size());
+  QCOMPARE(result.inlineEquationRegions.size(), sources.size());
+  QVERIFY(result.displayFormulaRegions.isEmpty());
+  QVector<QPair<unsigned long, unsigned long>> spans;
+  int offset = 0;
+  for (int i = 0; i < sources.size(); ++i) {
+    const int start = input.indexOf(sources.at(i), offset);
+    QVERIFY(start >= 0);
+    const int end = start + sources.at(i).size();
+    const auto &math = result.mathElements.at(i);
+    QCOMPARE(math.m_startPos, start);
+    QCOMPARE(math.m_endPos, end);
+    QCOMPARE(input.mid(math.m_startPos, math.m_endPos - math.m_startPos), sources.at(i));
+    QCOMPARE(math.m_expression, expressions.at(i));
+    QCOMPARE(math.m_display, i < 2);
+    QVERIFY(!math.m_block);
+    QCOMPARE(result.inlineEquationRegions.at(i).m_startPos, start);
+    QCOMPARE(result.inlineEquationRegions.at(i).m_endPos, end);
+    spans.append(qMakePair(static_cast<unsigned long>(start), static_cast<unsigned long>(end)));
+    offset = end;
+  }
+  // Display typesetting must not turn a same-line construct into block source geometry.
+  QCOMPARE(findElements(result, HLT_INLINEEQUATION, input), spans);
+  QCOMPARE(countElements(result, HLT_DISPLAYFORMULA), 0);
+
+  // Cell-local parsing must use the same delimiter widths and UTF-16 offsets as
+  // the document parser, including the second occurrence of an identical formula.
+  const auto local = parse(cell);
+  QCOMPARE(local.mathElements.size(), 3);
+  for (int i = 0; i < local.mathElements.size(); ++i) {
+    const auto &math = local.mathElements.at(i);
+    const auto &whole = result.mathElements.at(i);
+    QCOMPARE(math.m_startPos + prefix.size(), whole.m_startPos);
+    QCOMPARE(math.m_endPos + prefix.size(), whole.m_endPos);
+    QCOMPARE(math.m_expression, whole.m_expression);
+    QCOMPARE(math.m_display, whole.m_display);
+    QVERIFY(!math.m_block);
+  }
+}
+
+void TestMarkdownParser::testInlineDisplayEquationDoesNotCrossLines() {
+  const QVector<QString> inputs{QStringLiteral("before $$x\n+y$$ after $z$\n"),
+                                QStringLiteral("| head |\n| --- |\n| $$x |\n| y$$ |\n| $z$ |\n")};
+  for (const auto &input : inputs) {
+    const auto result = parse(input);
+    QCOMPARE(result.mathElements.size(), 1);
+    const auto &math = result.mathElements.first();
+    QCOMPARE(math.m_expression, QStringLiteral("z"));
+    QCOMPARE(math.m_startPos, input.indexOf(QStringLiteral("$z$")));
+    QCOMPARE(math.m_endPos, math.m_startPos + 3);
+    QVERIFY(!math.m_display);
+    QVERIFY(!math.m_block);
+    QVERIFY(result.displayFormulaRegions.isEmpty());
+  }
+}
+
+// ============================================================
+// T7: Edge Case Tests
+// ============================================================
+
+void TestMarkdownParser::testSurrogatePairs() {
+  // U+1F389 is 4 UTF-8 bytes -> 2 QChars (surrogate pair).
+  // cmark adapter uses QChar offsets via LineOffsetTable.
+  const QString input = QString::fromUtf8("# \xF0\x9F\x8E\x89 Hello\n");
+  auto result = parse(input);
+
+  QCOMPARE(countElements(result, HLT_H1), 1);
+
+  QCOMPARE(result.headerRegions.size(), 1);
+  qDebug() << "Surrogate H1 start:" << result.headerRegions[0].m_startPos
+           << "end:" << result.headerRegions[0].m_endPos;
+  QCOMPARE(result.headerRegions[0].m_startPos, 0);
+  QCOMPARE(result.headerRegions[0].m_endPos, 10);
+}
+
+void TestMarkdownParser::testEmptyElements() {
+  // Empty bold: **** — no STRONG or EMPH.
+  {
+    const QString input = QStringLiteral("****\n");
+    auto result = parse(input);
+
+    QCOMPARE(countElements(result, HLT_STRONG), 0);
+    QCOMPARE(countElements(result, HLT_EMPH), 0);
+  }
+
+  // Empty link text: [](url) — 1 LINK.
+  {
+    const QString input = QStringLiteral("[](url)\n");
+    auto result = parse(input);
+
+    QCOMPARE(countElements(result, HLT_LINK), 1);
+  }
+}
+
+void TestMarkdownParser::testUnclosedDelimiters() {
+  // Unclosed bold — no crash, 0 STRONG elements.
+  {
+    const QString input = QStringLiteral("**broken\n");
+    auto result = parse(input);
+
+    QCOMPARE(countElements(result, HLT_STRONG), 0);
+  }
+
+  // Unclosed link — no crash, 0 LINK elements.
+  {
+    const QString input = QStringLiteral("[unclosed\n");
+    auto result = parse(input);
+
+    QCOMPARE(countElements(result, HLT_LINK), 0);
+  }
+}
+
+void TestMarkdownParser::testDegenerate() {
+  // Empty string — walkAndConvert returns empty result (no crash).
+  {
+    const QString input = QStringLiteral("");
+    QByteArray utf8 = input.toUtf8();
+    int numBlocks = countBlocks(utf8);
+    auto result = vte::md::walkAndConvert(utf8, numBlocks);
+    // Empty result — no highlights.
+    bool hasAny = false;
+    for (const auto &block : result.blocksHighlights) {
+      if (!block.isEmpty()) {
+        hasAny = true;
+        break;
+      }
+    }
+    QVERIFY(!hasAny);
+  }
+
+  // Single newline — no crash.
+  {
+    const QString input = QStringLiteral("\n");
+    auto result = parse(input);
+    // Just verify it doesn't crash — no specific elements expected.
+    (void)result;
+  }
+
+  // Spaces — no crash.
+  {
+    const QString input = QStringLiteral("   \n");
+    auto result = parse(input);
+    (void)result;
+  }
+}
+
+void TestMarkdownParser::testNestedOverlap() {
+  const QString input = QStringLiteral("***bold-italic***\n");
+  auto result = parse(input);
+
+  QCOMPARE(countElements(result, HLT_EMPH), 1);
+  QCOMPARE(countElements(result, HLT_STRONG), 1);
+
+  // Verify both elements exist with valid ranges.
+  auto emphElems = findElements(result, HLT_EMPH, input);
+  QVERIFY(!emphElems.isEmpty());
+  QVERIFY((int)emphElems[0].first < (int)emphElems[0].second);
+
+  auto strongElems = findElements(result, HLT_STRONG, input);
+  QVERIFY(!strongElems.isEmpty());
+  QVERIFY((int)strongElems[0].first < (int)strongElems[0].second);
+}
+
+void TestMarkdownParser::testAllExtensions() {
+  const QString input = QStringLiteral("---\ntitle: test\n---\n\n"
+                                       "# Heading\n\n"
+                                       "*emph* **strong** ~~strike~~ ==mark==\n\n"
+                                       "$E=mc^2$ $$F=ma$$\n\n"
+                                       "| h1 | h2 |\n|---|---|\n| a | b |\n\n"
+                                       "[^1]: note\n\n"
+                                       "Text [^1]\n");
+  auto result = parse(input);
+
+  QVERIFY(countElements(result, HLT_FRONTMATTER) >= 1);
+  QVERIFY(countElements(result, HLT_H1) >= 1);
+  QVERIFY(countElements(result, HLT_EMPH) >= 1);
+  QVERIFY(countElements(result, HLT_STRONG) >= 1);
+  QVERIFY(countElements(result, HLT_STRIKE) >= 1);
+  QVERIFY(countElements(result, HLT_INLINEEQUATION) >= 1);
+  QVERIFY(countElements(result, HLT_TABLE) >= 1);
+  QVERIFY(countElements(result, HLT_NOTE) >= 1);
+
+  // cmark produces MARK elements (pmh did not).
+  QVERIFY(countElements(result, HLT_MARK) >= 1);
+}
+
+// ============================================================
+// T13: Performance Benchmark
+// ============================================================
+
+void TestMarkdownParser::testPerformance() {
+  // Generate a 1000-line markdown document with mixed content.
+  QString doc;
+  doc.reserve(64000);
+  for (int i = 0; i < 100; i++) {
+    doc += QString("# Heading %1\n\n").arg(i);
+    doc += QString("## Sub-heading %1\n\n").arg(i);
+    doc += QString("### Third level %1\n\n").arg(i);
+    doc +=
+        QString("Paragraph with *emph*, **strong**, `code`, ~~strike~~ and $E=mc^2$ inline.\n\n");
+    doc += "```cpp\nint x = 42;\nreturn x;\n```\n\n";
+    doc += "- bullet one\n- bullet two\n- bullet three\n\n";
+    doc += "1. first\n2. second\n\n";
+    doc += "| h1 | h2 | h3 |\n|---|---|---|\n| a | b | c |\n\n";
+    doc += "$$\nF = ma\n$$\n\n";
+  }
+
+  QByteArray utf8 = doc.toUtf8();
+  int numBlocks = countBlocks(utf8);
+
+  // Run 3 iterations, collect times.
+  QVector<qint64> times;
+  times.reserve(3);
+  for (int iter = 0; iter < 3; iter++) {
+    QElapsedTimer timer;
+    timer.start();
+    auto result = vte::md::walkAndConvert(utf8, numBlocks);
+    qint64 elapsed = timer.elapsed();
+    // Verify non-empty result.
+    bool hasAny = false;
+    for (const auto &block : result.blocksHighlights) {
+      if (!block.isEmpty()) {
+        hasAny = true;
+        break;
+      }
+    }
+    QVERIFY(hasAny);
+    times.append(elapsed);
+  }
+
+  std::sort(times.begin(), times.end());
+  qint64 median = times[1];
+  qDebug() << "walkAndConvert parse times (ms):" << times[0] << times[1] << times[2]
+           << "median:" << median;
+
+  QVERIFY2(median < 500,
+           qPrintable(QString("Median parse time %1ms exceeds 500ms threshold").arg(median)));
+}
+
+// ============================================================
+// Extra selection invalidation
+// ============================================================
+
+namespace {
+// Accumulate the paint regions delivered to a widget.
+class PaintRegionRecorder : public QObject {
+public:
+  explicit PaintRegionRecorder(QWidget *p_widget) : QObject(p_widget) {
+    p_widget->installEventFilter(this);
+  }
+
+  void clear() { m_region = QRegion(); }
+
+  const QRegion &region() const { return m_region; }
+
+protected:
+  bool eventFilter(QObject *p_obj, QEvent *p_event) Q_DECL_OVERRIDE {
+    if (p_event->type() == QEvent::Paint) {
+      m_region += static_cast<QPaintEvent *>(p_event)->region();
+    }
+    return QObject::eventFilter(p_obj, p_event);
+  }
+
+private:
+  QRegion m_region;
+};
+
+// Wait until no paint event is received during a quiet window, so that delayed
+// highlighting, initial show and resize paints could not pollute the recording.
+bool settlePaints(PaintRegionRecorder &p_recorder, int p_quietMs = 150, int p_maxMs = 5000) {
+  QElapsedTimer timer;
+  timer.start();
+  while (timer.elapsed() < p_maxMs) {
+    p_recorder.clear();
+    QTest::qWait(p_quietMs);
+    if (p_recorder.region().isEmpty()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// A one pixel high row spanning the whole viewport.
+QRect fullWidthRow(const QWidget *p_viewport, int p_y) {
+  return QRect(0, p_y, p_viewport->width(), 1);
+}
+
+// QRegion::contains(QRect) semantics differ between Qt versions, so check the
+// complete containment explicitly.
+bool regionContains(const QRegion &p_region, const QRect &p_rect) {
+  return QRegion(p_rect).subtracted(p_region).isEmpty();
+}
+} // namespace
+
+void TestMarkdownParser::testCursorLineInvalidationExpanded_data() {
+  QTest::addColumn<qreal>("lineSpacing");
+
+  // A line spacing greater than 1.0 gives the lines a fractional geometry, for
+  // which the rounded cursor rectangle differs from the aligned extent that the
+  // full-width selection is painted over.
+  QTest::newRow("integral line geometry") << 1.0;
+  QTest::newRow("fractional line geometry") << 1.5;
+}
+
+void TestMarkdownParser::testCursorLineInvalidationExpanded() {
+  QFETCH(qreal, lineSpacing);
+
+  // Avoid cursor blink repaints polluting the recorded paint regions.
+  const int cursorFlashTime = QApplication::cursorFlashTime();
+  QApplication::setCursorFlashTime(0);
+  struct FlashTimeRestorer {
+    ~FlashTimeRestorer() { QApplication::setCursorFlashTime(m_value); }
+    int m_value = 0;
+  } flashTimeRestorer{cursorFlashTime};
+
+  const QString themeJson = QStringLiteral(R"({
+    "metadata": {"type": "vtextedit", "name": "CursorLineTest"},
+    "editor-styles": {
+      "Text": {"font-family": "Arial", "font-size": 12},
+      "CursorLine": {"background-color": "#c5cae9"}
+    }
+  })");
+  auto theme = vte::Theme::createThemeFromContent(themeJson);
+  QVERIFY(!theme.isNull());
+
+  auto textConfig = QSharedPointer<vte::TextEditorConfig>::create();
+  textConfig->m_theme = theme;
+  textConfig->m_lineSpacing = lineSpacing;
+  auto markdownConfig = QSharedPointer<vte::MarkdownEditorConfig>::create(textConfig);
+  markdownConfig->m_inplacePreviewSources = vte::MarkdownEditorConfig::NoInplacePreview;
+  auto parameters = QSharedPointer<vte::TextEditorParameters>::create();
+  vte::VMarkdownEditor editor(markdownConfig, parameters);
+  auto highlighter = editor.getHighlighter();
+  QVERIFY(highlighter);
+
+  QString text;
+  const int lineCount = 16;
+  for (int i = 0; i < lineCount; ++i) {
+    text += QStringLiteral("line %1 of plain text\n").arg(i);
+  }
+
+  QSignalSpy completed(highlighter, &vte::MarkdownHighlighter::highlightCompleted);
+  editor.setText(text);
+  completed.clear();
+  highlighter->updateHighlight();
+  QTRY_VERIFY(completed.count() > 0);
+
+  auto textEdit = editor.getTextEdit();
+  QVERIFY(textEdit);
+  auto viewport = textEdit->viewport();
+
+  editor.resize(600, 600);
+  editor.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&editor));
+
+  PaintRegionRecorder recorder(viewport);
+
+  auto moveCursorToBlock = [&editor, textEdit](int p_blockNumber) {
+    auto cursor = textEdit->textCursor();
+    cursor.setPosition(editor.document()->findBlockByNumber(p_blockNumber).position());
+    textEdit->setTextCursor(cursor);
+  };
+
+  const int oldBlock = 3;
+  const int newBlock = 7;
+  const int untouchedBlock = 12;
+
+  // Settle the initial show/resize/highlight paints before recording.
+  moveCursorToBlock(oldBlock);
+  QVERIFY(settlePaints(recorder));
+
+  const QRect oldRect = textEdit->cursorRect(textEdit->textCursor());
+  const QRect untouchedRect =
+      textEdit->cursorRect(QTextCursor(editor.document()->findBlockByNumber(untouchedBlock)));
+
+  recorder.clear();
+  moveCursorToBlock(newBlock);
+  const QRect newRect = textEdit->cursorRect(textEdit->textCursor());
+
+  QTRY_VERIFY(!recorder.region().isEmpty());
+  // Collect the remaining queued paints of this cursor move.
+  QTest::qWait(150);
+
+  // VTextEdit::cursorRect() rounds the line geometry with qRound(), while the
+  // selection is painted over its aligned (floor/ceil) extent. The fringe row
+  // outside of the painted extent is therefore either the first or the second
+  // row outside of the rounded rectangle, so both of them must be invalidated.
+  const int maxMargin = 2;
+
+  // All the involved lines must have room above and below within the viewport,
+  // otherwise the expanded rows would be clipped away.
+  const QRect viewportRect = viewport->rect();
+  QVERIFY(oldRect.top() - maxMargin >= viewportRect.top());
+  QVERIFY(oldRect.bottom() + maxMargin <= viewportRect.bottom());
+  QVERIFY(newRect.top() - maxMargin >= viewportRect.top());
+  QVERIFY(newRect.bottom() + maxMargin <= viewportRect.bottom());
+  QVERIFY(untouchedRect.top() - 1 >= viewportRect.top());
+  QVERIFY(untouchedRect.isValid() && untouchedRect.bottom() <= viewportRect.bottom());
+
+  const QRegion region = recorder.region();
+  for (int margin = 1; margin <= maxMargin; ++margin) {
+    QVERIFY2(
+        regionContains(region, fullWidthRow(viewport, oldRect.top() - margin)),
+        qPrintable(
+            QStringLiteral("Row %1 above the old cursor line is not invalidated").arg(margin)));
+    QVERIFY2(
+        regionContains(region, fullWidthRow(viewport, oldRect.bottom() + margin)),
+        qPrintable(
+            QStringLiteral("Row %1 below the old cursor line is not invalidated").arg(margin)));
+    QVERIFY2(
+        regionContains(region, fullWidthRow(viewport, newRect.top() - margin)),
+        qPrintable(
+            QStringLiteral("Row %1 above the new cursor line is not invalidated").arg(margin)));
+    QVERIFY2(
+        regionContains(region, fullWidthRow(viewport, newRect.bottom() + margin)),
+        qPrintable(
+            QStringLiteral("Row %1 below the new cursor line is not invalidated").arg(margin)));
+  }
+
+  // The supplemental invalidation must stay local. This also guards the
+  // assertions above against a full viewport repaint.
+  QVERIFY2(!regionContains(region, fullWidthRow(viewport, untouchedRect.top() - 1)),
+           "An unrelated line is invalidated by a cursor line move");
+
+  // Re-applying the extra selections without changing the full-width cursor
+  // line selection must not invalidate its expanded rows again.
+  recorder.clear();
+  editor.clearSearchHighlight();
+  QTest::qWait(500);
+  QVERIFY2(!regionContains(recorder.region(), fullWidthRow(viewport, newRect.top() - 1)),
+           "An unchanged full-width selection is invalidated again");
+  QVERIFY2(!regionContains(recorder.region(), fullWidthRow(viewport, newRect.bottom() + 1)),
+           "An unchanged full-width selection is invalidated again");
+}
+
+// ============================================================
+// Typed preview element extraction
+// ============================================================
+
+void TestMarkdownParser::testTableElementBasic() {
+  const QString input = QStringLiteral("| h1 | h2 |\n| --- | --- |\n| a | b |\n");
+  auto result = parse(input);
+
+  QCOMPARE(result.tableElements.size(), 1);
+  const auto &table = result.tableElements.first();
+  QCOMPARE(table.m_columns, 2);
+  QCOMPARE(table.m_rows.size(), 3);
+  QCOMPARE(table.m_startPos, 0);
+  // The range excludes the terminating paragraph separator.
+  QCOMPARE(table.m_endPos, input.indexOf(QStringLiteral("| a | b |")) + 9);
+
+  QVERIFY(table.m_rows[0].m_type == vte::md::TableRowType::Header);
+  QVERIFY(table.m_rows[1].m_type == vte::md::TableRowType::Delimiter);
+  QVERIFY(table.m_rows[2].m_type == vte::md::TableRowType::Data);
+
+  QCOMPARE(table.m_rows[0].m_cells, QVector<QString>({QStringLiteral("h1"), QStringLiteral("h2")}));
+  QCOMPARE(table.m_rows[2].m_cells, QVector<QString>({QStringLiteral("a"), QStringLiteral("b")}));
+  QVERIFY(table.m_rows[0].m_prefix.isEmpty());
+}
+
+void TestMarkdownParser::testTableElementAlignments() {
+  const QString input =
+      QStringLiteral("| a | b | c | d |\n| --- | :--- | :---: | ---: |\n| 1 | 2 | 3 | 4 |\n");
+  auto result = parse(input);
+
+  QCOMPARE(result.tableElements.size(), 1);
+  // 0 none, 1 left, 2 center, 3 right.
+  QCOMPARE(result.tableElements.first().m_alignments, QVector<int>({0, 1, 2, 3}));
+}
+
+void TestMarkdownParser::testTableElementRawCells() {
+  const QString input =
+      QStringLiteral("| **bold** | [x](y.md) |\n| --- | --- |\n| `a|b` | _i_ |\n");
+  auto result = parse(input);
+
+  QCOMPARE(result.tableElements.size(), 1);
+  const auto &table = result.tableElements.first();
+  // Raw Markdown is preserved; inline processing never touches these values.
+  QCOMPARE(table.m_rows[0].m_cells[0], QStringLiteral("**bold**"));
+  QCOMPARE(table.m_rows[0].m_cells[1], QStringLiteral("[x](y.md)"));
+  // A pipe inside a code span still splits the cell in this dialect.
+  QCOMPARE(table.m_rows[2].m_cells.size(), 3);
+}
+
+void TestMarkdownParser::testTableElementEscapedPipes() {
+  const QString input = QStringLiteral("| a \\| b | c |\n| --- | --- |\n| d | e |\n");
+  auto result = parse(input);
+
+  QCOMPARE(result.tableElements.size(), 1);
+  const auto &table = result.tableElements.first();
+  QCOMPARE(table.m_columns, 2);
+  QCOMPARE(table.m_rows[0].m_cells.size(), 2);
+  // The escape is part of the raw source and must survive.
+  QCOMPARE(table.m_rows[0].m_cells[0], QStringLiteral("a \\| b"));
+}
+
+void TestMarkdownParser::testTableElementEmptyAndRaggedRows() {
+  const QString input = QStringLiteral("| a | b |\n| --- | --- |\n||\n| x | y | z |\n| only |\n");
+  auto result = parse(input);
+
+  QCOMPARE(result.tableElements.size(), 1);
+  const auto &table = result.tableElements.first();
+  QCOMPARE(table.m_columns, 2);
+  QCOMPARE(table.m_rows.size(), 5);
+  // Empty cell.
+  QCOMPARE(table.m_rows[2].m_cells, QVector<QString>({QString()}));
+  // Extra wide row is preserved verbatim, nothing is discarded.
+  QCOMPARE(table.m_rows[3].m_cells.size(), 3);
+  QCOMPARE(table.m_rows[3].m_cells[2], QStringLiteral("z"));
+  // Narrower row.
+  QCOMPARE(table.m_rows[4].m_cells, QVector<QString>({QStringLiteral("only")}));
+}
+
+void TestMarkdownParser::testTableElementSurrogatePositions() {
+  // The emoji is a surrogate pair: UTF-16 offsets must not be byte offsets.
+  const QString prefix = QStringLiteral("\xF0\x9F\x98\x80 head\n\n");
+  const QString input = QString::fromUtf8(
+      "\xF0\x9F\x98\x80 head\n\n| \xF0\x9F\x98\x80 | b |\n| --- | --- |\n| c | d |\n");
+  auto result = parse(input);
+
+  QCOMPARE(result.tableElements.size(), 1);
+  const auto &table = result.tableElements.first();
+  QCOMPARE(table.m_startPos, input.indexOf(QStringLiteral("| ")));
+  QCOMPARE(table.m_rows[0].m_cells[0], QString::fromUtf8("\xF0\x9F\x98\x80"));
+  QCOMPARE(input.mid(table.m_startPos, 1), QStringLiteral("|"));
+  Q_UNUSED(prefix);
+}
+
+void TestMarkdownParser::testTableElementNestedPrefixes() {
+  const QString input = QStringLiteral("> | a | b |\n> | --- | --- |\n> | c | d |\n");
+  auto result = parse(input);
+
+  QCOMPARE(result.tableElements.size(), 1);
+  const auto &table = result.tableElements.first();
+  // The range includes the container prefix.
+  QCOMPARE(table.m_startPos, 0);
+  for (const auto &row : table.m_rows) {
+    QCOMPARE(row.m_prefix, QStringLiteral("> "));
+  }
+}
+
+void TestMarkdownParser::testTableElementInvalid() {
+  // Missing trailing pipe: not a table in this dialect.
+  QCOMPARE(parse(QStringLiteral("| a | b\n| --- | ---\n")).tableElements.size(), 0);
+  // Column count mismatch.
+  QCOMPARE(parse(QStringLiteral("| a | b | c |\n| --- | --- |\n")).tableElements.size(), 0);
+  // No delimiter row.
+  QCOMPARE(parse(QStringLiteral("| a | b |\n| c | d |\n")).tableElements.size(), 0);
+}
+
+void TestMarkdownParser::testImageCodeMathElements() {
+  {
+    const QString input = QStringLiteral("![alt](pic.png \"t\")\n");
+    auto result = parse(input);
+    QCOMPARE(result.imageElements.size(), 1);
+    const auto &image = result.imageElements.first();
+    QCOMPARE(image.m_destination, QStringLiteral("pic.png"));
+    QCOMPARE(image.m_alternateText, QStringLiteral("alt"));
+    QCOMPARE(image.m_title, QStringLiteral("t"));
+    QVERIFY(image.m_standalone);
+    QCOMPARE(image.m_startPos, 0);
+  }
+
+  {
+    const QString input = QStringLiteral("text ![a](b.png) more\n");
+    auto result = parse(input);
+    QCOMPARE(result.imageElements.size(), 1);
+    QVERIFY(!result.imageElements.first().m_standalone);
+  }
+
+  {
+    const QString input = QStringLiteral("```cpp\nint a;\n```\n");
+    auto result = parse(input);
+    QCOMPARE(result.codeElements.size(), 1);
+    QCOMPARE(result.codeElements.first().m_language, QStringLiteral("cpp"));
+    QCOMPARE(result.codeElements.first().m_code, QStringLiteral("int a;\n"));
+  }
+
+  {
+    const QString input = QStringLiteral("$$\nx^2\n$$\n");
+    auto result = parse(input);
+    QCOMPARE(result.mathElements.size(), 1);
+    QVERIFY(result.mathElements.first().m_display);
+  }
+}
+
+// End-to-end plumbing of the walker's heading elements: walker ->
+// MarkdownParseResult -> MarkdownHighlighterResult -> headingsUpdated. The
+// walker test alone cannot catch an omitted std::move in either parse path, or
+// an omitted copy in the highlighter result.
+void TestMarkdownParser::testHeadingElementsPublished() {
+  auto textConfig = QSharedPointer<vte::TextEditorConfig>::create();
+  auto markdownConfig = QSharedPointer<vte::MarkdownEditorConfig>::create(textConfig);
+  markdownConfig->m_inplacePreviewSources = vte::MarkdownEditorConfig::NoInplacePreview;
+  auto parameters = QSharedPointer<vte::TextEditorParameters>::create();
+  vte::VMarkdownEditor editor(markdownConfig, parameters);
+  auto highlighter = editor.getHighlighter();
+  QVERIFY(highlighter);
+
+  // A direct lambda rather than a QSignalSpy: no metatype registration is
+  // needed, and the signal is deliberately a same-thread direct connection.
+  QVector<vte::md::HeadingInfo> published;
+  int emissions = 0;
+  QObject::connect(highlighter, &vte::MarkdownHighlighter::headingsUpdated, &editor,
+                   [&published, &emissions](const QVector<vte::md::HeadingInfo> &p_headings) {
+                     published = p_headings;
+                     ++emissions;
+                   });
+
+  QSignalSpy completed(highlighter, &vte::MarkdownHighlighter::highlightCompleted);
+  editor.setText(QStringLiteral("# A **bold** `x`\n\nbody\n\n## [a](b)\n"));
+  completed.clear();
+  highlighter->updateHighlight();
+  QTRY_VERIFY(completed.count() > 0);
+
+  QVERIFY(emissions > 0);
+  QCOMPARE(published.size(), 2);
+  QCOMPARE(published.at(0).m_level, 1);
+  QCOMPARE(published.at(0).m_title, QStringLiteral("A bold x"));
+  QCOMPARE(published.at(0).m_startPos, 0);
+  QCOMPARE(published.at(1).m_level, 2);
+  QCOMPARE(published.at(1).m_title, QStringLiteral("a"));
+  QCOMPARE(published.at(1).m_anchorText, QStringLiteral("a"));
+  QVERIFY(published.at(1).m_startPos > published.at(0).m_startPos);
+
+  // The block of the start position is the heading's own line.
+  QCOMPARE(editor.document()->findBlock(published.at(1).m_startPos).blockNumber(), 4);
+
+  // The synchronous MarkdownParser::parse() path is a copy-paste twin of the
+  // worker's; cover it directly, or an omitted std::move there stays invisible.
+  vte::md::MarkdownParser parser;
+  auto config = QSharedPointer<vte::md::MarkdownParseConfig>::create();
+  config->m_data = QByteArray("# one\n\n## two\n");
+  config->m_numOfBlocks = 3;
+  auto syncResult = parser.parse(config);
+  QVERIFY(!syncResult.isNull());
+  QCOMPARE(syncResult->m_headingElements.size(), 2);
+  QCOMPARE(syncResult->m_headingElements.at(0).m_title, QStringLiteral("one"));
+  QCOMPARE(syncResult->m_headingElements.at(1).m_title, QStringLiteral("two"));
+
+  // A fast parse publishes no heading data at all.
+  config->m_fast = true;
+  auto fastResult = parser.parse(config);
+  QVERIFY(!fastResult.isNull());
+  QVERIFY(fastResult->m_headingElements.isEmpty());
+
+  // ... and unrelated rehighlighting of sensitive blocks does not republish
+  // (only completeHighlight() emits, and the fast path never reaches it), so
+  // the last full publication survives.
+  const auto before = published;
+  const int emissionsBefore = emissions;
+  editor.getHighlighter()->rehighlightSensitiveBlocks();
+  QCOMPARE(emissions, emissionsBefore);
+  QCOMPARE(published.size(), before.size());
+  QCOMPARE(published.at(0).m_title, before.at(0).m_title);
+}
+
+// cmarkNodeSpan() / cmarkNodeUrlSpan() are the single implementation of
+// cmark-coordinates-to-document-offset mapping, shared by the walker and by the
+// snapshot API. Exercise them directly, in the container shapes where cmark's
+// block_offset accounting needs correcting, and over destinations whose cleaned
+// form differs in length from their raw source spelling.
+void TestMarkdownParser::testCmarkNodeSpans() {
+  struct Case {
+    const char *markdown;
+    const char *region; // exact raw text of the image construct
+    const char *rawUrl; // exact raw text of the destination, "" when spanless
+  };
+
+  const QVector<Case> cases{
+      {"![a](i.png)\n", "![a](i.png)", "i.png"},
+      // Block quote: the stripped `> ` prefix must not shift the span.
+      {"> ![a](i.png)\n", "![a](i.png)", "i.png"},
+      // Block quote continuation line: the prefix is stripped per line.
+      {"> lead\n> ![a](i.png)\n", "![a](i.png)", "i.png"},
+      // List item continuation.
+      {"- lead\n  ![a](i.png)\n", "![a](i.png)", "i.png"},
+      // Lazy continuation (no indent on the second line).
+      {"- lead\n![a](i.png)\n", "![a](i.png)", "i.png"},
+      // Spanning two lines, both ways round.
+      {"![a\nb](i.png)\n", "![a\nb](i.png)", "i.png"},
+      {"![a](\ni.png)\n", "![a](\ni.png)", "i.png"},
+      // Ending in an astral character: exercises qcharWidthAtEndColumn().
+      {"![\xf0\x9f\x92\x8e](i.png)\n", "![\xf0\x9f\x92\x8e](i.png)", "i.png"},
+      {"![a](\xf0\x9f\x92\x8e.png)\n", "![a](\xf0\x9f\x92\x8e.png)", "\xf0\x9f\x92\x8e.png"},
+      // The raw destination keeps what cmark_node_get_url() resolves away, and
+      // differs from it in length -- which is exactly what the old
+      // indexOf(cleanedUrl) search could not handle.
+      {"![a](a\\_b.png)\n", "![a](a\\_b.png)", "a\\_b.png"},
+      {"![a](<a b.png>)\n", "![a](<a b.png>)", "<a b.png>"},
+      {"![a](a&amp;b.png)\n", "![a](a&amp;b.png)", "a&amp;b.png"},
+      // The `=WxH` suffix is inside the region but outside the destination.
+      {"![a](i.png =500x300)\n", "![a](i.png =500x300)", "i.png"},
+      // No inline destination at all.
+      {"![a][r]\n\n[r]: i.png\n", "![a][r]", ""},
+      {"![a]()\n", "![a]()", ""},
+  };
+
+  for (const auto &c : cases) {
+    const QByteArray utf8(c.markdown);
+    const QString text = QString::fromUtf8(utf8);
+    LineOffsetTable offsets(utf8);
+
+    cmark_node *doc = cmark_parse_document(utf8.constData(), utf8.size(), CMARK_OPT_DEFAULT);
+    QVERIFY(doc);
+
+    cmark_iter *iter = cmark_iter_new(doc);
+    cmark_node *image = nullptr;
+    cmark_event_type ev;
+    while ((ev = cmark_iter_next(iter)) != CMARK_EVENT_DONE) {
+      cmark_node *cur = cmark_iter_get_node(iter);
+      if (ev == CMARK_EVENT_ENTER && cmark_node_get_type(cur) == CMARK_NODE_IMAGE) {
+        image = cur;
+        break;
+      }
+    }
+    cmark_iter_free(iter);
+    QVERIFY2(image, c.markdown);
+
+    int start = -1;
+    int end = -1;
+    QVERIFY2(cmarkNodeSpan(image, offsets, start, end), c.markdown);
+    QCOMPARE(text.mid(start, end - start), QString::fromUtf8(c.region));
+
+    int urlStart = -1;
+    int urlEnd = -1;
+    const bool hasUrl = cmarkNodeUrlSpan(image, offsets, urlStart, urlEnd);
+    if (*c.rawUrl == '\0') {
+      QVERIFY2(!hasUrl, c.markdown);
+    } else {
+      QVERIFY2(hasUrl, c.markdown);
+      QCOMPARE(text.mid(urlStart, urlEnd - urlStart), QString::fromUtf8(c.rawUrl));
+      // The destination always sits inside the construct it belongs to.
+      QVERIFY(start <= urlStart && urlStart < urlEnd && urlEnd <= end);
+    }
+
+    cmark_node_free(doc);
+  }
+}
+
+// The `=WxH` size extension, all the way to the ImageElement, and the
+// projection onto what the highlighter publishes.
+void TestMarkdownParser::testImageSizeElements() {
+  struct Case {
+    const char *markdown;
+    const char *destination;
+    int width;
+    int height;
+    const char *title;
+  };
+
+  const QVector<Case> cases{
+      {"![](a.png)\n", "a.png", 0, 0, ""},
+      {"![](a.png =500x)\n", "a.png", 500, 0, ""},
+      {"![](a.png =500x300)\n", "a.png", 500, 300, ""},
+      {"![](a.png =x300)\n", "a.png", 0, 300, ""},
+      {"![](a.png \"the title\" =500x)\n", "a.png", 500, 0, "the title"},
+      // Without a separating space the token is part of the destination.
+      {"![](a.png=500x)\n", "a.png=500x", 0, 0, ""},
+      // The escape is resolved; the size is still parsed off the end.
+      {"![](a\\_b.png =500x)\n", "a_b.png", 500, 0, ""},
+      // A link is not an image, so no size is ever parsed for one.
+      {"![](<a b.png> =64x64)\n", "a b.png", 64, 64, ""},
+  };
+
+  for (const auto &c : cases) {
+    const QString input = QString::fromUtf8(c.markdown);
+    auto result = parse(input);
+    QCOMPARE(result.imageElements.size(), 1);
+
+    const auto &image = result.imageElements.first();
+    QCOMPARE(image.m_destination, QString::fromUtf8(c.destination));
+    QCOMPARE(image.m_width, c.width);
+    QCOMPARE(image.m_height, c.height);
+    QCOMPARE(image.m_title, QString::fromUtf8(c.title));
+    // The size token is never part of the destination.
+    QVERIFY2(!image.m_destination.contains(QStringLiteral(" =")), c.markdown);
+
+    // buildImageLinks() is a 1:1, order-preserving projection.
+    const auto links = vte::md::buildImageLinks(result.imageElements);
+    QCOMPARE(links.size(), 1);
+    QCOMPARE(links.first().m_destination, image.m_destination);
+    QCOMPARE(links.first().m_width, image.m_width);
+    QCOMPARE(links.first().m_height, image.m_height);
+    QCOMPARE(links.first().m_region.m_startPos, image.m_startPos);
+    QCOMPARE(links.first().m_region.m_endPos, image.m_endPos);
+  }
+
+  // Order is preserved across several images.
+  {
+    auto result = parse(QStringLiteral("![](a.png =1x) ![](b.png =2x) ![](c.png =3x)\n"));
+    QCOMPARE(result.imageElements.size(), 3);
+    const auto links = vte::md::buildImageLinks(result.imageElements);
+    QCOMPARE(links.size(), 3);
+    for (int i = 0; i < 3; ++i) {
+      QCOMPARE(links[i].m_destination, result.imageElements[i].m_destination);
+      QCOMPARE(links[i].m_width, i + 1);
+    }
+  }
+}
+
+namespace {
+// Every fixture that contains image links, for the corpus-wide gates.
+const QStringList &imageFixtures() {
+  static const QStringList names{QStringLiteral("image_elements.md"),
+                                 QStringLiteral("inline_elements.md")};
+  return names;
+}
+
+MarkdownLink::TypeFlags allTypes() {
+  return MarkdownLink::TypeFlag::LocalRelativeInternal |
+         MarkdownLink::TypeFlag::LocalRelativeExternal | MarkdownLink::TypeFlag::LocalAbsolute |
+         MarkdownLink::TypeFlag::QtResource | MarkdownLink::TypeFlag::Remote;
+}
+} // namespace
+
+// P3.1/P3.3: exact region and RAW destination spans, across the destination
+// spellings where the cleaned value differs from the source text. The old
+// implementation searched the content for the CLEANED url, so these were either
+// dropped outright or matched against an unrelated earlier occurrence.
+void TestMarkdownParser::testFetchImageLinksSpans() {
+  struct Case {
+    const char *markdown;
+    const char *region;
+    const char *rawUrl; // "" when the image has no destination span
+    const char *cleanUrl;
+  };
+
+  const QVector<Case> cases{
+      {"![a](i.png)\n", "![a](i.png)", "i.png", "i.png"},
+      {"![a](i.png =500x300)\n", "![a](i.png =500x300)", "i.png", "i.png"},
+      // The three spellings that break a text search for the cleaned value.
+      {"![a](a\\_b.png)\n", "![a](a\\_b.png)", "a\\_b.png", "a_b.png"},
+      {"![a](<a b.png>)\n", "![a](<a b.png>)", "<a b.png>", "a b.png"},
+      {"![a](a&amp;b.png)\n", "![a](a&amp;b.png)", "a&amp;b.png", "a&b.png"},
+      {"![a](a%20b.png)\n", "![a](a%20b.png)", "a%20b.png", "a%20b.png"},
+      // A title containing `](` defeats any scan for the last `](`.
+      {"![a](i.png \"x](y\")\n", "![a](i.png \"x](y\")", "i.png", "i.png"},
+      {"![a](a(b)c.png)\n", "![a](a(b)c.png)", "a(b)c.png", "a(b)c.png"},
+      // Containers and continuations.
+      {"> ![a](i.png)\n", "![a](i.png)", "i.png", "i.png"},
+      {"- lead\n  ![a](i.png)\n", "![a](i.png)", "i.png", "i.png"},
+      {"![a\nb](i.png)\n", "![a\nb](i.png)", "i.png", "i.png"},
+      {"![a](\ni.png)\n", "![a](\ni.png)", "i.png", "i.png"},
+      {"> ![a](\n> i.png)\n", "![a](\n> i.png)", "i.png", "i.png"},
+  };
+
+  for (const auto &c : cases) {
+    const QString content = QString::fromUtf8(c.markdown);
+    const auto links = MarkdownUtils::fetchImageLinks(content, QStringLiteral("/base"), allTypes());
+    QVERIFY2(links.size() == 1, c.markdown);
+
+    const auto &link = links.first();
+    QCOMPARE(link.m_urlInLink, QString::fromUtf8(c.cleanUrl));
+    QCOMPARE(content.mid(link.m_regionStart, link.m_regionEnd - link.m_regionStart),
+             QString::fromUtf8(c.region));
+    QVERIFY2(link.hasUrlSpan(), c.markdown);
+    QCOMPARE(content.mid(link.m_urlStart, link.m_urlEnd - link.m_urlStart),
+             QString::fromUtf8(c.rawUrl));
+  }
+}
+
+// P3.2: a reference-style image and an empty destination have a valid region
+// but no destination span. The old implementation dropped reference-style
+// images entirely, which is why a reference-style local image was silently
+// omitted from an export bundle.
+void TestMarkdownParser::testFetchImageLinksWithoutUrlSpan() {
+  {
+    const QString content = QStringLiteral("![a][r]\n\n[r]: p.png\n");
+    const auto links = MarkdownUtils::fetchImageLinks(content, QStringLiteral("/base"), allTypes());
+    QCOMPARE(links.size(), 1);
+    QCOMPARE(links.first().m_urlInLink, QStringLiteral("p.png"));
+    QVERIFY(!links.first().hasUrlSpan());
+    QCOMPARE(links.first().m_urlStart, -1);
+    QCOMPARE(content.mid(links.first().m_regionStart,
+                         links.first().m_regionEnd - links.first().m_regionStart),
+             QStringLiteral("![a][r]"));
+  }
+
+  {
+    // An empty destination points at nothing at all, so it is not an image link
+    // any caller can act on.
+    const auto links = MarkdownUtils::fetchImageLinks(QStringLiteral("![a]()\n"),
+                                                      QStringLiteral("/base"), allTypes());
+    QCOMPARE(links.size(), 0);
+  }
+}
+
+// P3.4: classification is syntactic. A relative link to a missing file stays
+// LocalRelative* with exists == false; it used to be classified Remote purely
+// because the file was not there, so a caller asking for local images skipped
+// exactly the broken links a user would want repaired.
+void TestMarkdownParser::testFetchImageLinksClassification() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  QVERIFY(QDir(dir.path()).mkpath(QStringLiteral("vx_images")));
+  QFile present(QDir(dir.path()).filePath(QStringLiteral("vx_images/here.png")));
+  QVERIFY(present.open(QIODevice::WriteOnly));
+  present.write("x");
+  present.close();
+
+  const QString content = QStringLiteral("![a](vx_images/here.png)\n"
+                                         "![b](vx_images/missing.png)\n"
+                                         "![c](https://example.com/x.png)\n"
+                                         "![d](qrc:/icons/x.png)\n"
+                                         "![e](../outside.png)\n");
+  const auto links = MarkdownUtils::fetchImageLinks(content, dir.path(), allTypes());
+  QCOMPARE(links.size(), 5);
+
+  QHash<QString, MarkdownLink> byAlt;
+  for (const auto &l : links) {
+    byAlt.insert(l.m_alt, l);
+  }
+
+  QVERIFY(byAlt[QStringLiteral("a")].m_type & MarkdownLink::TypeFlag::LocalRelativeInternal);
+  QVERIFY(byAlt[QStringLiteral("a")].m_exists);
+
+  // The one that matters: present-tense classification, absent file.
+  QVERIFY(byAlt[QStringLiteral("b")].m_type & MarkdownLink::TypeFlag::LocalRelativeInternal);
+  QVERIFY(!byAlt[QStringLiteral("b")].m_exists);
+  QVERIFY(!(byAlt[QStringLiteral("b")].m_type & MarkdownLink::TypeFlag::Remote));
+
+  QVERIFY(byAlt[QStringLiteral("c")].m_type & MarkdownLink::TypeFlag::Remote);
+  QVERIFY(byAlt[QStringLiteral("d")].m_type & MarkdownLink::TypeFlag::QtResource);
+  QVERIFY(byAlt[QStringLiteral("e")].m_type & MarkdownLink::TypeFlag::LocalRelativeExternal);
+
+  // The filter selects on those same syntactic flags.
+  const auto localOnly =
+      MarkdownUtils::fetchImageLinks(content, dir.path(),
+                                     MarkdownLink::TypeFlag::LocalRelativeInternal |
+                                         MarkdownLink::TypeFlag::LocalRelativeExternal);
+  QCOMPARE(localOnly.size(), 3);
+}
+
+// P3.5: the sort contract rewriting callers depend on.
+void TestMarkdownParser::testFetchImageLinksSortContract() {
+  const QString content = QStringLiteral("![a](one.png) ![b][r] ![c](two.png) ![d][r]\n"
+                                         "![e](one.png)\n\n[r]: ref.png\n");
+  const auto links = MarkdownUtils::fetchImageLinks(content, QStringLiteral("/base"), allTypes());
+  QCOMPARE(links.size(), 5);
+
+  // Spanned entries first, strictly descending by raw destination start.
+  int spanned = 0;
+  for (const auto &l : links) {
+    if (!l.hasUrlSpan()) {
+      break;
+    }
+    ++spanned;
+  }
+  QCOMPARE(spanned, 3);
+  for (int i = 1; i < spanned; ++i) {
+    QVERIFY(links[i - 1].m_urlStart > links[i].m_urlStart);
+  }
+
+  // Spanless entries last, and in document order (the sort is stable).
+  for (int i = spanned; i < links.size(); ++i) {
+    QVERIFY(!links[i].hasUrlSpan());
+  }
+  QCOMPARE(links[spanned].m_alt, QStringLiteral("b"));
+  QCOMPARE(links[spanned + 1].m_alt, QStringLiteral("d"));
+
+  // No deduplication: one.png appears twice and both must be rewritable.
+  int oneCount = 0;
+  for (const auto &l : links) {
+    if (l.m_urlInLink == QStringLiteral("one.png")) {
+      ++oneCount;
+    }
+  }
+  QCOMPARE(oneCount, 2);
+}
+
+// G2: the walker and the snapshot API must report the same image regions, in
+// the same order, for the same content. They are two consumers of one mapping;
+// a divergence means one of them grew its own.
+void TestMarkdownParser::testWalkerAndSnapshotAgreeOnRegions() {
+  for (const auto &name : imageFixtures()) {
+    const QString content = readFixture(name);
+    QVERIFY2(!content.isEmpty(), qPrintable(name));
+
+    const auto walked = parse(content).imageElements;
+    const auto links = MarkdownUtils::fetchImageLinks(content, QStringLiteral("/base"), allTypes());
+
+    // The snapshot API drops images with an empty destination; the walker keeps
+    // them. Compare against the walker's list filtered the same way.
+    QVector<vte::md::ImageElement> comparable;
+    for (const auto &e : walked) {
+      if (!e.m_destination.isEmpty()) {
+        comparable.append(e);
+      }
+    }
+
+    QCOMPARE(links.size(), comparable.size());
+
+    // fetchImageLinks() sorts for rewriting; compare as sets of regions.
+    QVector<QPair<int, int>> fromWalker;
+    QVector<QPair<int, int>> fromSnapshot;
+    for (const auto &e : comparable) {
+      fromWalker.append(qMakePair(e.m_startPos, e.m_endPos));
+    }
+    for (const auto &l : links) {
+      fromSnapshot.append(qMakePair(l.m_regionStart, l.m_regionEnd));
+    }
+    std::sort(fromWalker.begin(), fromWalker.end());
+    std::sort(fromSnapshot.begin(), fromSnapshot.end());
+    QCOMPARE(fromSnapshot, fromWalker);
+  }
+}
+
+// G3: properties, checked for EVERY image in every fixture. Hand-enumerated
+// cases only guard what someone thought of; these scale to grammar nobody
+// anticipated.
+void TestMarkdownParser::testImageLinkInvariants() {
+  for (const auto &name : imageFixtures()) {
+    const QString content = readFixture(name);
+    QVERIFY2(!content.isEmpty(), qPrintable(name));
+
+    const auto links = MarkdownUtils::fetchImageLinks(content, QStringLiteral("/base"), allTypes());
+    QVERIFY2(!links.isEmpty(), qPrintable(name));
+
+    for (const auto &link : links) {
+      const QString where = QStringLiteral("%1: %2").arg(name, content.mid(link.m_regionStart, 40));
+
+      // Every span lies inside the content. This is the class of bug the old
+      // indexOf-based location produced when it matched the wrong occurrence.
+      QVERIFY2(link.m_regionStart >= 0 && link.m_regionStart < link.m_regionEnd &&
+                   link.m_regionEnd <= content.size(),
+               qPrintable(where));
+
+      if (!link.hasUrlSpan()) {
+        continue;
+      }
+
+      QVERIFY2(link.m_regionStart <= link.m_urlStart && link.m_urlStart < link.m_urlEnd &&
+                   link.m_urlEnd <= link.m_regionEnd,
+               qPrintable(where));
+
+      // THE invariant, checked against an INDEPENDENT oracle: feed the raw
+      // span back through cmark as the destination of a fresh image and the
+      // parser must resolve it to the same cleaned value. A span that is
+      // off by one, or that points at the wrong occurrence, produces a
+      // different destination here. Comparing the raw text to itself would
+      // prove nothing -- replacing any in-bounds span with its own contents is
+      // a no-op for every span, right or wrong.
+      const QString raw = content.mid(link.m_urlStart, link.m_urlEnd - link.m_urlStart);
+      if (link.m_syntax == MarkdownLink::Syntax::Html) {
+        // The independent oracle for an HTML image is the scanner run over the
+        // reported REGION alone: it must find exactly one tag, spanning the
+        // whole region, whose decoded src is the reported destination and whose
+        // src value span is the reported url span.
+        vte::RawTextState state;
+        const QString region =
+            content.mid(link.m_regionStart, link.m_regionEnd - link.m_regionStart);
+        const auto tags = vte::scanHtmlImgTags(region, link.m_regionStart, &state);
+        QVERIFY2(tags.size() == 1, qPrintable(where));
+        QCOMPARE(tags.first().m_tagStart, link.m_regionStart);
+        QCOMPARE(tags.first().m_tagEnd, link.m_regionEnd);
+        QCOMPARE(tags.first().src(), link.m_urlInLink);
+        const auto *srcAttr = tags.first().attr("src");
+        QVERIFY(srcAttr);
+        QCOMPARE(srcAttr->m_valueStart, link.m_urlStart);
+        QCOMPARE(srcAttr->m_valueEnd, link.m_urlEnd);
+        QCOMPARE(content.mid(link.m_regionStart, 4).toLower(), QStringLiteral("<img"));
+        continue;
+      }
+
+      {
+        const QString probeMd = QStringLiteral("![](") + raw + QStringLiteral(")\n");
+        const QByteArray probeUtf8 = probeMd.toUtf8();
+        cmark_node *probeDoc =
+            cmark_parse_document(probeUtf8.constData(), probeUtf8.size(), CMARK_OPT_DEFAULT);
+        QVERIFY(probeDoc);
+        cmark_iter *probeIter = cmark_iter_new(probeDoc);
+        QString reparsed;
+        bool sawImage = false;
+        cmark_event_type pev;
+        while ((pev = cmark_iter_next(probeIter)) != CMARK_EVENT_DONE) {
+          cmark_node *cur = cmark_iter_get_node(probeIter);
+          if (pev == CMARK_EVENT_ENTER && cmark_node_get_type(cur) == CMARK_NODE_IMAGE) {
+            sawImage = true;
+            const char *u = cmark_node_get_url(cur);
+            reparsed = u ? QString::fromUtf8(u) : QString();
+            break;
+          }
+        }
+        cmark_iter_free(probeIter);
+        cmark_node_free(probeDoc);
+        QVERIFY2(sawImage, qPrintable(where + QStringLiteral(" raw=") + raw));
+        QCOMPARE(reparsed, link.m_urlInLink);
+      }
+
+      // The region begins at the `!` of `![`.
+      QCOMPARE(content.mid(link.m_regionStart, 2), QStringLiteral("!["));
+    }
+
+    // Regions are properly nested: any two are either disjoint or one wholly
+    // contains the other. CommonMark permits an image inside another image's
+    // description, so plain disjointness is NOT an invariant -- asserting it
+    // would encode a false grammar rule and give whole-region rewriting
+    // callers a guarantee the parser does not make.
+    for (int i = 0; i < links.size(); ++i) {
+      for (int j = i + 1; j < links.size(); ++j) {
+        const auto &a = links[i];
+        const auto &b = links[j];
+        const bool disjoint = a.m_regionEnd <= b.m_regionStart || b.m_regionEnd <= a.m_regionStart;
+        const bool aInB = b.m_regionStart <= a.m_regionStart && a.m_regionEnd <= b.m_regionEnd;
+        const bool bInA = a.m_regionStart <= b.m_regionStart && b.m_regionEnd <= a.m_regionEnd;
+        QVERIFY2(disjoint || aInB || bInA, qPrintable(name));
+      }
+    }
+
+    // Destination spans, unlike regions, NEVER overlap -- which is what makes
+    // destination-only rewriting safe even across nested images.
+    QVector<QPair<int, int>> urlSpans;
+    for (const auto &l : links) {
+      if (l.hasUrlSpan()) {
+        urlSpans.append(qMakePair(l.m_urlStart, l.m_urlEnd));
+      }
+    }
+    std::sort(urlSpans.begin(), urlSpans.end());
+    for (int i = 1; i < urlSpans.size(); ++i) {
+      QVERIFY2(urlSpans[i - 1].second <= urlSpans[i].first, qPrintable(name));
+    }
+  }
+}
+
+// CommonMark allows an image inside another image's description. Both are
+// reported, their regions nest, and -- crucially -- their destination spans do
+// not overlap, so destination rewriting stays safe.
+void TestMarkdownParser::testNestedImages() {
+  const QString content = QStringLiteral("![foo ![bar](/a.png)](/b.png) tail\n");
+  const auto links = MarkdownUtils::fetchImageLinks(content, QStringLiteral("/base"), allTypes());
+  QCOMPARE(links.size(), 2);
+
+  const auto *outer = &links[0];
+  const auto *inner = &links[1];
+  if (outer->m_urlInLink != QStringLiteral("/b.png")) {
+    std::swap(outer, inner);
+  }
+  QCOMPARE(outer->m_urlInLink, QStringLiteral("/b.png"));
+  QCOMPARE(inner->m_urlInLink, QStringLiteral("/a.png"));
+
+  QCOMPARE(content.mid(outer->m_regionStart, outer->m_regionEnd - outer->m_regionStart),
+           QStringLiteral("![foo ![bar](/a.png)](/b.png)"));
+  QCOMPARE(content.mid(inner->m_regionStart, inner->m_regionEnd - inner->m_regionStart),
+           QStringLiteral("![bar](/a.png)"));
+
+  // Regions nest.
+  QVERIFY(outer->m_regionStart <= inner->m_regionStart);
+  QVERIFY(inner->m_regionEnd <= outer->m_regionEnd);
+
+  // Destination spans do not.
+  QVERIFY(inner->m_urlEnd <= outer->m_urlStart || outer->m_urlEnd <= inner->m_urlStart);
+  QCOMPARE(content.mid(inner->m_urlStart, inner->m_urlEnd - inner->m_urlStart),
+           QStringLiteral("/a.png"));
+  QCOMPARE(content.mid(outer->m_urlStart, outer->m_urlEnd - outer->m_urlStart),
+           QStringLiteral("/b.png"));
+}
+
+// A `file:` URL names an absolute location. Letting it fall through to the
+// relative branch would put it in front of consumers that copy or migrate
+// notebook-relative assets.
+void TestMarkdownParser::testFileUrlClassification() {
+  const QString content = QStringLiteral("![a](file:///tmp/notes/x.png)\n"
+                                         "![b](/abs/x.png)\n"
+                                         "![c](x:/drive-or-scheme.png)\n"
+                                         "![d](ftp://host/x.png)\n");
+  const auto links =
+      MarkdownUtils::fetchImageLinks(content, QStringLiteral("/tmp/notes"), allTypes());
+  QCOMPARE(links.size(), 4);
+
+  QHash<QString, MarkdownLink> byAlt;
+  for (const auto &l : links) {
+    byAlt.insert(l.m_alt, l);
+  }
+
+  QVERIFY2(byAlt[QStringLiteral("a")].m_type & MarkdownLink::TypeFlag::LocalAbsolute,
+           "a file: URL is absolute, not relative");
+  QVERIFY(!(byAlt[QStringLiteral("a")].m_type & (MarkdownLink::TypeFlag::LocalRelativeInternal |
+                                                 MarkdownLink::TypeFlag::LocalRelativeExternal)));
+  QVERIFY(byAlt[QStringLiteral("b")].m_type & MarkdownLink::TypeFlag::LocalAbsolute);
+  // `x:/...` is inherently ambiguous -- a Windows drive path and a legal
+  // one-character URI scheme are spelled identically. VNote resolves it as a
+  // drive path, which is what a user writing it means in practice.
+  QVERIFY(byAlt[QStringLiteral("c")].m_type & MarkdownLink::TypeFlag::LocalAbsolute);
+  QVERIFY(byAlt[QStringLiteral("d")].m_type & MarkdownLink::TypeFlag::Remote);
+
+  // A relative-only request must not see the absolute ones at all.
+  const auto relative =
+      MarkdownUtils::fetchImageLinks(content, QStringLiteral("/tmp/notes"),
+                                     MarkdownLink::TypeFlag::LocalRelativeInternal |
+                                         MarkdownLink::TypeFlag::LocalRelativeExternal);
+  QCOMPARE(relative.size(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// HTML `<img>`
+// ---------------------------------------------------------------------------
+
+// The scanner is the ONE place allowed to pattern-match `<img` in note source,
+// so its quoting, casing and entity handling are pinned here rather than only
+// through the callers.
+void TestMarkdownParser::testHtmlImgScannerQuoting() {
+  struct Case {
+    const char *text;
+    const char *src;
+    const char *alt;
+    int width;
+    int height;
+    bool unknownAttrs;
+  };
+
+  const QVector<Case> cases{
+      {"<img src=\"a.png\"/>", "a.png", "", 0, 0, false},
+      {"<img src='a.png'>", "a.png", "", 0, 0, false},
+      {"<img src=a.png>", "a.png", "", 0, 0, false},
+      {"<IMG SRC=\"a.png\" ALT=\"Hi\">", "a.png", "Hi", 0, 0, false},
+      // Entities are decoded in every value.
+      {"<img src=\"a&amp;b.png\" alt=\"&quot;q&quot;\">", "a&b.png", "\"q\"", 0, 0, false},
+      {"<img src=\"a.png\" width=\"500\" height=\"300\" />", "a.png", "", 500, 300, false},
+      // A percentage, a non-integer and a non-positive value are all "no size".
+      {"<img src=\"a.png\" width=\"50%\">", "a.png", "", 0, 0, false},
+      {"<img src=\"a.png\" width=\"abc\">", "a.png", "", 0, 0, false},
+      {"<img src=\"a.png\" width=\"0\">", "a.png", "", 0, 0, false},
+      {"<img src=\"a.png\" width=\"-5\">", "a.png", "", 0, 0, false},
+      // A `>` inside a quoted value does not terminate the tag.
+      {"<img src=\"a.png\" alt=\"a>b\">", "a.png", "a>b", 0, 0, false},
+      {"<img src=\"a.png\" class=\"x\">", "a.png", "", 0, 0, true},
+      {"<img src=\"a.png\" style=\"width:1px\">", "a.png", "", 0, 0, true},
+      {"<img src=\"a.png\" data-id=\"7\">", "a.png", "", 0, 0, true},
+      // A bare attribute is still an attribute.
+      {"<img src=\"a.png\" hidden>", "a.png", "", 0, 0, true},
+  };
+
+  for (const auto &c : cases) {
+    const QString text = QString::fromUtf8(c.text);
+    vte::RawTextState state;
+    const auto tags = vte::scanHtmlImgTags(text, 0, &state);
+    QVERIFY2(tags.size() == 1, c.text);
+    QCOMPARE(tags.first().src(), QString::fromUtf8(c.src));
+    QCOMPARE(tags.first().alt(), QString::fromUtf8(c.alt));
+    QCOMPARE(tags.first().width(), c.width);
+    QCOMPARE(tags.first().height(), c.height);
+    QCOMPARE(tags.first().hasUnknownAttrs(), c.unknownAttrs);
+    // The tag span is byte-exact.
+    QCOMPARE(text.mid(tags.first().m_tagStart, tags.first().m_tagEnd - tags.first().m_tagStart),
+             text);
+  }
+
+  // Entity decoding uses cmark''s decoder and its complete HTML5 named-reference
+  // table, so a decoded destination agrees with what the RENDERER resolves. That
+  // agreement is load-bearing: obsolete-image cleanup compares decoded
+  // destinations before DELETING assets, so a subset table would let a
+  // still-rendered `a&copy;.png` be classified as obsolete.
+  {
+    struct EntityCase {
+      const char *src;
+      const char *decoded;
+    };
+    const QVector<EntityCase> entities{
+        {"a&amp;b.png", "a&b.png"},
+        {"a&copy;b.png", "a\xC2\xA9"
+                         "b.png"}, // outside any hand-written subset
+        {"a&AElig;b.png", "a\xC3\x86"
+                          "b.png"},                         // upper-case name, a REAL reference
+        {"a&#38;b.png", "a&b.png"},                         // decimal
+        {"a&#x26;b.png", "a&b.png"},                        // hex
+        {"a&notareference;b.png", "a&notareference;b.png"}, // left literal
+    };
+
+    for (const auto &c : entities) {
+      const QString text = QStringLiteral("<img src=\"%1\">").arg(QString::fromUtf8(c.src));
+      vte::RawTextState state;
+      const auto tags = vte::scanHtmlImgTags(text, 0, &state);
+      QVERIFY2(tags.size() == 1, c.src);
+      QCOMPARE(tags.first().src(), QString::fromUtf8(c.decoded));
+      // The SPAN still measures the source spelling, never the decoded value.
+      const auto *srcAttr = tags.first().attr("src");
+      QVERIFY(srcAttr);
+      QCOMPARE(text.mid(srcAttr->m_valueStart, srcAttr->m_valueEnd - srcAttr->m_valueStart),
+               QString::fromUtf8(c.src));
+    }
+  }
+
+  // The first occurrence wins for reads, and the duplicate is still reported.
+  {
+    vte::RawTextState state;
+    const auto tags = vte::scanHtmlImgTags(
+        QStringLiteral("<img src=\"a.png\" width=\"100\" width=\"200\">"), 0, &state);
+    QCOMPARE(tags.size(), 1);
+    QCOMPARE(tags.first().width(), 100);
+    QVERIFY(tags.first().hasDuplicateAttrs());
+    QVERIFY(!tags.first().hasUnknownAttrs());
+    QCOMPARE(tags.first().m_attrs.size(), 3);
+  }
+}
+
+// Everything the scanner must NOT report.
+void TestMarkdownParser::testHtmlImgScannerSuppression() {
+  const QVector<const char *> ignored{
+      // A multiline tag is out of scope by design (unchanged behaviour).
+      "<img\n  src=\"a.png\">",
+      "<img src=\"a.png\"\n  width=\"5\">",
+      "<!-- <img src=\"a.png\"> -->",
+      // No src, or an empty one.
+      "<img alt=\"a\">",
+      "<img src=\"\">",
+      // Raw-text elements: an `<img>` there is text, not an image.
+      "<script>var s = '<img src=\"a.png\">';</script>",
+      "<style>/* <img src=\"a.png\"> */</style>",
+      "<textarea><img src=\"a.png\"></textarea>",
+      "<title><img src=\"a.png\"></title>",
+      // Unclosed raw text suppresses to the end -- fail safe.
+      "<script>'<img src=\"a.png\">'",
+      // A tag spelled inside another tag's quoted attribute value.
+      "<span title=\"<img src='a.png'>\">x</span>",
+  };
+
+  for (const char *text : ignored) {
+    vte::RawTextState state;
+    const auto tags = vte::scanHtmlImgTags(QString::fromUtf8(text), 0, &state);
+    QVERIFY2(tags.isEmpty(), text);
+  }
+
+  // A real tag immediately after the closing raw-text tag IS found.
+  {
+    vte::RawTextState state;
+    const auto tags = vte::scanHtmlImgTags(
+        QStringLiteral("<script><img src=\"no.png\"></script><img src=\"yes.png\">"), 0, &state);
+    QCOMPARE(tags.size(), 1);
+    QCOMPARE(tags.first().src(), QStringLiteral("yes.png"));
+    QVERIFY(state.m_element.isEmpty());
+  }
+
+  // The state is carried ACROSS calls, because cmark splits an element's
+  // opening tag, contents and closing tag into separate nodes.
+  {
+    vte::RawTextState state;
+    QVERIFY(vte::scanHtmlImgTags(QStringLiteral("<script>"), 0, &state).isEmpty());
+    QCOMPARE(state.m_element, QStringLiteral("script"));
+    QVERIFY(vte::scanHtmlImgTags(QStringLiteral("<img src=\"a.png\">"), 0, &state).isEmpty());
+    QVERIFY(vte::scanHtmlImgTags(QStringLiteral("</SCRIPT>"), 0, &state).isEmpty());
+    QVERIFY(state.m_element.isEmpty());
+    const auto tags = vte::scanHtmlImgTags(QStringLiteral("<img src=\"a.png\">"), 0, &state);
+    QCOMPARE(tags.size(), 1);
+  }
+
+  // Two tags on one line are both found.
+  {
+    vte::RawTextState state;
+    const auto tags = vte::scanHtmlImgTags(
+        QStringLiteral("<img src=\"a.png\"> and <img src=\"b.png\">"), 0, &state);
+    QCOMPARE(tags.size(), 2);
+    QCOMPARE(tags.at(0).src(), QStringLiteral("a.png"));
+    QCOMPARE(tags.at(1).src(), QStringLiteral("b.png"));
+  }
+}
+
+// Attribute spans are what every rewriter measures with; they must be
+// byte-exact, and the base offset must be applied.
+void TestMarkdownParser::testHtmlImgScannerAttrSpans() {
+  const QString text = QStringLiteral("xx<img src=\"a b.png\" width=500 alt='q'>");
+  const int base = 1000;
+  vte::RawTextState state;
+  const auto tags = vte::scanHtmlImgTags(text, base, &state);
+  QCOMPARE(tags.size(), 1);
+
+  const auto &tag = tags.first();
+  QCOMPARE(tag.m_tagStart, base + 2);
+  QCOMPARE(tag.m_tagEnd, base + text.size());
+
+  const auto *src = tag.attr("src");
+  QVERIFY(src);
+  QCOMPARE(text.mid(src->m_attrStart - base, src->m_attrEnd - src->m_attrStart),
+           QStringLiteral("src=\"a b.png\""));
+  QCOMPARE(text.mid(src->m_valueStart - base, src->m_valueEnd - src->m_valueStart),
+           QStringLiteral("a b.png"));
+  QCOMPARE(src->m_quote, QLatin1Char('"'));
+
+  const auto *width = tag.attr("width");
+  QVERIFY(width);
+  QCOMPARE(text.mid(width->m_attrStart - base, width->m_attrEnd - width->m_attrStart),
+           QStringLiteral("width=500"));
+  QVERIFY(width->m_quote.isNull());
+
+  const auto *alt = tag.attr("alt");
+  QVERIFY(alt);
+  QCOMPARE(text.mid(alt->m_valueStart - base, alt->m_valueEnd - alt->m_valueStart),
+           QStringLiteral("q"));
+  QCOMPARE(alt->m_quote, QLatin1Char('\''));
+
+  QVERIFY(!tag.attr("title"));
+}
+
+// An HTML image is a first-class entry of the snapshot API: same region/url
+// span contract, same classification, same flag filtering.
+void TestMarkdownParser::testFetchImageLinksHtml() {
+  const QString content = QStringLiteral(
+      "<img src=\"a b.png\" alt=\"the alt\" title=\"the title\" width=\"500\" height=\"300\" />\n");
+  const auto links = MarkdownUtils::fetchImageLinks(content, QStringLiteral("/base"), allTypes());
+  QCOMPARE(links.size(), 1);
+
+  const auto &link = links.first();
+  QCOMPARE(link.m_syntax, MarkdownLink::Syntax::Html);
+  QCOMPARE(link.m_urlInLink, QStringLiteral("a b.png"));
+  QCOMPARE(link.m_alt, QStringLiteral("the alt"));
+  QCOMPARE(link.m_title, QStringLiteral("the title"));
+  QCOMPARE(link.m_width, 500);
+  QCOMPARE(link.m_height, 300);
+  QVERIFY(link.m_type & MarkdownLink::TypeFlag::LocalRelativeInternal);
+  QCOMPARE(content.mid(link.m_regionStart, link.m_regionEnd - link.m_regionStart),
+           content.trimmed());
+  // The url span is the `src` VALUE, quotes excluded.
+  QVERIFY(link.hasUrlSpan());
+  QCOMPARE(content.mid(link.m_urlStart, link.m_urlEnd - link.m_urlStart),
+           QStringLiteral("a b.png"));
+
+  // Entities are decoded, and the raw span still measures the source spelling.
+  {
+    const QString html = QStringLiteral("<img src=\"a&amp;b.png\">\n");
+    const auto entity = MarkdownUtils::fetchImageLinks(html, QStringLiteral("/base"), allTypes());
+    QCOMPARE(entity.size(), 1);
+    QCOMPARE(entity.first().m_urlInLink, QStringLiteral("a&b.png"));
+    QCOMPARE(
+        html.mid(entity.first().m_urlStart, entity.first().m_urlEnd - entity.first().m_urlStart),
+        QStringLiteral("a&amp;b.png"));
+  }
+
+  // Remote and absolute destinations classify exactly as Markdown ones do.
+  {
+    const QString html = QStringLiteral("<img src=\"https://h/x.png\">\n");
+    const auto remote = MarkdownUtils::fetchImageLinks(html, QStringLiteral("/base"), allTypes());
+    QCOMPARE(remote.size(), 1);
+    QVERIFY(remote.first().m_type & MarkdownLink::TypeFlag::Remote);
+
+    const auto relativeOnly = MarkdownUtils::fetchImageLinks(
+        html, QStringLiteral("/base"), MarkdownLink::TypeFlag::LocalRelativeInternal);
+    QVERIFY(relativeOnly.isEmpty());
+  }
+
+  // A multiline tag is invisible, exactly as before this feature existed.
+  {
+    const auto none = MarkdownUtils::fetchImageLinks(QStringLiteral("<img\n  src=\"a.png\">\n"),
+                                                     QStringLiteral("/base"), allTypes());
+    QVERIFY(none.isEmpty());
+  }
+}
+
+// Container prefixes (`> `, list indent) and multiline HTML blocks: the raw
+// slice keeps the prefixes, but D8 guarantees a tag never contains one, so
+// every reported span must still be byte-exact.
+void TestMarkdownParser::testFetchImageLinksHtmlContainers() {
+  const QVector<QString> contents{
+      QStringLiteral("> <img src=\"a.png\">\n"),
+      QStringLiteral("- <img src=\"a.png\">\n"),
+      QStringLiteral("- item\n\n  <img src=\"a.png\">\n"),
+      QStringLiteral("<div>\n<img src=\"a.png\">\n</div>\n"),
+      QStringLiteral("> <div>\n> <img src=\"a.png\">\n> </div>\n"),
+      QStringLiteral("- <div>\n  <img src=\"a.png\">\n  </div>\n"),
+      // Ending at EOF with no trailing newline.
+      QStringLiteral("<div>\n<img src=\"a.png\">\n</div>"),
+      // A lazy continuation: the container prefix is absent on the tag's line,
+      // which shifts every reported column (D12).
+      QStringLiteral("> lead\n<img src=\"a.png\">\n"),
+      QStringLiteral("- lead\n<img src=\"a.png\">\n"),
+      // Nested in a Markdown image's description (regions may nest).
+      QStringLiteral("![d <img src=\"a.png\"> e](m.png)\n"),
+  };
+
+  for (const QString &content : contents) {
+    const auto links = MarkdownUtils::fetchImageLinks(content, QStringLiteral("/base"), allTypes());
+    const MarkdownLink *html = nullptr;
+    for (const auto &link : links) {
+      if (link.m_syntax == MarkdownLink::Syntax::Html) {
+        QVERIFY2(!html, qPrintable(content));
+        html = &link;
+      }
+    }
+    QVERIFY2(html, qPrintable(content));
+    QCOMPARE(content.mid(html->m_regionStart, html->m_regionEnd - html->m_regionStart),
+             QStringLiteral("<img src=\"a.png\">"));
+    QCOMPARE(content.mid(html->m_urlStart, html->m_urlEnd - html->m_urlStart),
+             QStringLiteral("a.png"));
+  }
+
+  // Two identical tags on one line: both are reported, at distinct spans.
+  {
+    const QString content =
+        QStringLiteral("<div>\n<img src=\"a.png\"><img src=\"a.png\">\n</div>\n");
+    const auto links = MarkdownUtils::fetchImageLinks(content, QStringLiteral("/base"), allTypes());
+    QCOMPARE(links.size(), 2);
+    QVERIFY(links.at(0).m_regionStart != links.at(1).m_regionStart);
+    for (const auto &link : links) {
+      QCOMPARE(content.mid(link.m_regionStart, link.m_regionEnd - link.m_regionStart),
+               QStringLiteral("<img src=\"a.png\">"));
+    }
+  }
+}
+
+// Raw-text suppression must hold THROUGH fetchImageLinks(), not only inside the
+// scanner: cmark splits `<script>`, its contents and `</script>` into separate
+// HTML nodes.
+void TestMarkdownParser::testFetchImageLinksHtmlRawText() {
+  const QVector<QString> suppressed{
+      QStringLiteral("<script>\nvar s = '<img src=\"a.png\">';\n</script>\n"),
+      QStringLiteral("<style>\n/* <img src=\"a.png\"> */\n</style>\n"),
+      QStringLiteral("<textarea>\n<img src=\"a.png\">\n</textarea>\n"),
+      QStringLiteral("<title>\n<img src=\"a.png\">\n</title>\n"),
+      QStringLiteral("para <script>var s = '<img src=\"a.png\">';</script> tail\n"),
+  };
+
+  for (const QString &content : suppressed) {
+    const auto links = MarkdownUtils::fetchImageLinks(content, QStringLiteral("/base"), allTypes());
+    QVERIFY2(links.isEmpty(), qPrintable(content));
+  }
+
+  // A real image after the closing tag is still found.
+  {
+    const QString content =
+        QStringLiteral("<script>\nvar s = '<img src=\"no.png\">';\n</script>\n\n"
+                       "<img src=\"yes.png\">\n");
+    const auto links = MarkdownUtils::fetchImageLinks(content, QStringLiteral("/base"), allTypes());
+    QCOMPARE(links.size(), 1);
+    QCOMPARE(links.first().m_urlInLink, QStringLiteral("yes.png"));
+  }
+
+  // The state must advance even for a node this walk cannot place, or an
+  // unresolvable `<script>` would unmask an `<img>` inside it. A lazy
+  // continuation is what makes the inline node unresolvable.
+  {
+    const QString content = QStringLiteral("> lead <script>\n'<img src=\"a.png\">'\n</script>\n");
+    const auto links = MarkdownUtils::fetchImageLinks(content, QStringLiteral("/base"), allTypes());
+    QVERIFY(links.isEmpty());
+  }
+}
+
+// The T0 regression: a single-line `<img>` following a multiline construct.
+// Before the cmark fix, every inline node after one carried stale coordinates.
+void TestMarkdownParser::testFetchImageLinksHtmlAfterMultilineConstruct() {
+  const QVector<QString> contents{
+      QStringLiteral("a `co\nde` <img src=\"a.png\"> b\n"),
+      QStringLiteral("a <span\nclass=\"x\">b</span> <img src=\"a.png\"> c\n"),
+      QStringLiteral("> a `co\n> de` <img src=\"a.png\"> b\n"),
+      QStringLiteral("- a <span\n  class=\"x\">b</span> <img src=\"a.png\"> c\n"),
+  };
+
+  for (const QString &content : contents) {
+    const auto links = MarkdownUtils::fetchImageLinks(content, QStringLiteral("/base"), allTypes());
+    QCOMPARE(links.size(), 1);
+    QCOMPARE(content.mid(links.first().m_regionStart,
+                         links.first().m_regionEnd - links.first().m_regionStart),
+             QStringLiteral("<img src=\"a.png\">"));
+  }
+}
+
+// The sort runs over the MERGED vector, so the descending-m_urlStart contract
+// holds across syntaxes.
+void TestMarkdownParser::testFetchImageLinksMixedOrdering() {
+  const QString content = QStringLiteral("![a](one.png)\n"
+                                         "<img src=\"two.png\">\n"
+                                         "![b](three.png)\n"
+                                         "<img src=\"four.png\">\n");
+  const auto links = MarkdownUtils::fetchImageLinks(content, QStringLiteral("/base"), allTypes());
+  QCOMPARE(links.size(), 4);
+
+  QStringList order;
+  for (int i = 0; i < links.size(); ++i) {
+    order << links.at(i).m_urlInLink;
+    if (i > 0) {
+      QVERIFY(links.at(i - 1).m_urlStart > links.at(i).m_urlStart);
+    }
+  }
+  QCOMPARE(order, QStringList({QStringLiteral("four.png"), QStringLiteral("three.png"),
+                               QStringLiteral("two.png"), QStringLiteral("one.png")}));
+
+  QCOMPARE(links.at(0).m_syntax, MarkdownLink::Syntax::Html);
+  QCOMPARE(links.at(1).m_syntax, MarkdownLink::Syntax::Markdown);
+}
+
+// The live path: the walker reports an HTML image exactly as it reports a
+// Markdown one, so PreviewMgr and the editor's Image menu need no branch.
+void TestMarkdownParser::testWalkerHtmlImages() {
+  {
+    const QString input =
+        QStringLiteral("<img src=\"a.png\" alt=\"A\" title=\"T\" width=\"200\"/>\n");
+    const auto result = parse(input);
+    QCOMPARE(result.imageElements.size(), 1);
+
+    const auto &image = result.imageElements.first();
+    QCOMPARE(image.m_syntax, vte::md::ImageLinkInfo::Syntax::Html);
+    QCOMPARE(image.m_destination, QStringLiteral("a.png"));
+    QCOMPARE(image.m_alternateText, QStringLiteral("A"));
+    QCOMPARE(image.m_title, QStringLiteral("T"));
+    QCOMPARE(image.m_width, 200);
+    QCOMPARE(image.m_height, 0);
+    QCOMPARE(input.mid(image.m_startPos, image.m_endPos - image.m_startPos), input.trimmed());
+    // Sole content of its line.
+    QVERIFY(image.m_standalone);
+
+    const auto links = vte::md::buildImageLinks(result.imageElements);
+    QCOMPARE(links.size(), 1);
+    QCOMPARE(links.first().m_syntax, vte::md::ImageLinkInfo::Syntax::Html);
+    QCOMPARE(links.first().m_alt, QStringLiteral("A"));
+    QCOMPARE(links.first().m_title, QStringLiteral("T"));
+    QCOMPARE(links.first().m_region.m_startPos, image.m_startPos);
+    QCOMPARE(links.first().m_region.m_endPos, image.m_endPos);
+  }
+
+  // Mid-sentence: not standalone.
+  {
+    const auto result = parse(QStringLiteral("text <img src=\"a.png\"> more\n"));
+    QCOMPARE(result.imageElements.size(), 1);
+    QVERIFY(!result.imageElements.first().m_standalone);
+  }
+
+  // Inside a multiline HTML block, on its own line.
+  {
+    const QString input = QStringLiteral("<div>\n<img src=\"a.png\">\n</div>\n");
+    const auto result = parse(input);
+    QCOMPARE(result.imageElements.size(), 1);
+    QVERIFY(result.imageElements.first().m_standalone);
+    QCOMPARE(
+        input.mid(result.imageElements.first().m_startPos,
+                  result.imageElements.first().m_endPos - result.imageElements.first().m_startPos),
+        QStringLiteral("<img src=\"a.png\">"));
+  }
+
+  // Raw-text suppression holds in the live path too.
+  {
+    const auto result =
+        parse(QStringLiteral("<script>\nvar s = '<img src=\"a.png\">';\n</script>\n"));
+    QVERIFY(result.imageElements.isEmpty());
+  }
+
+  // The T0 regression, through the walker.
+  {
+    const QString input = QStringLiteral("a `co\nde` <img src=\"a.png\"> b\n");
+    const auto result = parse(input);
+    QCOMPARE(result.imageElements.size(), 1);
+    QCOMPARE(
+        input.mid(result.imageElements.first().m_startPos,
+                  result.imageElements.first().m_endPos - result.imageElements.first().m_startPos),
+        QStringLiteral("<img src=\"a.png\">"));
+  }
+}
+
+// Generation is the inverse of the scanner, and the 3-argument
+// generateImageLink() must stay byte-identical for untouched call sites.
+void TestMarkdownParser::testGenerateImageTag() {
+  QCOMPARE(
+      MarkdownUtils::generateImageLink(QStringLiteral("alt"), QStringLiteral("a.png"), QString()),
+      QStringLiteral("![alt](a.png)"));
+  QCOMPARE(MarkdownUtils::generateImageLink(QStringLiteral("alt"), QStringLiteral("a.png"),
+                                            QStringLiteral("title")),
+           QStringLiteral("![alt](a.png \"title\")"));
+  QCOMPARE(MarkdownUtils::generateImageLink(QStringLiteral("alt"), QStringLiteral("a.png"),
+                                            QString(), 0, 0),
+           QStringLiteral("![alt](a.png)"));
+
+  // Any size at all switches to HTML, which every Markdown tool understands.
+  QCOMPARE(MarkdownUtils::generateImageLink(QString(), QStringLiteral("a.png"), QString(), 500, 0),
+           QStringLiteral("<img src=\"a.png\" width=\"500\" />"));
+  QCOMPARE(MarkdownUtils::generateImageLink(QStringLiteral("alt"), QStringLiteral("a.png"),
+                                            QStringLiteral("title"), 500, 300),
+           QStringLiteral(
+               "<img src=\"a.png\" alt=\"alt\" title=\"title\" width=\"500\" height=\"300\" />"));
+
+  // Every value is escaped, so the result always round trips through the
+  // scanner unchanged.
+  const QString tag = MarkdownUtils::generateImageTag(
+      QStringLiteral("a\"b<c"), QStringLiteral("a&b.png"), QStringLiteral("t'x"), 10, 20);
+  QCOMPARE(tag, QStringLiteral("<img src=\"a&amp;b.png\" alt=\"a&quot;b&lt;c\" title=\"t&#39;x\" "
+                               "width=\"10\" height=\"20\" />"));
+
+  vte::RawTextState state;
+  const auto tags = vte::scanHtmlImgTags(tag, 0, &state);
+  QCOMPARE(tags.size(), 1);
+  QCOMPARE(tags.first().src(), QStringLiteral("a&b.png"));
+  QCOMPARE(tags.first().alt(), QStringLiteral("a\"b<c"));
+  QCOMPARE(tags.first().title(), QStringLiteral("t'x"));
+  QCOMPARE(tags.first().width(), 10);
+  QCOMPARE(tags.first().height(), 20);
+  QVERIFY(!tags.first().hasUnknownAttrs());
+}
+
+// ---------------------------------------------------------------------------
+// The HTML `<table>` scanner (decisions D-a, D-b, D-i, D-j, D-n).
+// ---------------------------------------------------------------------------
+
+namespace {
+QString htmlTableSource(const QString &p_body) {
+  return QStringLiteral("<table>\n") + p_body + QStringLiteral("\n</table>");
+}
+} // namespace
+
+void TestMarkdownParser::testHtmlTableScannerBasic() {
+  const QString source =
+      QStringLiteral("<table>\n<tr><th>a</th><th>b</th></tr>\n<tr><td>c</td><td>d</td></tr>\n"
+                     "</table>");
+  const auto tables = scanHtmlTables(source, 0, nullptr);
+  QCOMPARE(tables.size(), 1);
+
+  const auto &table = tables.first();
+  QCOMPARE(table.m_rowCount, 2);
+  QCOMPARE(table.m_columnCount, 2);
+  QVERIFY(table.m_hasHeaderRow);
+  QVERIFY(!table.m_anyPayloadPresent);
+  QVERIFY(!table.m_anyPayloadMalformed);
+  QCOMPARE(table.m_tableStart, 0);
+  QCOMPARE(table.m_tableEnd, source.size());
+  QCOMPARE(source.mid(table.m_openTagStart, table.m_openTagEnd - table.m_openTagStart),
+           QStringLiteral("<table>"));
+
+  // Every slot is its own origin in an unmerged table.
+  for (int r = 0; r < 2; ++r) {
+    for (int c = 0; c < 2; ++c) {
+      QCOMPARE(table.originAt(r, c), QPoint(c, r));
+    }
+  }
+  QCOMPARE(table.cellAt(0, 0)->m_inner, QStringLiteral("a"));
+  QCOMPARE(table.cellAt(1, 1)->m_inner, QStringLiteral("d"));
+  QVERIFY(table.cellAt(0, 0)->m_header);
+  QVERIFY(!table.cellAt(1, 0)->m_header);
+
+  // An all-`td` table has no header row, and a one-row table is legal.
+  const auto plain =
+      scanHtmlTables(QStringLiteral("<table><tr><td>x</td></tr></table>"), 0, nullptr);
+  QCOMPARE(plain.size(), 1);
+  QVERIFY(!plain.first().m_hasHeaderRow);
+  QCOMPARE(plain.first().m_rowCount, 1);
+  QCOMPARE(plain.first().m_columnCount, 1);
+}
+
+void TestMarkdownParser::testHtmlTableScannerSpans() {
+  // A colspan and a rowspan which together tile a 2x2 rectangle exactly.
+  const QString colspan = htmlTableSource(QStringLiteral("<tr><td colspan=\"2\">wide</td></tr>\n"
+                                                         "<tr><td>a</td><td>b</td></tr>"));
+  const auto wide = scanHtmlTables(colspan, 0, nullptr);
+  QCOMPARE(wide.size(), 1);
+  QCOMPARE(wide.first().m_columnCount, 2);
+  QCOMPARE(wide.first().originAt(0, 0), QPoint(0, 0));
+  QCOMPARE(wide.first().originAt(0, 1), QPoint(0, 0));
+  QCOMPARE(wide.first().cellAt(0, 1)->m_colSpan, 2);
+
+  const QString rowspan =
+      htmlTableSource(QStringLiteral("<tr><td rowspan=\"2\">tall</td><td>a</td></tr>\n"
+                                     "<tr><td>b</td></tr>"));
+  const auto tall = scanHtmlTables(rowspan, 0, nullptr);
+  QCOMPARE(tall.size(), 1);
+  QCOMPARE(tall.first().m_rowCount, 2);
+  QCOMPARE(tall.first().m_columnCount, 2);
+  // The second row's only cell is pushed right by the rowspan above it.
+  QCOMPARE(tall.first().originAt(1, 0), QPoint(0, 0));
+  QCOMPARE(tall.first().originAt(1, 1), QPoint(1, 1));
+
+  // Alignment is per column, and only the cells which declare one are read.
+  const QString aligned =
+      htmlTableSource(QStringLiteral("<tr><td align=\"right\">a</td><td>b</td></tr>"));
+  const auto align = scanHtmlTables(aligned, 0, nullptr);
+  QCOMPARE(align.size(), 1);
+  QCOMPARE(align.first().m_alignments.value(0), QStringLiteral("right"));
+  QVERIFY(align.first().m_alignments.value(1).isEmpty());
+}
+
+void TestMarkdownParser::testHtmlTableScannerRefusals() {
+  // Everything decision D-i excludes is dropped WHOLE: the block then renders
+  // as plain source, exactly as before this feature existed.
+  const QStringList refused = {
+      // Structural elements outside the subset.
+      QStringLiteral("<table><caption>c</caption><tr><td>a</td></tr></table>"),
+      QStringLiteral("<table><thead><tr><td>a</td></tr></thead></table>"),
+      QStringLiteral("<table><tbody><tr><td>a</td></tr></tbody></table>"),
+      QStringLiteral("<table><colgroup><col></colgroup><tr><td>a</td></tr></table>"),
+      // A nested table refuses BOTH, so a refusal never degrades into
+      // capturing the inner one.
+      QStringLiteral("<table><tr><td><table><tr><td>x</td></tr></table></td></tr></table>"),
+      // Mixed `th`/`td` in one row, and a `th` row below row 0.
+      QStringLiteral("<table><tr><th>a</th><td>b</td></tr></table>"),
+      QStringLiteral("<table><tr><td>a</td></tr><tr><th>b</th></tr></table>"),
+      // A cell's inner source crossing a line.
+      QStringLiteral("<table><tr><td>a\nb</td></tr></table>"),
+      // Conflicting alignments in one column.
+      QStringLiteral("<table><tr><td align=\"left\">a</td></tr>"
+                     "<tr><td align=\"right\">b</td></tr></table>"),
+      // Spans which do not tile the rectangle: a gap, and an overflow.
+      QStringLiteral("<table><tr><td colspan=\"2\">a</td></tr><tr><td>b</td></tr></table>"),
+      QStringLiteral("<table><tr><td rowspan=\"3\">a</td></tr><tr><td>b</td></tr></table>"),
+      // Unbalanced tags, and text directly inside the table.
+      QStringLiteral("<table><tr><td>a</td></tr>"),
+      QStringLiteral("<table>text<tr><td>a</td></tr></table>"),
+      // A non-positive span.
+      QStringLiteral("<table><tr><td colspan=\"0\">a</td></tr></table>"),
+  };
+
+  for (const auto &source : refused) {
+    const auto tables = scanHtmlTables(source, 0, nullptr);
+    QVERIFY2(tables.isEmpty(), qPrintable(source));
+  }
+
+  // A table inside a raw-text element is text, not markup.
+  RawTextState state;
+  const auto suppressed = scanHtmlTables(
+      QStringLiteral("<script><table><tr><td>a</td></tr></table></script>"), 0, &state);
+  QVERIFY(suppressed.isEmpty());
+}
+
+void TestMarkdownParser::testHtmlTableScannerPayloads() {
+  // A single valid payload makes the whole table Markdown-backed (D-j), and a
+  // comment-less cell in it is read as Markdown source too.
+  const QString mixed =
+      QStringLiteral("<table><tr><td><!--vte-md:a--><p>a</p></td><td>plain</td></tr></table>");
+  const auto backed = scanHtmlTables(mixed, 0, nullptr);
+  QCOMPARE(backed.size(), 1);
+  QVERIFY(backed.first().m_anyPayloadPresent);
+  QVERIFY(!backed.first().m_anyPayloadMalformed);
+  QCOMPARE(backed.first().cellAt(0, 0)->m_payload, QStringLiteral("a"));
+  QVERIFY(!backed.first().cellAt(0, 1)->m_hasPayload);
+
+  // Decision D-n: ONE malformed payload poisons the whole table, however many
+  // valid ones sit beside it.
+  const QString poisoned =
+      QStringLiteral("<table><tr><td><!--vte-md:ok--></td><td><!--vte-md:bad\\--></td></tr>"
+                     "</table>");
+  const auto poison = scanHtmlTables(poisoned, 0, nullptr);
+  QCOMPARE(poison.size(), 1);
+  QVERIFY(poison.first().m_anyPayloadMalformed);
+}
+
+void TestMarkdownParser::testHtmlTablePayloadCodec() {
+  const QStringList payloads = {
+      QStringLiteral("plain"),
+      QStringLiteral("a-b"),
+      QStringLiteral("a--b"),
+      QStringLiteral("a\\b"),
+      QStringLiteral("\\"),
+      QStringLiteral("-"),
+      QStringLiteral("--\x3e"),
+      QStringLiteral("**bold** - `x`"),
+      QString(),
+  };
+
+  for (const auto &payload : payloads) {
+    const QString encoded = escapePayload(payload);
+    // `--` is unrepresentable in the output, so `-->` can never terminate the
+    // comment early.
+    QVERIFY2(!encoded.contains(QStringLiteral("--")), qPrintable(payload));
+    QString decoded;
+    QVERIFY2(unescapePayload(encoded, decoded), qPrintable(payload));
+    QCOMPARE(decoded, payload);
+  }
+
+  // Malformed input is a hard failure, never a best-effort decode.
+  QString out;
+  QVERIFY(!unescapePayload(QStringLiteral("a\\"), out));
+  QVERIFY(!unescapePayload(QStringLiteral("a\\x"), out));
+  QVERIFY(!unescapePayload(QStringLiteral("a-b"), out));
+}
+
+void TestMarkdownParser::testHtmlTableAttrRewrite() {
+  // Attribute-LOCAL: everything the author wrote survives.
+  const QString tag = QStringLiteral("<td class=\"x\" colspan=\"2\" style=\"a:b\">");
+  QCOMPARE(rewriteHtmlTagAttr(tag, QStringLiteral("colspan"), QStringLiteral("3")),
+           QStringLiteral("<td class=\"x\" colspan=\"3\" style=\"a:b\">"));
+  QCOMPARE(rewriteHtmlTagAttr(tag, QStringLiteral("colspan"), QString()),
+           QStringLiteral("<td class=\"x\" style=\"a:b\">"));
+  QCOMPARE(rewriteHtmlTagAttr(tag, QStringLiteral("align"), QStringLiteral("right")),
+           QStringLiteral("<td class=\"x\" colspan=\"2\" style=\"a:b\" align=\"right\">"));
+
+  // The WHOLE attribute is replaced, never just its value: an unquoted one
+  // would otherwise split in two.
+  QCOMPARE(rewriteHtmlTagAttr(QStringLiteral("<td colspan=2>"), QStringLiteral("colspan"),
+                              QStringLiteral("4")),
+           QStringLiteral("<td colspan=\"4\">"));
+
+  // Absent and null is a no-op, and a value is escaped.
+  QCOMPARE(rewriteHtmlTagAttr(QStringLiteral("<td>"), QStringLiteral("rowspan"), QString()),
+           QStringLiteral("<td>"));
+  QCOMPARE(
+      rewriteHtmlTagAttr(QStringLiteral("<td>"), QStringLiteral("align"), QStringLiteral("a\"b")),
+      QStringLiteral("<td align=\"a&quot;b\">"));
+}
+
+void TestMarkdownParser::testWalkerHtmlTables() {
+  const QString source = QStringLiteral("<table>\n<tr><th>a</th><th>b</th></tr>\n"
+                                        "<tr><td colspan=\"2\">wide</td></tr>\n</table>\n");
+  const auto walk = vte::md::walkAndConvert(source.toUtf8(), source.count(QLatin1Char('\n')) + 1);
+  QCOMPARE(walk.tableElements.size(), 1);
+
+  const auto &table = walk.tableElements.first();
+  QCOMPARE(table.m_syntax, vte::md::TableElement::Syntax::Html);
+  QVERIFY(!table.m_markdownBacked);
+  QVERIFY(table.m_hasHeaderRow);
+  // m_startBlock stays Markdown-only: an HTML table has no one-source-line-per
+  // -row correspondence to slice highlights out of.
+  QCOMPARE(table.m_startBlock, -1);
+  QCOMPARE(table.m_rowCount, 2);
+  QCOMPARE(table.m_columnCount, 2);
+  QCOMPARE(table.m_rows.size(), 2);
+  QCOMPARE(table.m_rows[0].m_type, vte::md::TableRowType::Header);
+  QCOMPARE(table.m_rows[1].m_type, vte::md::TableRowType::Data);
+  QCOMPARE(table.m_rows[1].m_cells.size(), 1);
+  QCOMPARE(table.m_rows[1].m_colSpans.value(0), 2);
+  QCOMPARE(table.m_rows[1].m_cellTags.value(0), QStringLiteral("<td colspan=\"2\">"));
+  QCOMPARE(table.m_openTag, QStringLiteral("<table>"));
+  // No delimiter row is ever emitted for the HTML syntax.
+  for (const auto &row : table.m_rows) {
+    QVERIFY(row.m_type != vte::md::TableRowType::Delimiter);
+    QVERIFY(row.m_prefix.isEmpty());
+  }
+
+  // A Markdown-backed table takes its cells' text from the payloads.
+  const QString backed =
+      QStringLiteral("<table>\n<tr><td><!--vte-md:**b**--><p><strong>b</strong></p></td></tr>\n"
+                     "</table>\n");
+  const auto backedWalk =
+      vte::md::walkAndConvert(backed.toUtf8(), backed.count(QLatin1Char('\n')) + 1);
+  QCOMPARE(backedWalk.tableElements.size(), 1);
+  QVERIFY(backedWalk.tableElements.first().m_markdownBacked);
+  QCOMPARE(backedWalk.tableElements.first().m_rows.value(0).m_cells.value(0),
+           QStringLiteral("**b**"));
+}
+
+void TestMarkdownParser::testWalkerHtmlTableContainers() {
+  // Decision D-a: only a WHOLE top-level HTML block previews. A table under a
+  // container prefix, or nested inside another element, renders as source.
+  const QStringList refused = {
+      QStringLiteral("> <table><tr><td>a</td></tr></table>\n"),
+      QStringLiteral("- <table><tr><td>a</td></tr></table>\n"),
+      QStringLiteral("<div><table><tr><td>a</td></tr></table></div>\n"),
+      QStringLiteral("<div>\n<table><tr><td>a</td></tr></table>\n</div>\n"),
+  };
+
+  for (const auto &source : refused) {
+    const auto walk = vte::md::walkAndConvert(source.toUtf8(), source.count(QLatin1Char('\n')) + 1);
+    QVERIFY2(walk.tableElements.isEmpty(), qPrintable(source));
+  }
+
+  // A pipe table keeps every one of its own fields, and its 1x1 grid.
+  const QString pipe = QStringLiteral("| a | b |\n| --- | --- |\n| c | d |\n");
+  const auto walk = vte::md::walkAndConvert(pipe.toUtf8(), 4);
+  QCOMPARE(walk.tableElements.size(), 1);
+  QCOMPARE(walk.tableElements.first().m_syntax, vte::md::TableElement::Syntax::Markdown);
+  QCOMPARE(walk.tableElements.first().m_rowCount, 2);
+  QCOMPARE(walk.tableElements.first().m_columnCount, 2);
+  QVERIFY(walk.tableElements.first().m_startBlock >= 0);
+}
+
+void TestMarkdownParser::testSingleTableScannerGate() {
+  // The drift gate. AGENTS.md allows exactly ONE place in the tree to
+  // pattern-match `<table` in note source; a second one is how the snapshot and
+  // the live paths silently disagree about what a table is. A scanner over
+  // RENDERED or CLIPBOARD HTML is a different problem and is exempted with a
+  // line-local `// html-table-allow:` hatch.
+  const QDir root(QString::fromLatin1(SRC_TREE_DIR));
+  QVERIFY2(root.exists(), qPrintable(root.absolutePath()));
+
+  const QString allowed = QDir(root.absoluteFilePath(QStringLiteral("utils")))
+                              .absoluteFilePath(QStringLiteral("htmltablescanner.cpp"));
+  const QString allowedHeader = QDir(root.absoluteFilePath(QStringLiteral("include/vtextedit")))
+                                    .absoluteFilePath(QStringLiteral("htmltablescanner.h"));
+
+  QStringList offenders;
+  QDirIterator it(root.absolutePath(), QStringList{QStringLiteral("*.cpp"), QStringLiteral("*.h")},
+                  QDir::Files, QDirIterator::Subdirectories);
+  while (it.hasNext()) {
+    const QString path = QDir::cleanPath(it.next());
+    if (path == QDir::cleanPath(allowed) || path == QDir::cleanPath(allowedHeader)) {
+      continue;
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+      continue;
+    }
+
+    int lineNumber = 0;
+    while (!file.atEnd()) {
+      const QString line = QString::fromUtf8(file.readLine());
+      ++lineNumber;
+      if (!line.contains(QStringLiteral("\"<table")) ||
+          line.contains(QStringLiteral("html-table-allow:"))) {
+        continue;
+      }
+      offenders.append(QStringLiteral("%1:%2").arg(path).arg(lineNumber));
+    }
+  }
+
+  QVERIFY2(offenders.isEmpty(), qPrintable(offenders.join(QLatin1Char('\n'))));
+}
+
+void TestMarkdownParser::testScannerRawTextStatesAgree() {
+  // The invariant extractHtmlNode() asserts: the `<img>` and `<table>` scanners
+  // walk the SAME slice with independent copies of RawTextState and must leave
+  // it in the same place. A divergence of one character can leave one of them
+  // inside a `<script>` and the other outside it, which would unmask an `<img>`
+  // or a `<table>` spelled in a JS string.
+  const QStringList slices = {
+      QStringLiteral("<script>"),
+      QStringLiteral("<script>var t = \"<table><tr><td>x</td></tr></table>\";"),
+      QStringLiteral("</script>"),
+      // A malformed / multiline `<img`, which is where the two lexers used to
+      // part company: one resumed after the name, the other skipped past the
+      // newline and swallowed the `<script>` opener.
+      QStringLiteral("<img\n<script>"),
+      QStringLiteral("<img src=\n<script>"),
+      QStringLiteral("<img src=\"a.png\"><script>"),
+      QStringLiteral("<a href=\"<script>\">x</a>"),
+      QStringLiteral("<table><tr><td><script></td></tr></table>"),
+      QStringLiteral("<table><tr><td>a</td></tr></table>"),
+      QStringLiteral("<table><caption>c</caption><tr><td>a</td></tr></table>"),
+      QStringLiteral("<!-- <script> --><table><tr><td>a</td></tr></table>"),
+      QStringLiteral("<textarea><table>"),
+      QStringLiteral("plain text with a bare < and a stray >"),
+  };
+
+  // Threaded across the whole list too, so a slice which begins inside a
+  // raw-text element carried in from an earlier one is covered as well.
+  RawTextState imageCarried;
+  RawTextState tableCarried;
+  for (const auto &slice : slices) {
+    RawTextState imageState = imageCarried;
+    RawTextState tableState = tableCarried;
+    vte::scanHtmlImgTags(slice, 0, &imageState);
+    scanHtmlTables(slice, 0, &tableState);
+    QVERIFY2(imageState.m_element == tableState.m_element, qPrintable(slice));
+
+    imageCarried = imageState;
+    tableCarried = tableState;
+  }
+}
+
+void TestMarkdownParser::testHtmlTableClosingTagsAreSingleLine() {
+  // Decision D-i applies to EVERY tag, not just opening ones: a closing tag
+  // whose '>' is on the next line is outside the canonical subset.
+  const QStringList refused = {
+      QStringLiteral("<table><tr><td>a</td\n></tr></table>"),
+      QStringLiteral("<table><tr><td>a</td></tr\n></table>"),
+      QStringLiteral("<table><tr><td>a</td></tr></table\n>"),
+  };
+
+  for (const auto &source : refused) {
+    QVERIFY2(scanHtmlTables(source, 0, nullptr).isEmpty(), qPrintable(source));
+  }
+}
+
+void TestMarkdownParser::testHtmlTableDuplicateAttrRewrite() {
+  // First-wins is what the readers do, so rewriting only the FIRST occurrence
+  // would leave a later duplicate to become effective - a table whose
+  // serialized geometry silently differs from the live one.
+  QCOMPARE(rewriteHtmlTagAttr(QStringLiteral("<td colspan=\"2\" colspan=\"3\">"),
+                              QStringLiteral("colspan"), QString()),
+           QStringLiteral("<td>"));
+  QCOMPARE(rewriteHtmlTagAttr(QStringLiteral("<td colspan=\"2\" class=\"k\" colspan=\"3\">"),
+                              QStringLiteral("colspan"), QStringLiteral("4")),
+           QStringLiteral("<td colspan=\"4\" class=\"k\">"));
+}
+
+void TestMarkdownParser::testHtmlTableHostileSpans() {
+  // A span is a positive int, so `colspan="2147483647"` is well formed. Bounds
+  // checked as `col + span > limit` would OVERFLOW, pass, and then drive a loop
+  // over billions of slots - a hang and an unbounded allocation from note
+  // source alone. Every one of these must be refused promptly.
+  const QStringList hostile = {
+      QStringLiteral("<table><tr><td>a</td><td colspan=\"2147483647\">b</td></tr></table>"),
+      QStringLiteral("<table><tr><td colspan=\"2147483647\">a</td></tr></table>"),
+      QStringLiteral("<table><tr><td>a</td></tr>"
+                     "<tr><td rowspan=\"2147483647\">b</td></tr></table>"),
+      QStringLiteral("<table><tr><td colspan=\"99999\">a</td></tr></table>"),
+      QStringLiteral("<table><tr><td rowspan=\"-1\">a</td></tr></table>"),
+      QStringLiteral("<table><tr><td colspan=\"nonsense\">a</td></tr></table>"),
+  };
+
+  QElapsedTimer timer;
+  timer.start();
+  for (const auto &source : hostile) {
+    QVERIFY2(scanHtmlTables(source, 0, nullptr).isEmpty(), qPrintable(source));
+  }
+  // Refused by arithmetic, not by exhaustion: a bound that overflowed would
+  // take minutes here rather than microseconds.
+  QVERIFY2(timer.elapsed() < 2000, qPrintable(QString::number(timer.elapsed())));
+}
+
+void TestMarkdownParser::testHtmlTableCellTagBalance() {
+  // "All tags are explicitly balanced" is a CONDITION of the canonical subset,
+  // not a hope. An unclosed `<b>` written back verbatim would swallow the rest
+  // of the table in any renderer that read it.
+  const QStringList refused = {
+      QStringLiteral("<table><tr><td><b>x</td></tr></table>"),
+      QStringLiteral("<table><tr><td><b>x</i></td></tr></table>"),
+      QStringLiteral("<table><tr><td></b></td></tr></table>"),
+      QStringLiteral("<table><tr><td><b><i>x</b></i></td></tr></table>"),
+      // A raw-text element inside a cell: its contents are text, so a `</td>`
+      // spelled in one is not a close, and the cell's extent would depend on
+      // which scanner was asking.
+      QStringLiteral("<table><tr><td><script>var x = 1;</script></td></tr></table>"),
+  };
+
+  for (const auto &source : refused) {
+    QVERIFY2(scanHtmlTables(source, 0, nullptr).isEmpty(), qPrintable(source));
+  }
+
+  // Balanced nesting, void elements and self-closing tags are all fine.
+  const QStringList accepted = {
+      QStringLiteral("<table><tr><td><b>x</b></td></tr></table>"),
+      QStringLiteral("<table><tr><td><b><i>x</i></b></td></tr></table>"),
+      QStringLiteral("<table><tr><td>a<br>b</td></tr></table>"),
+      QStringLiteral("<table><tr><td>a<br />b</td></tr></table>"),
+      QStringLiteral("<table><tr><td><img src=\"a.png\"></td></tr></table>"),
+      QStringLiteral("<table><tr><td><span class=\"k\">x</span></td></tr></table>"),
+  };
+
+  for (const auto &source : accepted) {
+    QCOMPARE(scanHtmlTables(source, 0, nullptr).size(), 1);
+  }
+}
+
+void TestMarkdownParser::testWalkerHtmlTableUnderListItem() {
+  // Decision D-a is STRUCTURAL, not textual. A list item's continuation indent
+  // is whitespace, so a source-prefix check alone would accept an HTML block
+  // living under CMARK_NODE_ITEM - and a multi-line HTML replacement would then
+  // escape the list, since only its first line inherits the retained prefix.
+  const QStringList refused = {
+      QStringLiteral("- item\n\n  <table>\n  <tr><td>a</td></tr>\n  </table>\n"),
+      QStringLiteral("1. item\n\n   <table>\n   <tr><td>a</td></tr>\n   </table>\n"),
+      QStringLiteral("- outer\n  - inner\n\n    <table>\n    <tr><td>a</td></tr>\n"
+                     "    </table>\n"),
+      QStringLiteral("> quoted\n>\n> <table>\n> <tr><td>a</td></tr>\n> </table>\n"),
+  };
+
+  for (const auto &source : refused) {
+    const auto walk = vte::md::walkAndConvert(source.toUtf8(), source.count(QLatin1Char('\n')) + 1);
+    QVERIFY2(walk.tableElements.isEmpty(), qPrintable(source));
+  }
+
+  // The same table at the top level is a first-class element.
+  const QString top = QStringLiteral("<table>\n<tr><td>a</td></tr>\n</table>\n");
+  const auto walk = vte::md::walkAndConvert(top.toUtf8(), top.count(QLatin1Char('\n')) + 1);
+  QCOMPARE(walk.tableElements.size(), 1);
+}
+
+void TestMarkdownParser::testWalkerHtmlTableFoldingRegion() {
+  using vte::md::FoldingRegionType;
+
+  auto tableRegions = [](const QString &p_source) {
+    const auto walk =
+        vte::md::walkAndConvert(p_source.toUtf8(), p_source.count(QLatin1Char('\n')) + 1);
+    QVector<QPair<int, int>> regions;
+    for (const auto &region : walk.foldingRegions) {
+      if (region.m_type == FoldingRegionType::Table) {
+        regions.append(qMakePair(region.m_startBlock, region.m_endBlock));
+      }
+    }
+    return regions;
+  };
+
+  // A `<table>` opens a CommonMark type-6 HTML block, which is terminated only
+  // by a BLANK LINE or by EOF - never by `</table>`, and whose reported
+  // end_line is not even that (resolveHtmlNodeSpan() deliberately extends past
+  // it). A fold derived from the block node would therefore swallow everything
+  // after the table, so the region must come from the scanner's exact span.
+  {
+    const QString source = QStringLiteral("<table>\n<tr><td>a</td></tr>\n</table>\n\n"
+                                          "trailing paragraph\n\n# heading\n\nmore\n");
+    const auto regions = tableRegions(source);
+    QCOMPARE(regions.size(), 1);
+    QCOMPARE(regions.first(), qMakePair(0, 2));
+  }
+
+  // At the very end of the document, where the block runs to EOF: the extent is
+  // identical.
+  {
+    const auto regions = tableRegions(QStringLiteral("<table>\n<tr><td>a</td></tr>\n</table>"));
+    QCOMPARE(regions.size(), 1);
+    QCOMPARE(regions.first(), qMakePair(0, 2));
+  }
+
+  // Not at the start of the document either.
+  {
+    const QString source =
+        QStringLiteral("# heading\n\npara\n\n<table>\n<tr><td>a</td></tr>\n</table>\n\ntail\n");
+    const auto regions = tableRegions(source);
+    QCOMPARE(regions.size(), 1);
+    QCOMPARE(regions.first(), qMakePair(4, 6));
+  }
+
+  // Text on the line right after `</table>` is part of the SAME html block, so
+  // the table is not the whole block and decision D-a refuses it outright -
+  // no element, and therefore no region to fold onto.
+  {
+    const QString source =
+        QStringLiteral("<table>\n<tr><td>a</td></tr>\n</table>\ntrailing paragraph\n");
+    QVERIFY(tableRegions(source).isEmpty());
+    const auto walk = vte::md::walkAndConvert(source.toUtf8(), source.count(QLatin1Char('\n')) + 1);
+    QVERIFY(walk.tableElements.isEmpty());
+  }
+
+  // A whole table on one line has nothing to fold, and the provider drops a
+  // one-block region anyway.
+  QVERIFY(tableRegions(QStringLiteral("<table><tr><td>a</td></tr></table>\n\ntail\n")).isEmpty());
+
+  // A REFUSED table emits no region at all: it is not a table element, so
+  // nothing would ever be folded onto it.
+  QVERIFY(tableRegions(QStringLiteral("<table>\n<caption>c</caption>\n"
+                                      "<tr><td>a</td></tr>\n</table>\n\ntail\n"))
+              .isEmpty());
+
+  // An ordinary HTML block is untouched - it never had a fold region and still
+  // does not.
+  QVERIFY(tableRegions(QStringLiteral("<div>\n<p>a</p>\n</div>\n\ntail\n")).isEmpty());
+
+  // And a pipe table still folds exactly as before.
+  {
+    const auto regions =
+        tableRegions(QStringLiteral("| a | b |\n| --- | --- |\n| c | d |\ntail\n"));
+    QCOMPARE(regions.size(), 1);
+    QCOMPARE(regions.first(), qMakePair(0, 2));
+  }
+}
+QTEST_MAIN(tests::TestMarkdownParser)

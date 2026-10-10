@@ -1,0 +1,6094 @@
+#include "tablepreviewwidget.h"
+
+#include <QAbstractTextDocumentLayout>
+#include <QAction>
+#include <QActionGroup>
+#include <QApplication>
+#include <QClipboard>
+#include <QContextMenuEvent>
+#include <QFocusEvent>
+#include <QFont>
+#include <QFontMetricsF>
+#include <QGuiApplication>
+#include <QInputMethod>
+#include <QKeyEvent>
+#include <QMenu>
+#include <QMimeData>
+#include <QMouseEvent>
+#include <QPainter>
+#include <QPalette>
+#include <QScopedValueRollback>
+#include <QScrollBar>
+#include <QSet>
+#include <QStringList>
+#include <QTextBlock>
+#include <QTextBlockFormat>
+#include <QTextCharFormat>
+#include <QTextCursor>
+#include <QTextDocument>
+#include <QTextFragment>
+#include <QTextFrame>
+#include <QTextLayout>
+#include <QTextTable>
+#include <QTextTableCell>
+#include <QTimer>
+#include <QUrl>
+#include <QVBoxLayout>
+#include <QWheelEvent>
+#include <QtMath>
+
+#include <algorithm>
+#include <cstdlib>
+#include <functional>
+#include <memory>
+
+#include <cmark.h>
+
+#include <inputmode/abstractinputmode.h>
+#include <inputmode/abstractinputmodefactory.h>
+#include <inputmode/inputmodemgr.h>
+#include <texteditor/inputmodestatuswidget.h>
+#include <vtextedit/htmltablescanner.h>
+#include <vtextedit/markdownutils.h>
+#include <vtextedit/vmarkdowneditor.h>
+
+#include "hlformatresolver.h"
+#include "markdownastwalker.h"
+#include "previewlogging.h"
+#include "tablepreviewinputmode.h"
+
+using namespace vte;
+
+namespace {
+// See tablePreviewCellsBuilt(). A plain int, not an atomic: every table sheet
+// is built on the GUI thread, and a diagnostics counter is not worth an
+// ordering guarantee it could never observe.
+quint64 s_tablePreviewCellsBuilt = 0;
+} // namespace
+
+quint64 vte::tablePreviewCellsBuilt() { return s_tablePreviewCellsBuilt; }
+
+void vte::resetTablePreviewCellsBuilt() { s_tablePreviewCellsBuilt = 0; }
+
+// ---------------------------------------------------------------------------
+// TablePreviewSerializer
+// ---------------------------------------------------------------------------
+
+QString TablePreviewSerializer::escapeCell(const QString &p_cell, QVector<int> *p_sourceOffsets) {
+  QString result;
+  result.reserve(p_cell.size());
+  if (p_sourceOffsets) {
+    p_sourceOffsets->clear();
+    p_sourceOffsets->reserve(p_cell.size() + 1);
+    p_sourceOffsets->append(0);
+  }
+
+  int backslashes = 0;
+  for (int i = 0; i < p_cell.size(); ++i) {
+    const QChar ch = p_cell.at(i);
+    if (ch == QLatin1Char('|') && (backslashes % 2) == 0) {
+      result.append(QLatin1Char('\\'));
+      if (p_sourceOffsets) {
+        p_sourceOffsets->append(i);
+      }
+    }
+
+    result.append(ch);
+    if (p_sourceOffsets) {
+      p_sourceOffsets->append(i + 1);
+    }
+
+    if (ch == QLatin1Char('\\')) {
+      ++backslashes;
+    } else {
+      backslashes = 0;
+    }
+  }
+
+  return result;
+}
+
+static bool isContinuationPrefix(const QString &p_prefix) {
+  for (int i = 0; i < p_prefix.size(); ++i) {
+    const QChar ch = p_prefix.at(i);
+    if (ch != QLatin1Char(' ') && ch != QLatin1Char('\t') && ch != QLatin1Char('>')) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool TablePreviewSerializer::arePrefixesSafe(const QVector<QString> &p_rowPrefixes,
+                                             const QString &p_delimiterPrefix) {
+  if (p_rowPrefixes.isEmpty()) {
+    return false;
+  }
+
+  // Every row after the header shares the delimiter row's prefix, which must
+  // not contain a list marker: repeating a marker would create new list items.
+  if (!isContinuationPrefix(p_delimiterPrefix)) {
+    return false;
+  }
+
+  for (int i = 1; i < p_rowPrefixes.size(); ++i) {
+    if (p_rowPrefixes[i] != p_delimiterPrefix) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+// Ceiling on a padded column's display width. Above it the aligned form is
+// abandoned for the whole table.
+static const int c_maxAlignedColumnWidth = 200;
+
+// Every East Asian Width `W` (Wide) and `F` (Fullwidth) range of Unicode 15.1,
+// taken from EastAsianWidth.txt of that version, with adjacent ranges merged
+// and kept sorted so it can be binary searched. Regenerate wholesale against a
+// named version if it is ever refreshed - hand editing it is how a wrong
+// classification gets in.
+//
+// The ad-hoc "CJK blocks" approximation is deliberately not used: it misses
+// U+231A-U+231B, the U+1F300 emoji planes and everything above the BMP, all of
+// which a user can paste into a cell.
+struct EastAsianWideRange {
+  uint m_first;
+  uint m_last;
+};
+
+static const EastAsianWideRange c_eastAsianWideRanges[] = {
+    {0x1100, 0x115F},   {0x231A, 0x231B},   {0x2329, 0x232A},   {0x23E9, 0x23EC},
+    {0x23F0, 0x23F0},   {0x23F3, 0x23F3},   {0x25FD, 0x25FE},   {0x2614, 0x2615},
+    {0x2648, 0x2653},   {0x267F, 0x267F},   {0x2693, 0x2693},   {0x26A1, 0x26A1},
+    {0x26AA, 0x26AB},   {0x26BD, 0x26BE},   {0x26C4, 0x26C5},   {0x26CE, 0x26CE},
+    {0x26D4, 0x26D4},   {0x26EA, 0x26EA},   {0x26F2, 0x26F3},   {0x26F5, 0x26F5},
+    {0x26FA, 0x26FA},   {0x26FD, 0x26FD},   {0x2705, 0x2705},   {0x270A, 0x270B},
+    {0x2728, 0x2728},   {0x274C, 0x274C},   {0x274E, 0x274E},   {0x2753, 0x2755},
+    {0x2757, 0x2757},   {0x2795, 0x2797},   {0x27B0, 0x27B0},   {0x27BF, 0x27BF},
+    {0x2B1B, 0x2B1C},   {0x2B50, 0x2B50},   {0x2B55, 0x2B55},   {0x2E80, 0x2E99},
+    {0x2E9B, 0x2EF3},   {0x2F00, 0x2FD5},   {0x2FF0, 0x303E},   {0x3041, 0x3096},
+    {0x3099, 0x30FF},   {0x3105, 0x312F},   {0x3131, 0x318E},   {0x3190, 0x31E3},
+    {0x31EF, 0x321E},   {0x3220, 0x3247},   {0x3250, 0x4DBF},   {0x4E00, 0xA48C},
+    {0xA490, 0xA4C6},   {0xA960, 0xA97C},   {0xAC00, 0xD7A3},   {0xF900, 0xFAFF},
+    {0xFE10, 0xFE19},   {0xFE30, 0xFE52},   {0xFE54, 0xFE66},   {0xFE68, 0xFE6B},
+    {0xFF01, 0xFF60},   {0xFFE0, 0xFFE6},   {0x16FE0, 0x16FE4}, {0x16FF0, 0x16FF1},
+    {0x17000, 0x187F7}, {0x18800, 0x18CD5}, {0x18D00, 0x18D08}, {0x1AFF0, 0x1AFF3},
+    {0x1AFF5, 0x1AFFB}, {0x1AFFD, 0x1AFFE}, {0x1B000, 0x1B122}, {0x1B132, 0x1B132},
+    {0x1B150, 0x1B152}, {0x1B155, 0x1B155}, {0x1B164, 0x1B167}, {0x1B170, 0x1B2FB},
+    {0x1F004, 0x1F004}, {0x1F0CF, 0x1F0CF}, {0x1F18E, 0x1F18E}, {0x1F191, 0x1F19A},
+    {0x1F200, 0x1F202}, {0x1F210, 0x1F23B}, {0x1F240, 0x1F248}, {0x1F250, 0x1F251},
+    {0x1F260, 0x1F265}, {0x1F300, 0x1F320}, {0x1F32D, 0x1F335}, {0x1F337, 0x1F37C},
+    {0x1F37E, 0x1F393}, {0x1F3A0, 0x1F3CA}, {0x1F3CF, 0x1F3D3}, {0x1F3E0, 0x1F3F0},
+    {0x1F3F4, 0x1F3F4}, {0x1F3F8, 0x1F43E}, {0x1F440, 0x1F440}, {0x1F442, 0x1F4FC},
+    {0x1F4FF, 0x1F53D}, {0x1F54B, 0x1F54E}, {0x1F550, 0x1F567}, {0x1F57A, 0x1F57A},
+    {0x1F595, 0x1F596}, {0x1F5A4, 0x1F5A4}, {0x1F5FB, 0x1F64F}, {0x1F680, 0x1F6C5},
+    {0x1F6CC, 0x1F6CC}, {0x1F6D0, 0x1F6D2}, {0x1F6D5, 0x1F6D7}, {0x1F6DC, 0x1F6DF},
+    {0x1F6EB, 0x1F6EC}, {0x1F6F4, 0x1F6FC}, {0x1F7E0, 0x1F7EB}, {0x1F7F0, 0x1F7F0},
+    {0x1F90C, 0x1F93A}, {0x1F93C, 0x1F945}, {0x1F947, 0x1F9FF}, {0x1FA70, 0x1FA7C},
+    {0x1FA80, 0x1FA88}, {0x1FA90, 0x1FABD}, {0x1FABF, 0x1FAC5}, {0x1FACE, 0x1FADB},
+    {0x1FAE0, 0x1FAE8}, {0x1FAF0, 0x1FAF8}, {0x20000, 0x2FFFD}, {0x30000, 0x3FFFD}};
+
+static bool isEastAsianWide(uint p_code) {
+  int low = 0;
+  int high = static_cast<int>(sizeof(c_eastAsianWideRanges) / sizeof(c_eastAsianWideRanges[0])) - 1;
+  while (low <= high) {
+    const int mid = low + (high - low) / 2;
+    if (p_code < c_eastAsianWideRanges[mid].m_first) {
+      high = mid - 1;
+    } else if (p_code > c_eastAsianWideRanges[mid].m_last) {
+      low = mid + 1;
+    } else {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// Display width of @p_text in terminal-style columns: an East Asian `W`/`F`
+// code point counts 2, a combining mark counts 0, everything else counts 1.
+//
+// Measured over UCS-4 CODE POINTS - surrogate pairs are combined first - so an
+// astral wide character scores 2 rather than 4, and an astral combining mark
+// scores 0 rather than 2.
+//
+// The scan SATURATES at @p_ceiling: it returns as soon as the accumulated
+// width passes it. No int can overflow, and a pathologically long cell is not
+// scanned to its end just to be rejected.
+static int displayWidth(const QString &p_text, int p_ceiling) {
+  int width = 0;
+  for (int i = 0; i < p_text.size(); ++i) {
+    const QChar ch = p_text.at(i);
+    uint code = ch.unicode();
+    if (ch.isHighSurrogate() && i + 1 < p_text.size() && p_text.at(i + 1).isLowSurrogate()) {
+      code = QChar::surrogateToUcs4(ch, p_text.at(i + 1));
+      ++i;
+    }
+
+    const auto category = QChar::category(code);
+    if (category == QChar::Mark_NonSpacing || category == QChar::Mark_Enclosing) {
+      continue;
+    }
+
+    width += isEastAsianWide(code) ? 2 : 1;
+    if (width > p_ceiling) {
+      return width;
+    }
+  }
+
+  return width;
+}
+
+// The delimiter markers are emitted at @p_width dashes, or at their minimum
+// readable length when the column is narrower than that: the compact form the
+// serializer writes by default is the case where @p_width is the minimum, and
+// the opt-in aligned form is the case where it is the column's display width.
+// The `:` markers always stay at the edges.
+static QString alignmentMarker(PreviewTableAlignment p_alignment, int p_width) {
+  switch (p_alignment) {
+  case PreviewTableAlignment::Left:
+    return QLatin1String(":") + QString(qMax(3, p_width - 1), QLatin1Char('-'));
+  case PreviewTableAlignment::Right:
+    return QString(qMax(3, p_width - 1), QLatin1Char('-')) + QLatin1String(":");
+  case PreviewTableAlignment::Center:
+    return QLatin1String(":") + QString(qMax(3, p_width - 2), QLatin1Char('-')) +
+           QLatin1String(":");
+  default:
+    return QString(qMax(3, p_width), QLatin1Char('-'));
+  }
+}
+
+// The width the delimiter marker of @p_alignment occupies at its minimum
+// readable length: 3 for None, 4 for Left/Right, 5 for Center. A column is
+// never padded below this, because the marker itself cannot shrink.
+static int minimumMarkerWidth(PreviewTableAlignment p_alignment) {
+  switch (p_alignment) {
+  case PreviewTableAlignment::Left:
+  case PreviewTableAlignment::Right:
+    return 4;
+  case PreviewTableAlignment::Center:
+    return 5;
+  default:
+    return 3;
+  }
+}
+
+// Place @p_cell inside a field of @p_width display columns, per the column's
+// alignment: None/Left pad on the right, Right pads on the left, Center splits
+// with the odd column going to the right.
+static QString padCell(const QString &p_cell, int p_width, PreviewTableAlignment p_alignment) {
+  const int pad = p_width - displayWidth(p_cell, p_width);
+  if (pad <= 0) {
+    return p_cell;
+  }
+
+  switch (p_alignment) {
+  case PreviewTableAlignment::Right:
+    return QString(pad, QLatin1Char(' ')) + p_cell;
+  case PreviewTableAlignment::Center: {
+    const int left = pad / 2;
+    return QString(left, QLatin1Char(' ')) + p_cell + QString(pad - left, QLatin1Char(' '));
+  }
+  default:
+    return p_cell + QString(pad, QLatin1Char(' '));
+  }
+}
+
+// Whether @p_code is one of the separators a table row can never carry: the
+// serializer emits one source line per row, and every one of these would end
+// that line early.
+static bool isLineSeparator(ushort p_code) {
+  return p_code == '\n' || p_code == '\r' || p_code == 0x2028 || p_code == 0x2029;
+}
+
+static bool hasLineSeparator(const QString &p_text) {
+  for (int i = 0; i < p_text.size(); ++i) {
+    if (isLineSeparator(p_text.at(i).unicode())) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+QString TablePreviewSerializer::serialize(const QVector<QVector<QString>> &p_cells,
+                                          const QVector<PreviewTableAlignment> &p_alignments,
+                                          const QVector<QString> &p_rowPrefixes,
+                                          const QString &p_delimiterPrefix, bool p_align) {
+  if (p_cells.isEmpty() || p_cells.size() != p_rowPrefixes.size()) {
+    return QString();
+  }
+
+  if (!arePrefixesSafe(p_rowPrefixes, p_delimiterPrefix)) {
+    return QString();
+  }
+
+  // The model width is the maximum of the header, the alignment row and every
+  // body row: nothing is ever discarded.
+  int columns = p_alignments.size();
+  for (const auto &row : p_cells) {
+    columns = qMax(columns, row.size());
+  }
+
+  if (columns <= 0) {
+    return QString();
+  }
+
+  QVector<QString> escaped;
+  escaped.reserve(p_cells.size() * columns);
+  for (const auto &row : p_cells) {
+    for (int c = 0; c < columns; ++c) {
+      const QString raw = c < row.size() ? row[c] : QString();
+      if (hasLineSeparator(raw)) {
+        return QString();
+      }
+
+      escaped.append(escapeCell(raw));
+    }
+  }
+
+  auto columnAlignment = [&](int p_column) {
+    return p_column < p_alignments.size() ? p_alignments[p_column] : PreviewTableAlignment::None;
+  };
+
+  // Per column display widths, empty when the table is emitted compact. The
+  // ceiling is checked per TABLE, not per column: a mixed table would
+  // otherwise produce output the user cannot predict. Beyond it, one long cell
+  // would amplify the source by the row count - the very thing the compact
+  // contract exists to prevent - so the whole table falls back to compact.
+  // This is NOT a failure path: it emits, it does not reject.
+  QVector<int> widths;
+  if (p_align) {
+    widths.resize(columns);
+    bool oversized = false;
+    for (int c = 0; c < columns && !oversized; ++c) {
+      int width = minimumMarkerWidth(columnAlignment(c));
+      for (int r = 0; r < p_cells.size(); ++r) {
+        width = qMax(width, displayWidth(escaped[r * columns + c], c_maxAlignedColumnWidth));
+        if (width > c_maxAlignedColumnWidth) {
+          oversized = true;
+          break;
+        }
+      }
+
+      widths[c] = width;
+    }
+
+    if (oversized) {
+      widths.clear();
+    }
+  }
+
+  auto emitRow = [&](const QString &p_prefix, int p_rowIdx) {
+    QString line = p_prefix;
+    line.append(QLatin1Char('|'));
+    for (int c = 0; c < columns; ++c) {
+      const QString &cell = escaped[p_rowIdx * columns + c];
+      line.append(QLatin1Char(' '));
+      line.append(widths.isEmpty() ? cell : padCell(cell, widths[c], columnAlignment(c)));
+      line.append(QLatin1String(" |"));
+    }
+    return line;
+  };
+
+  QStringList lines;
+  lines.append(emitRow(p_rowPrefixes[0], 0));
+
+  {
+    QString line = p_delimiterPrefix;
+    line.append(QLatin1Char('|'));
+    for (int c = 0; c < columns; ++c) {
+      const auto alignment = columnAlignment(c);
+      line.append(QLatin1Char(' '));
+      line.append(
+          alignmentMarker(alignment, widths.isEmpty() ? minimumMarkerWidth(alignment) : widths[c]));
+      line.append(QLatin1String(" |"));
+    }
+    lines.append(line);
+  }
+
+  for (int r = 1; r < p_cells.size(); ++r) {
+    lines.append(emitRow(p_rowPrefixes[r], r));
+  }
+
+  return lines.join(QLatin1Char('\n'));
+}
+
+// ---------------------------------------------------------------------------
+// TablePreviewHtmlSerializer
+// ---------------------------------------------------------------------------
+
+namespace {
+// The name of the alignment attribute, and the one place its values are
+// spelled, so the serializer and the scanner cannot disagree on the vocabulary
+// the canonical subset admits.
+QString alignmentAttrValue(PreviewTableAlignment p_alignment) {
+  switch (p_alignment) {
+  case PreviewTableAlignment::Left:
+    return QStringLiteral("left");
+  case PreviewTableAlignment::Center:
+    return QStringLiteral("center");
+  case PreviewTableAlignment::Right:
+    return QStringLiteral("right");
+  default:
+    return QString();
+  }
+}
+} // namespace
+
+QString TablePreviewHtmlSerializer::renderCellHtml(const QString &p_markdown) {
+  if (p_markdown.isEmpty()) {
+    return QString();
+  }
+
+  const QByteArray utf8 = p_markdown.toUtf8();
+  // CMARK_OPT_DEFAULT is the safe mode: raw inline HTML inside a cell is
+  // replaced with an "omitted" comment rather than passed through.
+  std::unique_ptr<char, decltype(&std::free)> rendered(
+      cmark_markdown_to_html(utf8.constData(), static_cast<size_t>(utf8.size()), CMARK_OPT_DEFAULT),
+      &std::free);
+  if (!rendered) {
+    return QString();
+  }
+
+  QString html = QString::fromUtf8(rendered.get());
+  while (html.endsWith(QLatin1Char('\n'))) {
+    html.chop(1);
+  }
+
+  // A single wrapping paragraph is unwrapped, so ordinary prose round-trips as
+  // inline content rather than as a block inside a cell.
+  if (html.startsWith(QLatin1String("<p>")) && html.endsWith(QLatin1String("</p>")) &&
+      html.indexOf(QLatin1String("<p>"), 3) < 0) {
+    html = html.mid(3, html.size() - 7);
+  }
+
+  // Everything that is still a line break becomes `&#10;`. See the header for
+  // why a space would be wrong inside a `<pre>`.
+  QString single;
+  single.reserve(html.size());
+  for (int i = 0; i < html.size(); ++i) {
+    const QChar ch = html.at(i);
+    if (ch == QLatin1Char('\r')) {
+      // A CRLF collapses to one reference rather than two.
+      if (i + 1 < html.size() && html.at(i + 1) == QLatin1Char('\n')) {
+        continue;
+      }
+      single += QLatin1String("&#10;");
+      continue;
+    }
+    if (isLineSeparator(ch.unicode())) {
+      single += QLatin1String("&#10;");
+      continue;
+    }
+    single += ch;
+  }
+
+  // Belt and braces: the loop above cannot leave one behind, but emitting a
+  // multi-line cell is exactly the failure that leaves the user with raw HTML
+  // and no sheet, so it is verified rather than assumed.
+  if (hasLineSeparator(single)) {
+    return QString();
+  }
+
+  return single;
+}
+
+QString TablePreviewHtmlSerializer::payloadComment(const QString &p_text) {
+  return QString::fromLatin1(c_vteMarkdownPayloadPrefix) + escapePayload(p_text) +
+         QStringLiteral("-->");
+}
+
+QString TablePreviewHtmlSerializer::serialize(const QVector<QVector<QString>> &p_cells,
+                                              const QVector<QVector<QPoint>> &p_spans,
+                                              const QVector<QVector<QString>> &p_cellTags,
+                                              const QVector<QString> &p_rowTags,
+                                              const QString &p_openTag,
+                                              const QVector<PreviewTableAlignment> &p_alignments,
+                                              bool p_hasHeaderRow, bool p_markdownBacked) {
+  const int rows = p_cells.size();
+  if (rows <= 0 || p_spans.size() != rows) {
+    return QString();
+  }
+
+  int columns = 0;
+  for (const auto &row : p_cells) {
+    columns = qMax(columns, row.size());
+  }
+  if (columns <= 0) {
+    return QString();
+  }
+
+  QStringList lines;
+  // GENERATING an open tag, not matching one. The drift gate in
+  // test_markdownparser forbids pattern-matching a table tag outside the single
+  // scanner; spelling a fresh one is the serializer's job.
+  lines.append(p_openTag.isEmpty() ? QStringLiteral("<table>") : p_openTag); // html-table-allow:
+
+  for (int r = 0; r < rows; ++r) {
+    if (p_spans.at(r).size() < columns) {
+      return QString();
+    }
+
+    lines.append(p_rowTags.value(r).isEmpty() ? QStringLiteral("<tr>") : p_rowTags.value(r));
+
+    for (int c = 0; c < columns; ++c) {
+      const QPoint span = p_spans.at(r).at(c);
+      if (span.x() <= 0 || span.y() <= 0) {
+        // A covered slot emits nothing at all: it belongs to an origin above or
+        // to the left, which has already carried it in its `colspan`/`rowspan`.
+        continue;
+      }
+
+      const QString text = p_cells.at(r).value(c);
+      if (hasLineSeparator(text)) {
+        // Exactly what the Markdown serializer refuses, and for the same
+        // reason: a cell's inner source must lie on one line (D-i).
+        return QString();
+      }
+
+      const bool header = p_hasHeaderRow && r == 0;
+      QString tag = p_cellTags.value(r).value(c);
+      if (tag.isEmpty()) {
+        // Generated by an insert or a split: a fresh tag is the only case in
+        // which one is spelled from scratch (decision D-g).
+        tag = header ? QStringLiteral("<th>") : QStringLiteral("<td>");
+      }
+
+      // Attribute-LOCAL rewrites, never a regenerated tag: `class`, `style`,
+      // `data-*` and anything else the author wrote survive.
+      tag = rewriteHtmlTagAttr(tag, QStringLiteral("colspan"),
+                               span.x() > 1 ? QString::number(span.x()) : QString());
+      tag = rewriteHtmlTagAttr(tag, QStringLiteral("rowspan"),
+                               span.y() > 1 ? QString::number(span.y()) : QString());
+      tag = rewriteHtmlTagAttr(tag, QStringLiteral("align"),
+                               alignmentAttrValue(p_alignments.value(c)));
+
+      QString inner;
+      if (p_markdownBacked) {
+        // Decision D-b/D-c: the comment carries the source and always wins. A
+        // hand edit to the rendered half is destroyed at the next commit.
+        const QString renderedHtml = TablePreviewHtmlSerializer::renderCellHtml(text);
+        if (!text.isEmpty() && renderedHtml.isEmpty()) {
+          // The payload could not be rendered to a single line. Fail closed.
+          return QString();
+        }
+        inner = TablePreviewHtmlSerializer::payloadComment(text) + renderedHtml;
+      } else {
+        // Decision D-d: an HTML-only table's cells are literal text both ways,
+        // and no comment is EVER synthesized for one.
+        inner = text;
+      }
+
+      const QString closing = header ? QStringLiteral("</th>") : QStringLiteral("</td>");
+      lines.append(tag + inner + closing);
+    }
+
+    lines.append(QStringLiteral("</tr>"));
+  }
+
+  lines.append(QStringLiteral("</table>"));
+  const QString source = lines.join(QLatin1Char('\n'));
+
+  // SELF-VERIFICATION, and the whole reason every path above may fail closed.
+  //
+  // A commit whose output the scanner then refuses is unrecoverable in place:
+  // the source is replaced, the re-parse finds no table, and the user is left
+  // with raw HTML and no sheet. Emitting text that merely LOOKS right is not
+  // enough - an HTML-only table's cells are written verbatim, so a cell edited
+  // to hold `</td>` or an unbalanced raw-text tag would reshape the table, and
+  // a duplicate structural attribute in an authored tag would change its
+  // geometry. So the finished string is handed to the very scanner that will
+  // read it back, and anything but an exact match is a refusal.
+  RawTextState state;
+  const auto rescanned = scanHtmlTables(source, 0, &state);
+  if (rescanned.size() != 1 || !state.m_element.isEmpty()) {
+    return QString();
+  }
+
+  const auto &check = rescanned.first();
+  // The classification is recomputed EXACTLY as the walker computes it, never
+  // tested piecemeal: an HTML-only table is legitimately allowed to carry a
+  // malformed payload comment in its verbatim cell text (D-n), and rejecting
+  // that outright would make such a table unwritable rather than merely
+  // literal.
+  const bool rescannedMarkdownBacked = check.m_anyPayloadPresent && !check.m_anyPayloadMalformed;
+  if (check.m_tableStart != 0 || check.m_tableEnd != source.size() || check.m_rowCount != rows ||
+      check.m_columnCount != columns || check.m_hasHeaderRow != p_hasHeaderRow ||
+      rescannedMarkdownBacked != p_markdownBacked) {
+    return QString();
+  }
+
+  for (int r = 0; r < rows; ++r) {
+    for (int c = 0; c < columns; ++c) {
+      const QPoint span = p_spans.at(r).at(c);
+      const QPoint origin = check.originAt(r, c);
+      if (span.x() > 0 && span.y() > 0) {
+        // An origin must come back as one, with the very same box.
+        const auto *cell = check.cellAt(r, c);
+        if (origin != QPoint(c, r) || !cell || cell->m_colSpan != span.x() ||
+            cell->m_rowSpan != span.y()) {
+          return QString();
+        }
+      } else if (origin == QPoint(c, r)) {
+        // A covered slot must not come back as an origin.
+        return QString();
+      }
+    }
+  }
+
+  return source;
+}
+
+// ---------------------------------------------------------------------------
+// TablePreviewDocument
+// ---------------------------------------------------------------------------
+
+// See the header for how these were measured.
+const int TablePreviewDocument::c_maxCells = 300;
+
+const int TablePreviewDocument::c_maxColumns = 200;
+
+namespace {
+// Padding inside one cell, in pixels. Small enough that a compact table does
+// not turn into a spreadsheet, large enough that the text does not touch the
+// border.
+const qreal c_cellPadding = 3;
+
+// The margin the document keeps around the table. The table itself spans the
+// whole remaining width, so this is the only gap between the border and the
+// edge of the band.
+const qreal c_documentMargin = 2;
+
+// Width of one cell border, as handed to QTextTableFormat::setBorder() in
+// TablePreviewDocument::build().
+const qreal c_cellBorder = 1;
+
+// Whether neighbouring cells SHARE one border line rather than each drawing
+// its own. Mirrors the QT_VERSION guard around setBorderCollapse() in build();
+// with collapsing off, every interior boundary costs two borders instead of
+// one, which the size estimate has to account for or it under-reserves the
+// band of every table.
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+const bool c_bordersCollapsed = true;
+#else
+const bool c_bordersCollapsed = false;
+#endif
+} // namespace
+
+int TablePreviewDocument::normalizedColumnCount(const TablePreview &p_table) {
+  // The LOGICAL grid is what the sheet materializes and therefore what the
+  // layout cost is linear in, so the bound counts grid slots -- a merged cell
+  // still occupies its whole box in the layout.
+  int columns = qMax(p_table.alignments().size(), p_table.gridColumnCount());
+  for (const auto &row : p_table.cells()) {
+    columns = qMax(columns, row.size());
+  }
+
+  return columns;
+}
+
+qint64 TablePreviewDocument::normalizedCellCount(const TablePreview &p_table) {
+  return static_cast<qint64>(normalizedColumnCount(p_table)) *
+         static_cast<qint64>(qMax(p_table.cells().size(), p_table.gridRowCount()));
+}
+
+bool TablePreviewDocument::isWithinLimits(const TablePreview &p_table) {
+  return normalizedColumnCount(p_table) <= c_maxColumns &&
+         normalizedCellCount(p_table) <= c_maxCells;
+}
+
+TablePreviewDocument::TablePreviewDocument() : m_doc(new QTextDocument()) {
+  // The sheet's undo granularity is one whole-table replacement on the
+  // editor's own stack, so the inner document must not accumulate a second,
+  // invisible one.
+  m_doc->setUndoRedoEnabled(false);
+  m_doc->setDocumentMargin(c_documentMargin);
+
+  QTextOption option = m_doc->defaultTextOption();
+  // WordWrap alone cannot break an unbroken token and would leave a long URL
+  // or identifier overflowing its column, which with no horizontal scrolling
+  // means unreachable.
+  option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+  m_doc->setDefaultTextOption(option);
+}
+
+TablePreviewDocument::~TablePreviewDocument() = default;
+
+QTextDocument *TablePreviewDocument::document() const { return m_doc.data(); }
+
+QTextTable *TablePreviewDocument::table() const { return m_table; }
+
+int TablePreviewDocument::rowCount() const { return m_rowCount; }
+
+int TablePreviewDocument::columnCount() const { return m_columnCount; }
+
+Qt::Alignment TablePreviewDocument::blockAlignment(int p_column) const {
+  switch (m_alignments.value(p_column, PreviewTableAlignment::None)) {
+  case PreviewTableAlignment::Center:
+    return Qt::AlignHCenter;
+  case PreviewTableAlignment::Right:
+    return Qt::AlignRight;
+  default:
+    return Qt::AlignLeft;
+  }
+}
+
+void TablePreviewDocument::setTable(const QSharedPointer<const TablePreview> &p_table) {
+  if (p_table) {
+    m_source = p_table->cells();
+    m_alignments = p_table->alignments();
+    m_rowPrefixes = p_table->rowPrefixes();
+    m_delimiterPrefix = p_table->delimiterPrefix();
+    m_declaredColumnCount = p_table->columnCount();
+    m_syntax = p_table->syntax();
+    m_markdownBacked = p_table->isMarkdownBacked();
+    m_hasHeaderRow = p_table->hasHeaderRow();
+    m_openTag = p_table->openTag();
+  } else {
+    m_source.clear();
+    m_cellHighlightCache.clear();
+    m_alignments.clear();
+    m_rowPrefixes.clear();
+    m_delimiterPrefix.clear();
+    m_declaredColumnCount = 0;
+    m_syntax = PreviewTableSyntax::Markdown;
+    m_markdownBacked = true;
+    m_hasHeaderRow = true;
+    m_openTag.clear();
+  }
+
+  // Normalize exactly as the snapshot describes it: pad every row to the
+  // widest one and extend the alignments. Nothing is ever discarded, so a body
+  // row wider than the header stays visible - it is isRoundTrippable() which
+  // then refuses to write it back.
+  m_columnCount = m_alignments.size();
+  if (p_table) {
+    // The grid is always rectangular and may be wider than the ragged matrix
+    // when a trailing column is covered by a colspan.
+    m_columnCount = qMax(m_columnCount, p_table->gridColumnCount());
+  }
+  for (const auto &row : m_source) {
+    m_columnCount = qMax(m_columnCount, row.size());
+  }
+
+  for (auto &row : m_source) {
+    while (row.size() < m_columnCount) {
+      row.append(QString());
+    }
+  }
+
+  while (m_alignments.size() < m_columnCount) {
+    m_alignments.append(PreviewTableAlignment::None);
+  }
+
+  m_rowCount = m_source.size();
+  if (p_table) {
+    while (m_rowCount < p_table->gridRowCount()) {
+      m_source.append(QVector<QString>(m_columnCount));
+      ++m_rowCount;
+    }
+  }
+
+  // The spans and the verbatim tags build() needs. A covered slot is spelled
+  // QPoint(0, 0); an origin carries (colSpan, rowSpan). For a pipe table every
+  // slot is a 1x1 origin, so this degenerates to a uniform grid.
+  m_pendingSpans =
+      QVector<QVector<QPoint>>(m_rowCount, QVector<QPoint>(m_columnCount, QPoint(1, 1)));
+  m_cellMeta = QVector<QVector<TablePreviewCellMeta>>(m_rowCount,
+                                                      QVector<TablePreviewCellMeta>(m_columnCount));
+  m_rowTags = QVector<QString>(m_rowCount);
+  if (p_table) {
+    for (int r = 0; r < m_rowCount; ++r) {
+      m_rowTags[r] = p_table->rowTag(r);
+      for (int c = 0; c < m_columnCount; ++c) {
+        if (r >= p_table->gridRowCount() || c >= p_table->gridColumnCount()) {
+          continue;
+        }
+        if (p_table->isOrigin(r, c)) {
+          m_pendingSpans[r][c] = QPoint(p_table->colSpan(r, c), p_table->rowSpan(r, c));
+          m_cellMeta[r][c].m_tag = p_table->cellTag(r, c);
+        } else {
+          m_pendingSpans[r][c] = QPoint(0, 0);
+        }
+      }
+    }
+  }
+
+  build();
+}
+
+void TablePreviewDocument::build() {
+  clearInlinePreviews();
+  m_suspendedInlineRow = m_suspendedInlineColumn = -1;
+  m_table = nullptr;
+  m_doc->clear();
+  // clear() rebuilds the document, which restores the default undo behavior.
+  m_doc->setUndoRedoEnabled(false);
+
+  if (m_rowCount <= 0 || m_columnCount <= 0) {
+    m_cellHighlightCache.clear();
+    return;
+  }
+
+  QTextTableFormat format;
+  // The band is the sheet's whole width, and the column widths are owned by
+  // Qt: every column is a VariableLength constraint, so the layout shares the
+  // width out by content instead of the retired proportional-compression pass.
+  format.setWidth(QTextLength(QTextLength::PercentageLength, 100));
+  format.setColumnWidthConstraints(
+      QVector<QTextLength>(m_columnCount, QTextLength(QTextLength::VariableLength, 0)));
+  format.setCellPadding(c_cellPadding);
+  format.setCellSpacing(0);
+  format.setBorder(c_cellBorder);
+  format.setBorderStyle(QTextFrameFormat::BorderStyle_Solid);
+  // Not unconditionally 1 any more: an all-`<td>` HTML table has no header row
+  // (decision D-i), and giving it one would bold and repeat a row the source
+  // never marked as a header.
+  format.setHeaderRowCount(m_hasHeaderRow ? 1 : 0);
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+  // One shared line between neighbouring cells rather than two abutting ones.
+  // c_bordersCollapsed mirrors this guard for the size estimator; keep the two
+  // in step.
+  format.setBorderCollapse(true);
+#endif
+
+  QTextCursor cursor(m_doc.data());
+  // One edit block for the whole build: QTextDocumentLayout relayouts the
+  // frame an edit lands in, and the frame here is the table.
+  cursor.beginEditBlock();
+  m_table = cursor.insertTable(m_rowCount, m_columnCount, format);
+  if (!m_table) {
+    cursor.endEditBlock();
+    return;
+  }
+
+  // Diagnostics only: the grid this build just paid for. Counted here rather
+  // than at the per-cell writes below so a merged span is still charged for
+  // every slot it covers - insertTable() allocated them all.
+  s_tablePreviewCellsBuilt +=
+      static_cast<quint64>(m_rowCount) * static_cast<quint64>(m_columnCount);
+
+  // Every span is applied BEFORE any text is written. QTextTable::mergeCells()
+  // concatenates the covered cells' contents, introducing paragraph breaks
+  // which hasLineSeparator() rejects; merging an empty grid first sidesteps
+  // that entirely, and the origin's text is then written into the merged cell.
+  for (int r = 0; r < m_rowCount; ++r) {
+    for (int c = 0; c < m_columnCount; ++c) {
+      const QPoint span = m_pendingSpans.value(r).value(c, QPoint(1, 1));
+      if (span.x() <= 1 && span.y() <= 1) {
+        continue;
+      }
+      m_table->mergeCells(r, c, span.y(), span.x());
+    }
+  }
+
+  for (int r = 0; r < m_rowCount; ++r) {
+    const auto &row = m_source.at(r);
+    for (int c = 0; c < m_columnCount; ++c) {
+      // A covered slot has no content of its own: cellAt() there returns the
+      // ORIGIN's cell, so writing through it would duplicate the origin's text.
+      if (!isOrigin(r, c)) {
+        continue;
+      }
+
+      QTextTableCell cell = m_table->cellAt(r, c);
+      if (!cell.isValid()) {
+        continue;
+      }
+
+      const QString text = row.value(c);
+      if (!text.isEmpty()) {
+        cell.firstCursorPosition().insertText(text);
+      }
+    }
+  }
+
+  // A QTextDocument's root frame always ends with a block, so the table is
+  // necessarily followed by an empty paragraph. At the editor's font that
+  // would add a whole empty line under the sheet and give the caret a resting
+  // place outside every cell; shrink it to a single pixel instead. The caret
+  // is kept out of it by TablePreviewSheet::clampCursorIntoTable().
+  QTextCursor tail(m_doc.data());
+  tail.movePosition(QTextCursor::End);
+  QTextCharFormat tailChar;
+  tailChar.setFontPointSize(1);
+  tail.setCharFormat(tailChar);
+
+  QTextBlockFormat tailBlock = tail.blockFormat();
+  tailBlock.setTopMargin(0);
+  tailBlock.setBottomMargin(0);
+  tailBlock.setLineHeight(1, QTextBlockFormat::FixedHeight);
+  tail.setBlockFormat(tailBlock);
+
+  noteStructuralChange();
+  refreshCellSyntaxFormats();
+  cursor.endEditBlock();
+
+  if (previewTableLog().isDebugEnabled()) {
+    int imageObjects = 0;
+    for (auto block = m_doc->begin(); block.isValid(); block = block.next()) {
+      for (auto it = block.begin(); !it.atEnd(); ++it) {
+        const auto fragment = it.fragment();
+        if (fragment.isValid() && fragment.charFormat().isImageFormat()) {
+          imageObjects += fragment.length();
+        }
+      }
+    }
+    qCDebug(previewTableLog) << "sheet document built" << "document" << m_doc.data() << "rows"
+                             << m_rowCount << "columns" << m_columnCount << "syntax"
+                             << static_cast<int>(m_syntax) << "markdownBacked" << m_markdownBacked
+                             << "imageObjects" << imageObjects;
+  }
+}
+
+// Visit contiguous physical source runs without allocating a parallel character map.
+// Untagged U+FFFC is ordinary user source; only tagged replacement characters vanish.
+template <typename Visitor>
+static void visitSourceRanges(QTextDocument *p_doc, int p_start, int p_end, Visitor p_visit) {
+  int start = p_start;
+  for (auto block = p_doc->findBlock(p_start); block.isValid() && block.position() < p_end;
+       block = block.next()) {
+    for (auto it = block.begin(); !it.atEnd(); ++it) {
+      const auto fragment = it.fragment();
+      if (fragment.position() >= p_end) {
+        break;
+      }
+      if (fragment.position() + fragment.length() <= p_start ||
+          fragment.charFormat().property(TablePreviewDocument::c_inlinePreviewProperty) != true) {
+        continue;
+      }
+      const QString text = fragment.text();
+      const int first = qMax(p_start - fragment.position(), 0);
+      const int last = qMin(p_end - fragment.position(), fragment.length());
+      for (int i = first; i < last; ++i) {
+        if (text.at(i) == QChar::ObjectReplacementCharacter) {
+          const int position = fragment.position() + i;
+          if (start < position) {
+            p_visit(start, position);
+          }
+          start = position + 1;
+        }
+      }
+    }
+  }
+  if (start < p_end) {
+    p_visit(start, p_end);
+  }
+}
+
+QString TablePreviewDocument::sourceText(int p_start, int p_end) const {
+  QString text;
+  if (p_start < 0 || p_end < p_start || p_end >= m_doc->characterCount()) {
+    return text;
+  }
+  visitSourceRanges(m_doc.data(), p_start, p_end, [this, &text](int p_first, int p_last) {
+    QTextCursor cursor(m_doc.data());
+    cursor.setPosition(p_first);
+    cursor.setPosition(p_last, QTextCursor::KeepAnchor);
+    text.append(cursor.selectedText());
+  });
+  return text;
+}
+
+int TablePreviewDocument::sourceOffset(int p_row, int p_column, int p_documentPosition) const {
+  if (!isOrigin(p_row, p_column)) {
+    return -1;
+  }
+  const auto cell = m_table->cellAt(p_row, p_column);
+  int offset = 0;
+  visitSourceRanges(m_doc.data(), cell.firstPosition(),
+                    qBound(cell.firstPosition(), p_documentPosition, cell.lastPosition()),
+                    [&offset](int p_first, int p_last) { offset += p_last - p_first; });
+  return offset;
+}
+
+int TablePreviewDocument::documentPosition(int p_row, int p_column, int p_sourceOffset,
+                                           bool p_afterPreview) const {
+  if (!isOrigin(p_row, p_column)) {
+    return -1;
+  }
+  const auto cell = m_table->cellAt(p_row, p_column);
+  if (p_sourceOffset <= 0 && !p_afterPreview) {
+    return cell.firstPosition();
+  }
+  int remaining = qMax(0, p_sourceOffset);
+  int result = cell.lastPosition();
+  bool found = false;
+  visitSourceRanges(m_doc.data(), cell.firstPosition(), cell.lastPosition(),
+                    [&](int p_first, int p_last) {
+                      if (found) {
+                        return;
+                      }
+                      const int length = p_last - p_first;
+                      if (remaining < length || (remaining == length && !p_afterPreview)) {
+                        result = p_first + remaining;
+                        found = true;
+                      } else {
+                        remaining -= length;
+                      }
+                    });
+  return result;
+}
+
+bool TablePreviewDocument::isInlinePreviewAt(int p_position) const {
+  if (p_position < 0 || p_position >= m_doc->characterCount() - 1 ||
+      m_doc->characterAt(p_position) != QChar::ObjectReplacementCharacter) {
+    return false;
+  }
+  QTextCursor cursor(m_doc.data());
+  cursor.setPosition(p_position);
+  cursor.setPosition(p_position + 1, QTextCursor::KeepAnchor);
+  return cursor.charFormat().property(c_inlinePreviewProperty) == true;
+}
+
+static QUrl inlinePreviewUrl(int p_slot) {
+  return QUrl(QStringLiteral("vte-table-preview:%1").arg(p_slot));
+}
+
+bool TablePreviewDocument::hasInlineElement(const QString &p_source, int p_start, int p_end,
+                                            PreviewData::Source p_kind) {
+  if (p_start < 0 || p_end <= p_start || p_end > p_source.size()) {
+    return false;
+  }
+  const auto &parsed = cellInlineData(p_source);
+  if (p_kind == PreviewData::ImageLink) {
+    for (const auto &element : parsed.imageElements) {
+      if (element.m_startPos == p_start && element.m_endPos == p_end &&
+          !element.m_destination.isEmpty()) {
+        return true;
+      }
+    }
+  } else if (p_kind == PreviewData::MathBlock) {
+    for (const auto &element : parsed.mathElements) {
+      if (element.m_startPos == p_start && element.m_endPos == p_end) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool TablePreviewDocument::validInlinePreview(const InlinePreviewBinding &p_binding) {
+  if (p_binding.m_generation != m_inlinePreviewGenerations[p_binding.m_source] ||
+      !isOrigin(p_binding.m_row, p_binding.m_column)) {
+    return false;
+  }
+  const auto cell = m_table->cellAt(p_binding.m_row, p_binding.m_column);
+  const int first = p_binding.m_start.position();
+  const int last = p_binding.m_end.position();
+  if (first < cell.firstPosition() || last > cell.lastPosition() || last <= first) {
+    return false;
+  }
+  const QString source = sourceText(cell.firstPosition(), cell.lastPosition());
+  const int start = sourceOffset(cell.row(), cell.column(), first);
+  const int end = sourceOffset(cell.row(), cell.column(), last);
+  return source.mid(start, end - start) == p_binding.m_elementSource &&
+         hasInlineElement(source, start, end, p_binding.m_source);
+}
+
+void TablePreviewDocument::removeInlinePreviewObject(InlinePreviewBinding &p_binding) {
+  if (!p_binding.m_installed) {
+    return;
+  }
+  const int position = p_binding.m_object.position();
+  if (isInlinePreviewAt(position)) {
+    QTextCursor cursor(m_doc.data());
+    cursor.setPosition(position);
+    cursor.setPosition(position + 1, QTextCursor::KeepAnchor);
+    if (cursor.charFormat().toImageFormat().name() ==
+        inlinePreviewUrl(p_binding.m_slot).toString()) {
+      cursor.removeSelectedText();
+    }
+  }
+  p_binding.m_installed = false;
+}
+
+void TablePreviewDocument::retireInlinePreview(int p_index) {
+  auto &binding = m_inlinePreviews[p_index];
+  removeInlinePreviewObject(binding);
+  m_doc->addResource(QTextDocument::ImageResource, inlinePreviewUrl(binding.m_slot), QVariant());
+  m_freeInlinePreviewSlots.append(binding.m_slot);
+  m_inlinePreviews.removeAt(p_index);
+}
+
+void TablePreviewDocument::clearInlinePreviews(PreviewData::Source p_source) {
+  InlinePreviewGuard presentation(this);
+  for (int source = 0; source < PreviewData::MaxSource; ++source) {
+    if (p_source == PreviewData::MaxSource || source == p_source) {
+      ++m_inlinePreviewGenerations[source];
+    }
+  }
+  for (int i = m_inlinePreviews.size() - 1; i >= 0; --i) {
+    if (p_source == PreviewData::MaxSource || m_inlinePreviews.at(i).m_source == p_source) {
+      retireInlinePreview(i);
+    }
+  }
+}
+
+void TablePreviewDocument::noteStructuralChange() {
+  clearInlinePreviews();
+  ++m_structureGeneration;
+}
+
+QSizeF TablePreviewDocument::inlinePreviewSize(const InlinePreviewBinding &p_binding) const {
+  const qreal border = c_bordersCollapsed ? c_cellBorder : 2 * c_cellBorder;
+  const qreal contentWidth = m_doc->textWidth() - 2 * m_doc->documentMargin();
+  const qreal cap =
+      qMax(qreal(1), contentWidth / qMax(1, m_columnCount) - 2 * c_cellPadding - 2 * border);
+  const qreal scale = qMin(qreal(1), cap / p_binding.m_logicalSize.width());
+  return QSizeF(p_binding.m_logicalSize.width() * scale, p_binding.m_logicalSize.height() * scale);
+}
+
+void TablePreviewDocument::updateInlinePreviewResource(const InlinePreviewBinding &p_binding) {
+  QPixmap image = p_binding.m_image;
+  if (qAlpha(p_binding.m_backgroundColor) != 0) {
+    QPixmap variant(image.size());
+    variant.setDevicePixelRatio(image.devicePixelRatio());
+    variant.fill(QColor::fromRgba(p_binding.m_backgroundColor));
+    QPainter painter(&variant);
+    painter.drawPixmap(QPointF(0, 0), image);
+    painter.end();
+    image = variant;
+  }
+  m_doc->addResource(QTextDocument::ImageResource, inlinePreviewUrl(p_binding.m_slot), image);
+}
+
+void TablePreviewDocument::refreshInlinePreviewSizes() {
+  InlinePreviewGuard presentation(this);
+  for (const auto &binding : m_inlinePreviews) {
+    if (!binding.m_installed || binding.m_suspended) {
+      continue;
+    }
+    const int position = binding.m_object.position();
+    if (!isInlinePreviewAt(position)) {
+      continue;
+    }
+    QTextCursor cursor(m_doc.data());
+    cursor.setPosition(position);
+    cursor.setPosition(position + 1, QTextCursor::KeepAnchor);
+    auto format = cursor.charFormat().toImageFormat();
+    const QSizeF size = inlinePreviewSize(binding);
+    if (qFuzzyCompare(format.width(), size.width()) &&
+        qFuzzyCompare(format.height(), size.height())) {
+      continue;
+    }
+    format.setWidth(size.width());
+    format.setHeight(size.height());
+    cursor.setCharFormat(format);
+    m_doc->markContentsDirty(position, 1);
+  }
+}
+
+void TablePreviewDocument::installInlinePreviewObjects() {
+  // New objects move all later physical positions; live cursors plus descending
+  // insertion keep every source end attached to its own construct.
+  QVector<int> pending;
+  for (int i = 0; i < m_inlinePreviews.size(); ++i) {
+    if (!m_inlinePreviews.at(i).m_installed && !m_inlinePreviews.at(i).m_suspended) {
+      pending.append(i);
+    }
+  }
+  std::sort(pending.begin(), pending.end(), [this](int p_left, int p_right) {
+    return m_inlinePreviews.at(p_left).m_end.position() >
+           m_inlinePreviews.at(p_right).m_end.position();
+  });
+  for (int index : pending) {
+    auto &binding = m_inlinePreviews[index];
+    const QSizeF size = inlinePreviewSize(binding);
+    QTextImageFormat format;
+    format.setName(inlinePreviewUrl(binding.m_slot).toString());
+    format.setProperty(c_inlinePreviewProperty, true);
+    format.setWidth(size.width());
+    format.setHeight(size.height());
+    const int position = binding.m_end.position();
+    QTextCursor cursor(m_doc.data());
+    // Retained left-affine cursors can acquire incidental selections.
+    cursor.setPosition(position);
+    cursor.insertImage(format);
+    binding.m_object = QTextCursor(m_doc.data());
+    binding.m_object.setPosition(position);
+    binding.m_object.setKeepPositionOnInsert(false);
+    binding.m_installed = true;
+  }
+}
+
+void TablePreviewDocument::revalidateInlinePreviews() {
+  if (!isIntact() || m_syntax != PreviewTableSyntax::Markdown || hasMergedCells()) {
+    clearInlinePreviews();
+    return;
+  }
+  InlinePreviewGuard presentation(this);
+  for (int i = m_inlinePreviews.size() - 1; i >= 0; --i) {
+    auto &binding = m_inlinePreviews[i];
+    if (!validInlinePreview(binding)) {
+      retireInlinePreview(i);
+    } else if (binding.m_installed && (binding.m_object.position() != binding.m_end.position() ||
+                                       !isInlinePreviewAt(binding.m_object.position()))) {
+      removeInlinePreviewObject(binding);
+    }
+  }
+  installInlinePreviewObjects();
+  refreshInlinePreviewSizes();
+}
+
+void TablePreviewDocument::suspendInlinePreviews(int p_row, int p_column) {
+  m_suspendedInlineRow = p_row;
+  m_suspendedInlineColumn = p_column;
+  InlinePreviewGuard presentation(this);
+  for (auto &binding : m_inlinePreviews) {
+    if (binding.m_row == p_row && binding.m_column == p_column) {
+      removeInlinePreviewObject(binding);
+      binding.m_suspended = true;
+    }
+  }
+}
+
+void TablePreviewDocument::resumeInlinePreviews() {
+  m_suspendedInlineRow = m_suspendedInlineColumn = -1;
+  for (auto &binding : m_inlinePreviews) {
+    binding.m_suspended = false;
+  }
+  revalidateInlinePreviews();
+}
+
+void TablePreviewDocument::setInlinePreviews(PreviewData::Source p_source,
+                                             const QVector<TableCellInlinePreview> &p_previews) {
+  if (p_source != PreviewData::ImageLink && p_source != PreviewData::MathBlock) {
+    return;
+  }
+  if (p_previews.isEmpty()) {
+    clearInlinePreviews(p_source);
+    return;
+  }
+  if (!isIntact() || m_syntax != PreviewTableSyntax::Markdown || hasMergedCells()) {
+    clearInlinePreviews();
+    return;
+  }
+  InlinePreviewGuard presentation(this);
+  for (int i = m_inlinePreviews.size() - 1; i >= 0; --i) {
+    if (!validInlinePreview(m_inlinePreviews.at(i))) {
+      retireInlinePreview(i);
+    }
+  }
+  struct CanonicalCell {
+    QString m_source;
+    QString m_escaped;
+    QVector<int> m_offsets;
+    int m_first = 0;
+    int m_last = 0;
+    bool m_matchesPublication = false;
+  };
+  QHash<int, CanonicalCell> cells;
+  auto canonicalCell = [&](int p_row, int p_column) -> CanonicalCell & {
+    const int key = p_row * m_columnCount + p_column;
+    auto it = cells.find(key);
+    if (it == cells.end()) {
+      const auto cell = m_table->cellAt(p_row, p_column);
+      CanonicalCell data;
+      data.m_source = sourceText(cell.firstPosition(), cell.lastPosition());
+      data.m_escaped = TablePreviewSerializer::escapeCell(data.m_source, &data.m_offsets);
+      data.m_last = data.m_escaped.size();
+      while (data.m_first < data.m_last && data.m_escaped.at(data.m_first).isSpace()) {
+        ++data.m_first;
+      }
+      while (data.m_last > data.m_first && data.m_escaped.at(data.m_last - 1).isSpace()) {
+        --data.m_last;
+      }
+      it = cells.insert(key, std::move(data));
+    }
+    return it.value();
+  };
+  QSet<int> retainedSlots;
+  bool repaint = false;
+  for (const auto &preview : p_previews) {
+    if (preview.m_source != p_source || !isOrigin(preview.m_row, preview.m_column)) {
+      continue;
+    }
+    auto &cell = canonicalCell(preview.m_row, preview.m_column);
+    if (cell.m_escaped.mid(cell.m_first, cell.m_last - cell.m_first) != preview.m_sourceCell) {
+      continue;
+    }
+    cell.m_matchesPublication = true;
+    if (preview.m_start < 0 || preview.m_end <= preview.m_start ||
+        preview.m_end > preview.m_sourceCell.size() || preview.m_image.isNull() ||
+        preview.m_logicalSize.width() <= 0 || preview.m_logicalSize.height() <= 0 ||
+        preview.m_sourceCell.mid(preview.m_start, preview.m_end - preview.m_start) !=
+            preview.m_elementSource) {
+      continue;
+    }
+    const int start = cell.m_offsets.at(cell.m_first + preview.m_start);
+    const int end = cell.m_offsets.at(cell.m_first + preview.m_end);
+    if (!hasInlineElement(cell.m_source, start, end, p_source)) {
+      continue;
+    }
+    const QString spelling = cell.m_source.mid(start, end - start);
+    int matching = -1;
+    bool overlap = false;
+    for (int i = 0; i < m_inlinePreviews.size(); ++i) {
+      const auto &binding = m_inlinePreviews.at(i);
+      if (binding.m_row != preview.m_row || binding.m_column != preview.m_column) {
+        continue;
+      }
+      const int boundStart =
+          sourceOffset(binding.m_row, binding.m_column, binding.m_start.position());
+      const int boundEnd = sourceOffset(binding.m_row, binding.m_column, binding.m_end.position());
+      if (boundStart == start && boundEnd == end && binding.m_source == p_source &&
+          binding.m_elementSource == spelling) {
+        matching = i;
+      } else if (boundStart < end && start < boundEnd) {
+        overlap = true;
+      }
+    }
+    if (overlap) {
+      continue;
+    }
+    if (matching < 0) {
+      InlinePreviewBinding binding;
+      binding.m_row = preview.m_row;
+      binding.m_column = preview.m_column;
+      binding.m_start = QTextCursor(m_doc.data());
+      binding.m_start.setPosition(documentPosition(preview.m_row, preview.m_column, start));
+      binding.m_start.setKeepPositionOnInsert(false);
+      binding.m_end = QTextCursor(m_doc.data());
+      binding.m_end.setPosition(documentPosition(preview.m_row, preview.m_column, end, false));
+      binding.m_end.setKeepPositionOnInsert(true);
+      binding.m_elementSource = spelling;
+      binding.m_source = p_source;
+      binding.m_generation = m_inlinePreviewGenerations[p_source];
+      binding.m_slot = m_freeInlinePreviewSlots.isEmpty() ? m_nextInlinePreviewSlot++
+                                                          : m_freeInlinePreviewSlots.takeLast();
+      binding.m_suspended =
+          preview.m_row == m_suspendedInlineRow && preview.m_column == m_suspendedInlineColumn;
+      matching = m_inlinePreviews.size();
+      m_inlinePreviews.append(std::move(binding));
+    }
+    auto &binding = m_inlinePreviews[matching];
+    retainedSlots.insert(binding.m_slot);
+    const bool resourceChanged = binding.m_image.cacheKey() != preview.m_image.cacheKey() ||
+                                 binding.m_backgroundColor != preview.m_backgroundColor;
+    binding.m_sourceCell = preview.m_sourceCell;
+    binding.m_image = preview.m_image;
+    binding.m_logicalSize = preview.m_logicalSize;
+    binding.m_backgroundColor = preview.m_backgroundColor;
+    if (resourceChanged) {
+      updateInlinePreviewResource(binding);
+      repaint = true;
+    }
+  }
+  for (int i = m_inlinePreviews.size() - 1; i >= 0; --i) {
+    const auto &binding = m_inlinePreviews.at(i);
+    if (binding.m_source != p_source || retainedSlots.contains(binding.m_slot)) {
+      continue;
+    }
+    const auto &cell = canonicalCell(binding.m_row, binding.m_column);
+    // An unmatched pristine cell is authoritative. A dirty cell retains only
+    // its already validated live binding; stale offsets are never relocated.
+    if (cell.m_matchesPublication ||
+        cell.m_escaped.mid(cell.m_first, cell.m_last - cell.m_first) == binding.m_sourceCell) {
+      retireInlinePreview(i);
+    }
+  }
+  revalidateInlinePreviews();
+  if (repaint) {
+    m_doc->documentLayout()->update();
+  }
+}
+
+QVector<QVector<QString>> TablePreviewDocument::cells() const {
+  QVector<QVector<QString>> matrix;
+  if (!m_table) {
+    return matrix;
+  }
+
+  const int rows = m_table->rows();
+  const int columns = m_table->columns();
+  matrix.reserve(rows);
+
+  for (int r = 0; r < rows; ++r) {
+    QVector<QString> row;
+    row.reserve(columns);
+    for (int c = 0; c < columns; ++c) {
+      // The grid projected row-major: the origin's text at its origin slot and
+      // an EMPTY string at every covered slot. cellAt() on a covered slot
+      // returns the ORIGIN's cell, so reading through it would repeat the
+      // origin's text once per slot it covers.
+      if (!isOrigin(r, c)) {
+        row.append(QString());
+        continue;
+      }
+
+      const QTextTableCell cell = m_table->cellAt(r, c);
+      if (!cell.isValid()) {
+        row.append(QString());
+        continue;
+      }
+
+      row.append(sourceText(cell.firstPosition(), cell.lastPosition()));
+    }
+
+    matrix.append(row);
+  }
+
+  return matrix;
+}
+
+PreviewTableSyntax TablePreviewDocument::syntax() const { return m_syntax; }
+
+bool TablePreviewDocument::isMarkdownBacked() const { return m_markdownBacked; }
+
+bool TablePreviewDocument::hasHeaderRow() const { return m_hasHeaderRow; }
+
+bool TablePreviewDocument::isOrigin(int p_row, int p_column) const {
+  if (!m_table || p_row < 0 || p_column < 0 || p_row >= m_table->rows() ||
+      p_column >= m_table->columns()) {
+    return false;
+  }
+
+  const QTextTableCell cell = m_table->cellAt(p_row, p_column);
+  // QTextTableCell::row()/column() report the ORIGIN's coordinates for every
+  // covered slot, which is exactly what makes this test work -- and exactly why
+  // they can never answer "which half of a colspan is this".
+  return cell.isValid() && cell.row() == p_row && cell.column() == p_column;
+}
+
+int TablePreviewDocument::rowSpanAt(int p_row, int p_column) const {
+  if (!m_table) {
+    return 1;
+  }
+  const QTextTableCell cell = m_table->cellAt(p_row, p_column);
+  return cell.isValid() ? qMax(1, cell.rowSpan()) : 1;
+}
+
+int TablePreviewDocument::colSpanAt(int p_row, int p_column) const {
+  if (!m_table) {
+    return 1;
+  }
+  const QTextTableCell cell = m_table->cellAt(p_row, p_column);
+  return cell.isValid() ? qMax(1, cell.columnSpan()) : 1;
+}
+
+bool TablePreviewDocument::hasMergedCells() const {
+  if (!m_table) {
+    return false;
+  }
+  for (int r = 0; r < m_rowCount; ++r) {
+    for (int c = 0; c < m_columnCount; ++c) {
+      if (isOrigin(r, c) && (rowSpanAt(r, c) > 1 || colSpanAt(r, c) > 1)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool TablePreviewDocument::isColumnSpanned(int p_column) const {
+  if (!m_table || p_column < 0 || p_column >= m_columnCount) {
+    return false;
+  }
+  for (int r = 0; r < m_rowCount; ++r) {
+    const QTextTableCell cell = m_table->cellAt(r, p_column);
+    if (cell.isValid() && cell.columnSpan() > 1) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool TablePreviewDocument::isRoundTrippable() const {
+  if (m_rowCount <= 0 || m_declaredColumnCount <= 0) {
+    qCDebug(previewTableLog) << "not round-trippable: rows" << m_rowCount << "declared columns"
+                             << m_declaredColumnCount;
+    return false;
+  }
+
+  // An HTML table is written back as HTML, which has no declared-width notion
+  // and no container prefixes (decision D-a): what has to hold instead is that
+  // the grid tiles exactly and that every origin has metadata to serialize
+  // from.
+  if (m_syntax == PreviewTableSyntax::Html || hasMergedCells()) {
+    if (m_columnCount <= 0 || m_cellMeta.size() != m_rowCount) {
+      qCDebug(previewTableLog) << "not round-trippable: grid metadata is missing";
+      return false;
+    }
+    for (int r = 0; r < m_rowCount; ++r) {
+      if (m_cellMeta.at(r).size() != m_columnCount) {
+        qCDebug(previewTableLog) << "not round-trippable: grid metadata row" << r << "is short";
+        return false;
+      }
+      for (int c = 0; c < m_columnCount; ++c) {
+        // cellAt() must resolve every slot to an origin inside the grid, which
+        // is exactly "the spans tile the rectangle".
+        const QTextTableCell cell = m_table ? m_table->cellAt(r, c) : QTextTableCell();
+        if (!cell.isValid() || cell.row() < 0 || cell.column() < 0 ||
+            cell.row() + qMax(1, cell.rowSpan()) > m_rowCount ||
+            cell.column() + qMax(1, cell.columnSpan()) > m_columnCount) {
+          qCDebug(previewTableLog)
+              << "not round-trippable: the grid does not tile exactly at" << r << c;
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  // Writing a wider matrix back would add the excess column to the header and
+  // the delimiter row, turning cells GFM ignores today into real ones.
+  if (m_columnCount != m_declaredColumnCount) {
+    qCDebug(previewTableLog) << "not round-trippable: a row is wider than the header declares -"
+                             << m_columnCount << "vs" << m_declaredColumnCount;
+    return false;
+  }
+
+  if (!TablePreviewSerializer::arePrefixesSafe(m_rowPrefixes, m_delimiterPrefix)) {
+    qCDebug(previewTableLog) << "not round-trippable: the block container prefixes cannot be"
+                             << "reproduced - rows" << m_rowPrefixes << "delimiter"
+                             << m_delimiterPrefix;
+    return false;
+  }
+
+  return true;
+}
+
+bool TablePreviewDocument::isIntact() const {
+  if (m_rowCount <= 0 || m_columnCount <= 0) {
+    // Nothing was ever built, so nothing can have been taken apart.
+    return true;
+  }
+
+  if (!m_doc || !m_doc->rootFrame()) {
+    return false;
+  }
+
+  // Deliberately re-resolved instead of compared against m_table: that pointer
+  // is what dangles in exactly the case this detects. The document only ever
+  // holds the one table this object built, so "a table is still there" is the
+  // whole question.
+  for (auto frame : m_doc->rootFrame()->childFrames()) {
+    if (qobject_cast<QTextTable *>(frame)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+QString TablePreviewDocument::toMarkdown(bool p_align) const {
+  if (!isRoundTrippable()) {
+    return QString();
+  }
+
+  // Decision D-e / D-h: HTML once HTML, and HTML as soon as anything spans -
+  // GFM pipe syntax cannot express `colspan` or `rowspan` at all.
+  if (m_syntax == PreviewTableSyntax::Html || hasMergedCells()) {
+    const GridSnapshot grid = captureGrid();
+    // Every cell of a pipe table is Markdown source, so a Markdown -> HTML
+    // conversion emits a payload comment for every cell.
+    return TablePreviewHtmlSerializer::serialize(grid.m_source, grid.m_spans, cellTagGrid(),
+                                                 m_rowTags, m_openTag, m_alignments, m_hasHeaderRow,
+                                                 m_markdownBacked);
+  }
+
+  return TablePreviewSerializer::serialize(cells(), m_alignments, m_rowPrefixes, m_delimiterPrefix,
+                                           p_align);
+}
+
+QVector<QVector<QString>> TablePreviewDocument::cellTagGrid() const {
+  QVector<QVector<QString>> tags(m_rowCount, QVector<QString>(m_columnCount));
+  for (int r = 0; r < m_rowCount && r < m_cellMeta.size(); ++r) {
+    for (int c = 0; c < m_columnCount && c < m_cellMeta.at(r).size(); ++c) {
+      tags[r][c] = m_cellMeta.at(r).at(c).m_tag;
+    }
+  }
+  return tags;
+}
+
+QString TablePreviewDocument::toStandaloneMarkdown(bool p_align) const {
+  // Guarded exactly as toMarkdown() is, because cells() reads the cached
+  // m_table - but without the round-trippability requirement: widening a
+  // ragged sheet only affects the copy, which is never written back.
+  if (!isIntact()) {
+    return QString();
+  }
+
+  const QVector<QVector<QString>> matrix = cells();
+  // One empty prefix per row, and an empty delimiter prefix: the copy is meant
+  // to stand on its own, so the blockquote or list indent the binding carried
+  // is deliberately dropped. Sized from the matrix rather than m_rowCount, so
+  // the serializer's size check cannot fail on a drift between the two.
+  return TablePreviewSerializer::serialize(matrix, m_alignments, QVector<QString>(matrix.size()),
+                                           QString(), p_align);
+}
+
+QString TablePreviewDocument::toHtml() const {
+  // The HTML path returns exactly what a commit would write, so what lands on
+  // the clipboard and what would land in the document cannot disagree about a
+  // merged cell.
+  if (m_syntax == PreviewTableSyntax::Html || hasMergedCells()) {
+    if (!isIntact()) {
+      return QString();
+    }
+    const GridSnapshot grid = captureGrid();
+    return TablePreviewHtmlSerializer::serialize(grid.m_source, grid.m_spans, cellTagGrid(),
+                                                 m_rowTags, m_openTag, m_alignments, m_hasHeaderRow,
+                                                 m_markdownBacked);
+  }
+
+  // Never padded: the rendered HTML is layout independent, so alignment
+  // padding would only inject meaningless whitespace into the cell payloads.
+  const QString markdown = toStandaloneMarkdown(false);
+
+  if (markdown.isEmpty()) {
+    return QString();
+  }
+
+  const QByteArray utf8 = markdown.toUtf8();
+  // CMARK_OPT_DEFAULT is the safe mode: raw inline HTML inside a cell is
+  // replaced with an "omitted" comment rather than passed through into a
+  // payload which lands in another application.
+  std::unique_ptr<char, decltype(&std::free)> rendered(
+      cmark_markdown_to_html(utf8.constData(), static_cast<size_t>(utf8.size()), CMARK_OPT_DEFAULT),
+      &std::free);
+  if (!rendered) {
+    return QString();
+  }
+
+  QString html = QString::fromUtf8(rendered.get());
+  // Exactly one trailing newline, which cmark always terminates the rendered
+  // table with. Not trimmed(): that would eat whitespace which is meaningful
+  // inside a <pre> a cell could carry.
+  if (html.endsWith(QLatin1Char('\n'))) {
+    html.chop(1);
+  }
+
+  return html;
+}
+
+QTextCharFormat TablePreviewDocument::baselineCellFormat(int p_row) const {
+  QTextCharFormat format;
+  // Keyed by hasHeaderRow(), not by `row == 0`: an all-`<td>` HTML table has no
+  // header row at all, and bolding its first row would invent one.
+  if (p_row == 0 && m_hasHeaderRow) {
+    // The same weight applyCellFormat() writes, so typing into a header cell
+    // stays bold.
+    format.setFontWeight(QFont::Bold);
+  }
+
+  return format;
+}
+
+void TablePreviewDocument::applyCellFormat(int p_row, int p_column) {
+  if (!m_table) {
+    return;
+  }
+
+  const QTextTableCell cell = m_table->cellAt(p_row, p_column);
+  if (!cell.isValid()) {
+    return;
+  }
+
+  QTextCursor cursor = cell.firstCursorPosition();
+  cursor.setPosition(cell.lastCursorPosition().position(), QTextCursor::KeepAnchor);
+
+  QTextBlockFormat blockFormat = cursor.blockFormat();
+  blockFormat.setAlignment(blockAlignment(p_column));
+  cursor.setBlockFormat(blockFormat);
+
+  if (p_row != 0 || !m_hasHeaderRow) {
+    return;
+  }
+
+  // The header is bold as a character format, not as Markdown: a cell holds
+  // its raw source, so '**' here would be two literal asterisks. Both halves
+  // are needed - the block's char format so a cell which is empty in the
+  // source is still bold once it is typed into, and the merge so text which is
+  // already there is restyled.
+  const QTextCharFormat headerFormat = baselineCellFormat(p_row);
+  cursor.mergeBlockCharFormat(headerFormat);
+  applySourceCharFormat(cell.firstPosition(), cell.lastPosition(), headerFormat, true);
+}
+
+void TablePreviewDocument::setSyntaxStyles(const QVector<QTextCharFormat> &p_styles) {
+  if (m_syntaxStyles != p_styles) {
+    m_syntaxStyles = p_styles;
+    m_syntaxStylesDirty = true;
+  }
+}
+
+void TablePreviewDocument::applyCellFormats() {
+  if (!m_table) {
+    return;
+  }
+
+  const int rows = m_table->rows();
+  const int columns = m_table->columns();
+  for (int r = 0; r < rows; ++r) {
+    for (int c = 0; c < columns; ++c) {
+      // Origins only. applyCellFormat() on a covered slot resolves to the
+      // ORIGIN's cell but takes the COVERED slot's column alignment, so a
+      // spanning cell would end up with whichever covered column was written
+      // last.
+      if (!isOrigin(r, c)) {
+        continue;
+      }
+      applyCellFormat(r, c);
+    }
+  }
+}
+
+void TablePreviewDocument::applyCellSyntaxFormats(int p_row, int p_column,
+                                                  const QVector<PreviewFormatRun> &p_runs) {
+  if (!m_table || p_runs.isEmpty()) {
+    return;
+  }
+
+  const QTextTableCell cell = m_table->cellAt(p_row, p_column);
+  if (!cell.isValid()) {
+    return;
+  }
+
+  const int textLength = sourceOffset(p_row, p_column, cell.lastPosition());
+  for (const auto &run : p_runs) {
+    if (run.m_start < 0 || run.m_length <= 0 || run.m_start > textLength ||
+        run.m_length > textLength - run.m_start) {
+      continue;
+    }
+    applySourceCharFormat(documentPosition(p_row, p_column, run.m_start),
+                          documentPosition(p_row, p_column, run.m_start + run.m_length, false),
+                          run.m_format, true);
+  }
+}
+
+void TablePreviewDocument::applySourceCharFormat(int p_start, int p_end,
+                                                 const QTextCharFormat &p_format, bool p_merge) {
+  InlinePreviewGuard presentation(this);
+  visitSourceRanges(m_doc.data(), p_start, p_end, [&](int p_first, int p_last) {
+    QTextCursor cursor(m_doc.data());
+    cursor.setPosition(p_first);
+    cursor.setPosition(p_last, QTextCursor::KeepAnchor);
+    if (p_merge) {
+      cursor.mergeCharFormat(p_format);
+    } else {
+      cursor.setCharFormat(p_format);
+    }
+  });
+}
+
+TablePreviewDocument::CellHighlightCacheEntry &
+TablePreviewDocument::cellInlineData(const QString &p_source) {
+  auto it = m_cellHighlightCache.find(p_source);
+  if (it == m_cellHighlightCache.end()) {
+    auto parsed = md::parseInlineSnippet(p_source);
+    CellHighlightCacheEntry entry;
+    if (!parsed.blocksHighlights.isEmpty()) {
+      entry.m_units = std::move(parsed.blocksHighlights.first());
+    }
+    entry.m_overlays = parsed.blockOverlays.take(0);
+    entry.imageElements = std::move(parsed.imageElements);
+    entry.mathElements = std::move(parsed.mathElements);
+    it = m_cellHighlightCache.insert(p_source, std::move(entry));
+  }
+  it->m_used = true;
+  return it.value();
+}
+
+bool TablePreviewDocument::refreshCellSyntaxFormats(int p_start, int p_end) {
+  if (!m_table) {
+    m_cellHighlightCache.clear();
+    return false;
+  }
+
+  InlinePreviewGuard presentation(this);
+  const bool repaintAll = p_start < 0 || p_end < 0 || m_syntaxStylesDirty ||
+                          m_highlightedStructureGeneration != structureGeneration();
+  const bool highlight =
+      !m_syntaxStyles.isEmpty() && (m_syntax == PreviewTableSyntax::Markdown || m_markdownBacked);
+  for (auto &entry : m_cellHighlightCache) {
+    entry.m_used = false;
+  }
+
+  QTextCursor edit(m_doc.data());
+  bool wroteFormats = false;
+  const int rows = m_table->rows();
+  const int columns = m_table->columns();
+  for (int r = 0; r < rows; ++r) {
+    for (int c = 0; c < columns; ++c) {
+      if (!isOrigin(r, c)) {
+        continue;
+      }
+      QTextTableCell cell = m_table->cellAt(r, c);
+      QTextCursor cursor = cell.firstCursorPosition();
+      const int start = cursor.position();
+      const int end = cell.lastCursorPosition().position();
+      cursor.setPosition(end, QTextCursor::KeepAnchor);
+      const QString text = sourceText(start, end);
+      auto cached = m_cellHighlightCache.end();
+      bool newText = false;
+      if ((highlight || m_inlinePreviewEdits > 0 || !m_inlinePreviews.isEmpty()) &&
+          !text.isEmpty() && !hasLineSeparator(text)) {
+        cached = m_cellHighlightCache.find(text);
+        if (cached == m_cellHighlightCache.end()) {
+          cellInlineData(text);
+          cached = m_cellHighlightCache.find(text);
+          qCDebug(previewTableLog)
+              << "sheet cell highlighted" << "document" << m_doc.data() << "row" << r << "column"
+              << c << "characters" << text.size() << "highlightUnits" << cached->m_units.size()
+              << "imageElements" << cached->imageElements.size() << "mathElements"
+              << cached->mathElements.size();
+          newText = true;
+        }
+        cached->m_used = true;
+      }
+
+      if (!repaintAll && !newText && (end < p_start || start > p_end)) {
+        continue;
+      }
+      if (!wroteFormats) {
+        edit.beginEditBlock();
+        wroteFormats = true;
+      }
+      const QTextCharFormat baseline = baselineCellFormat(r);
+      applySourceCharFormat(start, end, baseline);
+      // The first block's marker also owns the cell's spans. Qt's cell setter
+      // preserves them; setBlockCharFormat() would reset them to 1x1.
+      cell.setFormat(baseline);
+      for (QTextBlock block = m_doc->findBlock(start).next();
+           block.isValid() && block.position() <= end; block = block.next()) {
+        QTextCursor(block).setBlockCharFormat(baseline);
+      }
+      applyCellFormat(r, c);
+      if (cached != m_cellHighlightCache.end()) {
+        applyCellSyntaxFormats(
+            r, c, md::resolveFormatRuns(cached->m_units, m_syntaxStyles, cached->m_overlays));
+      }
+    }
+  }
+
+  for (auto it = m_cellHighlightCache.begin(); it != m_cellHighlightCache.end();) {
+    if (!it->m_used) {
+      it = m_cellHighlightCache.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  m_highlightedStructureGeneration = structureGeneration();
+  m_syntaxStylesDirty = false;
+  if (wroteFormats) {
+    edit.endEditBlock();
+  }
+  return wroteFormats;
+}
+
+bool TablePreviewDocument::canAppendRow() const {
+  if (!m_table || m_columnCount <= 0 || m_rowCount <= 0) {
+    return false;
+  }
+
+  // qint64 for the same reason normalizedCellCount() uses it: the product of
+  // two ints is what is being bounded here, and it must not be the overflow
+  // which decides the answer.
+  return qint64(m_rowCount + 1) * qint64(m_columnCount) <= qint64(c_maxCells);
+}
+
+bool TablePreviewDocument::appendRow() { return insertRow(m_rowCount); }
+
+bool TablePreviewDocument::canInsertRow() const {
+  // Where the row goes does not change the cell count, so this is exactly the
+  // append bound.
+  return canAppendRow();
+}
+
+bool TablePreviewDocument::canInsertColumn() const {
+  if (!m_table || m_columnCount <= 0 || m_rowCount <= 0) {
+    return false;
+  }
+
+  if (m_columnCount + 1 > c_maxColumns) {
+    return false;
+  }
+
+  // qint64 for the same reason canAppendRow() uses it.
+  return qint64(m_rowCount) * qint64(m_columnCount + 1) <= qint64(c_maxCells);
+}
+
+bool TablePreviewDocument::canDeleteRow(int p_row) const {
+  // Row 0 is the header: see the header file for why it is not an ordinary
+  // row. The table may shrink to a header-only table but not to nothing.
+  return m_table && p_row > 0 && p_row < m_rowCount && m_rowCount > 1;
+}
+
+bool TablePreviewDocument::canDeleteColumn(int p_column) const {
+  return m_table && p_column >= 0 && p_column < m_columnCount && m_columnCount > 1;
+}
+
+PreviewTableAlignment TablePreviewDocument::columnAlignment(int p_column) const {
+  return m_alignments.value(p_column, PreviewTableAlignment::None);
+}
+
+void TablePreviewDocument::rewriteColumnConstraints() {
+  if (!m_table) {
+    return;
+  }
+
+  QTextTableFormat format = m_table->format().toTableFormat();
+  format.setColumnWidthConstraints(
+      QVector<QTextLength>(m_columnCount, QTextLength(QTextLength::VariableLength, 0)));
+  m_table->setFormat(format);
+}
+
+QVector<QVector<QString>> TablePreviewDocument::ownerTagGrid() const {
+  QVector<QVector<QString>> owner(m_rowCount, QVector<QString>(m_columnCount));
+  if (!m_table) {
+    return owner;
+  }
+  for (int r = 0; r < m_rowCount; ++r) {
+    for (int c = 0; c < m_columnCount; ++c) {
+      const QTextTableCell cell = m_table->cellAt(r, c);
+      if (!cell.isValid()) {
+        continue;
+      }
+      owner[r][c] = m_cellMeta.value(cell.row()).value(cell.column()).m_tag;
+    }
+  }
+  return owner;
+}
+
+void TablePreviewDocument::remapCellMeta(const QVector<QVector<QString>> &p_ownerTags,
+                                         const QVector<QString> &p_rowTags,
+                                         const QVector<int> &p_rowMap,
+                                         const QVector<int> &p_columnMap) {
+  if (!m_table) {
+    return;
+  }
+
+  const int rows = m_table->rows();
+  const int columns = m_table->columns();
+  QVector<QVector<TablePreviewCellMeta>> meta(rows, QVector<TablePreviewCellMeta>(columns));
+  QVector<QString> rowTags(rows);
+
+  for (int r = 0; r < rows; ++r) {
+    const int preRow = p_rowMap.value(r, -1);
+    if (preRow >= 0) {
+      rowTags[r] = p_rowTags.value(preRow);
+    }
+
+    for (int c = 0; c < columns; ++c) {
+      // Keyed to the LIVE origin, not to the slot: a clipped span keeps the tag
+      // of the cell that still owns the slot, wherever its origin moved to.
+      if (!isOrigin(r, c)) {
+        continue;
+      }
+      const int preColumn = p_columnMap.value(c, -1);
+      if (preRow < 0 || preColumn < 0) {
+        // A row or column this sheet inserted, or a slot with no pre-image:
+        // generated, so no verbatim tag.
+        continue;
+      }
+      meta[r][c].m_tag = p_ownerTags.value(preRow).value(preColumn);
+    }
+  }
+
+  m_cellMeta = meta;
+  m_rowTags = rowTags;
+}
+
+bool TablePreviewDocument::insertRow(int p_row) {
+
+  // The whole precondition runs before the edit block opens: QTextTable clamps
+  // an out-of-range index silently while QVector::insert() asserts on one, and
+  // the two diverging is exactly the drift the serializer answers by throwing
+  // the edit away. Row 0 is refused because the header is not an ordinary row.
+  if (!m_table || p_row <= 0 || p_row > m_rowCount || !canInsertRow()) {
+    return false;
+  }
+
+  // One edit block for the whole insert, as in build(): the row, its prefix
+  // and its formats have to reach TablePreviewWidget::handleContentsChanged()
+  // as a single change. That slot re-runs isIntact() and rebuilds from source
+  // when the table looks gone, so an intermediate state observed halfway
+  // through would risk throwing the user's edit away.
+  QTextCursor cursor(m_doc.data());
+  cursor.beginEditBlock();
+
+  // Captured while the pre-mutation geometry is still live; see remapCellMeta().
+  const auto ownerTags = ownerTagGrid();
+  const auto rowTags = m_rowTags;
+  const int preRows = m_rowCount;
+  const int preColumns = m_columnCount;
+
+  if (p_row == m_rowCount) {
+    // Appending is what appendRows() is for; insertRows() at the row count is
+    // not the documented way to grow at the bottom.
+    m_table->appendRows(1);
+  } else {
+    m_table->insertRows(p_row, 1);
+  }
+
+  // The prefix vector is per row, and the serializer refuses a matrix whose
+  // size disagrees with it. m_delimiterPrefix is what arePrefixesSafe()
+  // requires of every row after the header, so it is the only prefix a new
+  // body row may carry.
+  m_rowPrefixes.insert(p_row, m_delimiterPrefix);
+
+  // Derived from the table rather than incremented, exactly as build() derives
+  // it, so the cached count cannot drift if the Qt call ever refuses.
+  m_rowCount = m_table->rows();
+
+  // The inserted row has no pre-image, so its cells are generated and carry no
+  // verbatim tag.
+  QVector<int> rowMap(m_rowCount, -1);
+  for (int r = 0; r < m_rowCount; ++r) {
+    const int pre = r < p_row ? r : r - 1;
+    rowMap[r] = (r == p_row || pre < 0 || pre >= preRows) ? -1 : pre;
+  }
+  QVector<int> columnMap(m_columnCount, -1);
+  for (int c = 0; c < m_columnCount && c < preColumns; ++c) {
+    columnMap[c] = c;
+  }
+  remapCellMeta(ownerTags, rowTags, rowMap, columnMap);
+
+  for (int c = 0; c < m_columnCount; ++c) {
+    // A new row carries no per-cell format, so its cells would otherwise be
+    // left-aligned regardless of the column's alignment. Origins only: a
+    // rowspan reaching into the new row leaves covered slots behind.
+    if (!isOrigin(p_row, c)) {
+      continue;
+    }
+    applyCellFormat(p_row, c);
+  }
+
+  noteStructuralChange();
+  cursor.endEditBlock();
+  return true;
+}
+
+bool TablePreviewDocument::removeRow(int p_row) {
+  if (!canDeleteRow(p_row)) {
+    return false;
+  }
+
+  QTextCursor cursor(m_doc.data());
+  cursor.beginEditBlock();
+
+  const auto ownerTags = ownerTagGrid();
+  const auto rowTags = m_rowTags;
+  const int preColumns = m_columnCount;
+
+  m_table->removeRows(p_row, 1);
+  m_rowPrefixes.remove(p_row);
+  m_rowCount = m_table->rows();
+
+  // An origin whose rowspan is CLIPPED by the removal keeps its tag, even when
+  // the row that held its origin coordinates is the one that went: Qt moves the
+  // origin down, and the remap follows it through the surviving slots.
+  QVector<int> rowMap(m_rowCount, -1);
+  for (int r = 0; r < m_rowCount; ++r) {
+    rowMap[r] = r < p_row ? r : r + 1;
+  }
+  QVector<int> columnMap(m_columnCount, -1);
+  for (int c = 0; c < m_columnCount && c < preColumns; ++c) {
+    columnMap[c] = c;
+  }
+  remapCellMeta(ownerTags, rowTags, rowMap, columnMap);
+
+  noteStructuralChange();
+  cursor.endEditBlock();
+  return true;
+}
+
+bool TablePreviewDocument::insertColumn(int p_column) {
+  if (!m_table || p_column < 0 || p_column > m_columnCount || !canInsertColumn()) {
+    return false;
+  }
+
+  QTextCursor cursor(m_doc.data());
+  cursor.beginEditBlock();
+
+  const auto ownerTags = ownerTagGrid();
+  const auto rowTags = m_rowTags;
+  const int preRows = m_rowCount;
+  const int preColumns = m_columnCount;
+
+  if (p_column == m_columnCount) {
+    m_table->appendColumns(1);
+  } else {
+    m_table->insertColumns(p_column, 1);
+  }
+
+  // One alignment per column, which the delimiter row is written from.
+  m_alignments.insert(p_column, PreviewTableAlignment::None);
+  m_columnCount = m_table->columns();
+  m_rowCount = m_table->rows();
+
+  // The inserted column has no pre-image, so its cells are generated.
+  QVector<int> rowMap(m_rowCount, -1);
+  for (int r = 0; r < m_rowCount && r < preRows; ++r) {
+    rowMap[r] = r;
+  }
+  QVector<int> columnMap(m_columnCount, -1);
+  for (int c = 0; c < m_columnCount; ++c) {
+    const int pre = c < p_column ? c : c - 1;
+    columnMap[c] = (c == p_column || pre < 0 || pre >= preColumns) ? -1 : pre;
+  }
+  remapCellMeta(ownerTags, rowTags, rowMap, columnMap);
+
+  // The width the document now intends to serialize as. Leaving this behind
+  // makes isRoundTrippable() refuse, toMarkdown() empty and
+  // flushPendingCommit() restore the source - the column would vanish at
+  // commit time rather than be refused visibly.
+  m_declaredColumnCount = m_columnCount;
+  rewriteColumnConstraints();
+
+  // Not just the new column: every column right of it has shifted, so its
+  // cells now carry the previous neighbour's alignment.
+  applyCellFormats();
+
+  noteStructuralChange();
+  cursor.endEditBlock();
+  return true;
+}
+
+bool TablePreviewDocument::removeColumn(int p_column) {
+  if (!canDeleteColumn(p_column)) {
+    return false;
+  }
+
+  QTextCursor cursor(m_doc.data());
+  cursor.beginEditBlock();
+
+  const auto ownerTags = ownerTagGrid();
+  const auto rowTags = m_rowTags;
+  const int preRows = m_rowCount;
+
+  m_table->removeColumns(p_column, 1);
+  m_alignments.remove(p_column);
+  m_columnCount = m_table->columns();
+  m_rowCount = m_table->rows();
+
+  // As in removeRow(): an origin whose colspan is clipped keeps its tag, and so
+  // does one whose origin COLUMN was the one removed - Qt moves the origin
+  // right and the remap follows it.
+  QVector<int> rowMap(m_rowCount, -1);
+  for (int r = 0; r < m_rowCount && r < preRows; ++r) {
+    rowMap[r] = r;
+  }
+  QVector<int> columnMap(m_columnCount, -1);
+  for (int c = 0; c < m_columnCount; ++c) {
+    columnMap[c] = c < p_column ? c : c + 1;
+  }
+  remapCellMeta(ownerTags, rowTags, rowMap, columnMap);
+
+  m_declaredColumnCount = m_columnCount;
+  rewriteColumnConstraints();
+  applyCellFormats();
+
+  noteStructuralChange();
+  cursor.endEditBlock();
+  return true;
+}
+
+bool TablePreviewDocument::setColumnAlignment(int p_column, PreviewTableAlignment p_alignment) {
+  if (!m_table || p_column < 0 || p_column >= m_columnCount) {
+    return false;
+  }
+
+  // Decision D-m, enforced in the MODEL and not only by the menu that disables
+  // the entry: a cell spanning this column carries ONE `align` attribute, so a
+  // per-column alignment is not representable. Accepting it here would update
+  // m_alignments, write no cell format (the slot is not an origin) and then
+  // serialize from the spanning origin's column instead - an edit that looks
+  // taken and is silently dropped.
+  if (isColumnSpanned(p_column)) {
+    return false;
+  }
+
+  if (m_alignments.value(p_column) == p_alignment) {
+    // Unchanged: refused so an idempotent click does not arm a commit.
+    return false;
+  }
+
+  m_alignments[p_column] = p_alignment;
+
+  QTextCursor cursor(m_doc.data());
+  cursor.beginEditBlock();
+
+  const int rows = m_table->rows();
+  for (int r = 0; r < rows; ++r) {
+    // Origins only, so a cell spanning this column is written once rather than
+    // once per covered slot.
+    if (!isOrigin(r, p_column)) {
+      continue;
+    }
+    applyCellFormat(r, p_column);
+  }
+
+  cursor.endEditBlock();
+  return true;
+}
+
+QRect TablePreviewDocument::selectionRect(const QTextCursor &p_cursor) const {
+  if (!m_table) {
+    return QRect();
+  }
+
+  int firstRow = 0;
+  int firstColumn = 0;
+  int rowCount = 0;
+  int columnCount = 0;
+  if (p_cursor.hasComplexSelection()) {
+    p_cursor.selectedTableCells(&firstRow, &rowCount, &firstColumn, &columnCount);
+    if (firstRow < 0 || firstColumn < 0 || rowCount <= 0 || columnCount <= 0) {
+      return QRect();
+    }
+    return QRect(firstColumn, firstRow, columnCount, rowCount);
+  }
+
+  const QTextTableCell cell = m_table->cellAt(p_cursor);
+  if (!cell.isValid()) {
+    return QRect();
+  }
+
+  // A caret resolves to its OWNING cell's whole box, not to one slot: that is
+  // what makes "the cell under the caret" mean the same thing for a merged cell
+  // as for a plain one.
+  return QRect(cell.column(), cell.row(), qMax(1, cell.columnSpan()), qMax(1, cell.rowSpan()));
+}
+
+bool TablePreviewDocument::canMergeCells(const QTextCursor &p_cursor) const {
+  if (!m_table || m_rowCount <= 0 || m_columnCount <= 0) {
+    return false;
+  }
+
+  // Decision D-l: a merge converts the table to HTML, and decision D-a says an
+  // HTML table previews only at the top level. A prefixed Markdown table could
+  // therefore only emit source that no longer previews, or that the host's
+  // prefix check reads as a changed wrapper chain.
+  if (m_syntax == PreviewTableSyntax::Markdown) {
+    if (!m_delimiterPrefix.isEmpty()) {
+      return false;
+    }
+    for (const auto &prefix : m_rowPrefixes) {
+      if (!prefix.isEmpty()) {
+        return false;
+      }
+    }
+  }
+
+  const QRect rect = selectionRect(p_cursor);
+  if (!rect.isValid() || (rect.width() <= 1 && rect.height() <= 1)) {
+    return false;
+  }
+
+  if (rect.left() < 0 || rect.top() < 0 || rect.right() >= m_columnCount ||
+      rect.bottom() >= m_rowCount) {
+    return false;
+  }
+
+  // The header row is not an ordinary row: merging across the boundary would
+  // make one cell both a header and a body cell, which neither
+  // QTextTableFormat::headerRowCount() nor the serializer can express.
+  if (m_hasHeaderRow && rect.top() == 0 && rect.bottom() > 0) {
+    return false;
+  }
+
+  // CONTAINMENT. QTextTable::mergeCells() silently refuses a request whose edge
+  // cuts a cell, so every origin the rectangle touches must lie wholly inside
+  // it -- otherwise mergeCells() below would clear the texts and then not
+  // merge, erasing content and leaving metadata describing geometry that never
+  // changed.
+  for (int r = rect.top(); r <= rect.bottom(); ++r) {
+    for (int c = rect.left(); c <= rect.right(); ++c) {
+      const QTextTableCell cell = m_table->cellAt(r, c);
+      if (!cell.isValid()) {
+        return false;
+      }
+      const int originRow = cell.row();
+      const int originColumn = cell.column();
+      if (originRow < rect.top() || originColumn < rect.left() ||
+          originRow + qMax(1, cell.rowSpan()) - 1 > rect.bottom() ||
+          originColumn + qMax(1, cell.columnSpan()) - 1 > rect.right()) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+TablePreviewDocument::GridSnapshot TablePreviewDocument::captureGrid() const {
+  GridSnapshot snapshot;
+  snapshot.m_source = cells();
+  snapshot.m_cellMeta = m_cellMeta;
+  snapshot.m_alignments = m_alignments;
+  snapshot.m_rowPrefixes = m_rowPrefixes;
+  snapshot.m_rowTags = m_rowTags;
+  snapshot.m_delimiterPrefix = m_delimiterPrefix;
+  snapshot.m_rowCount = m_rowCount;
+  snapshot.m_columnCount = m_columnCount;
+  snapshot.m_declaredColumnCount = m_declaredColumnCount;
+
+  snapshot.m_spans =
+      QVector<QVector<QPoint>>(m_rowCount, QVector<QPoint>(m_columnCount, QPoint(0, 0)));
+  for (int r = 0; r < m_rowCount; ++r) {
+    for (int c = 0; c < m_columnCount; ++c) {
+      if (isOrigin(r, c)) {
+        snapshot.m_spans[r][c] = QPoint(colSpanAt(r, c), rowSpanAt(r, c));
+      }
+    }
+  }
+
+  return snapshot;
+}
+
+void TablePreviewDocument::restoreGrid(const GridSnapshot &p_snapshot) {
+  m_source = p_snapshot.m_source;
+  m_cellMeta = p_snapshot.m_cellMeta;
+  m_pendingSpans = p_snapshot.m_spans;
+  m_alignments = p_snapshot.m_alignments;
+  m_rowPrefixes = p_snapshot.m_rowPrefixes;
+  m_rowTags = p_snapshot.m_rowTags;
+  m_delimiterPrefix = p_snapshot.m_delimiterPrefix;
+  m_rowCount = p_snapshot.m_rowCount;
+  m_columnCount = p_snapshot.m_columnCount;
+  m_declaredColumnCount = p_snapshot.m_declaredColumnCount;
+
+  // The same path a fresh bind takes, so a recovery cannot produce a document
+  // shape setTable() could not.
+  build();
+}
+
+bool TablePreviewDocument::mergeCells(const QTextCursor &p_cursor) {
+  // Every precondition before the edit block opens, exactly as insertRow()
+  // does, and exhaustive enough that Qt cannot refuse.
+  if (!canMergeCells(p_cursor)) {
+    return false;
+  }
+
+  const QRect rect = selectionRect(p_cursor);
+  const GridSnapshot before = captureGrid();
+
+  // Decision D-k: the surviving text is the non-empty source texts in grid
+  // order joined with one space. Read BEFORE anything is cleared.
+  QStringList parts;
+  for (int r = rect.top(); r <= rect.bottom(); ++r) {
+    for (int c = rect.left(); c <= rect.right(); ++c) {
+      if (!isOrigin(r, c)) {
+        continue;
+      }
+      const QString text = before.m_source.value(r).value(c);
+      if (!text.trimmed().isEmpty()) {
+        parts.append(text);
+      }
+    }
+  }
+  const QString merged = parts.join(QLatin1Char(' '));
+
+  const QString survivingTag = m_cellMeta.value(rect.top()).value(rect.left()).m_tag;
+
+  QTextCursor cursor(m_doc.data());
+  cursor.beginEditBlock();
+
+  // Every selected origin is cleared, INCLUDING the top-left survivor: Qt's own
+  // concatenation introduces paragraph breaks, so the merged content is written
+  // from scratch afterwards.
+  for (int r = rect.top(); r <= rect.bottom(); ++r) {
+    for (int c = rect.left(); c <= rect.right(); ++c) {
+      if (!isOrigin(r, c)) {
+        continue;
+      }
+      const QTextTableCell cell = m_table->cellAt(r, c);
+      if (!cell.isValid()) {
+        continue;
+      }
+      QTextCursor cellCursor = cell.firstCursorPosition();
+      cellCursor.setPosition(cell.lastCursorPosition().position(), QTextCursor::KeepAnchor);
+      cellCursor.removeSelectedText();
+    }
+  }
+
+  m_table->mergeCells(rect.top(), rect.left(), rect.height(), rect.width());
+
+  const QTextTableCell survivor = m_table->cellAt(rect.top(), rect.left());
+  const bool geometryOk = survivor.isValid() && survivor.row() == rect.top() &&
+                          survivor.column() == rect.left() && survivor.rowSpan() == rect.height() &&
+                          survivor.columnSpan() == rect.width();
+  if (!geometryOk) {
+    cursor.endEditBlock();
+    // Recovery, not rollback: an edit block is not a transaction and this
+    // document has no undo stack, so the only way back is to rebuild the table
+    // exactly as it was. Unreachable in practice -- the containment preflight
+    // is what makes Qt's refusal impossible -- but a merge that half happened
+    // would silently destroy content.
+    restoreGrid(before);
+    return false;
+  }
+
+  if (!merged.isEmpty()) {
+    survivor.firstCursorPosition().insertText(merged);
+  }
+
+  // Metadata: the survivor keeps the top-left origin's verbatim tag, and every
+  // covered cell's tag is dropped.
+  for (int r = rect.top(); r <= rect.bottom(); ++r) {
+    for (int c = rect.left(); c <= rect.right(); ++c) {
+      if (r < m_cellMeta.size() && c < m_cellMeta[r].size()) {
+        m_cellMeta[r][c] = TablePreviewCellMeta();
+      }
+    }
+  }
+  if (rect.top() < m_cellMeta.size() && rect.left() < m_cellMeta[rect.top()].size()) {
+    m_cellMeta[rect.top()][rect.left()].m_tag = survivingTag;
+  }
+
+  applyCellFormat(rect.top(), rect.left());
+
+  // Decision D-h / D-e: the first merge converts the table to HTML, and it
+  // stays HTML afterwards - even once every merge has been split again. Every
+  // cell of the pipe table it came from is Markdown source, so the converted
+  // table is Markdown-backed.
+  if (m_syntax != PreviewTableSyntax::Html) {
+    m_syntax = PreviewTableSyntax::Html;
+    m_markdownBacked = true;
+  }
+
+  noteStructuralChange();
+  cursor.endEditBlock();
+  return true;
+}
+
+bool TablePreviewDocument::canSplitCell(int p_row, int p_column) const {
+  if (!m_table || p_row < 0 || p_column < 0 || p_row >= m_rowCount || p_column >= m_columnCount) {
+    return false;
+  }
+
+  // Same D-l gate as canMergeCells(): a prefixed Markdown table never takes the
+  // HTML route at all, and a split is only meaningful on a table that did.
+  if (m_syntax == PreviewTableSyntax::Markdown) {
+    if (!m_delimiterPrefix.isEmpty()) {
+      return false;
+    }
+    for (const auto &prefix : m_rowPrefixes) {
+      if (!prefix.isEmpty()) {
+        return false;
+      }
+    }
+  }
+
+  const QTextTableCell cell = m_table->cellAt(p_row, p_column);
+  return cell.isValid() && (cell.rowSpan() > 1 || cell.columnSpan() > 1);
+}
+
+bool TablePreviewDocument::splitCell(int p_row, int p_column) {
+  if (!canSplitCell(p_row, p_column)) {
+    return false;
+  }
+
+  const QTextTableCell cell = m_table->cellAt(p_row, p_column);
+  const int originRow = cell.row();
+  const int originColumn = cell.column();
+  const int rowSpan = qMax(1, cell.rowSpan());
+  const int colSpan = qMax(1, cell.columnSpan());
+
+  QTextCursor cursor(m_doc.data());
+  cursor.beginEditBlock();
+
+  m_table->splitCell(originRow, originColumn, 1, 1);
+
+  // The origin keeps its text and its verbatim tag; every newly exposed slot is
+  // a cell this sheet generated, so it carries no tag and the serializer spells
+  // a fresh `<th>` or `<td>` for it per hasHeaderRow().
+  for (int r = originRow; r < originRow + rowSpan && r < m_cellMeta.size(); ++r) {
+    for (int c = originColumn; c < originColumn + colSpan && c < m_cellMeta[r].size(); ++c) {
+      if (r == originRow && c == originColumn) {
+        continue;
+      }
+      m_cellMeta[r][c] = TablePreviewCellMeta();
+    }
+  }
+
+  for (int r = originRow; r < originRow + rowSpan; ++r) {
+    for (int c = originColumn; c < originColumn + colSpan; ++c) {
+      if (isOrigin(r, c)) {
+        applyCellFormat(r, c);
+      }
+    }
+  }
+
+  noteStructuralChange();
+  cursor.endEditBlock();
+  return true;
+}
+
+void TablePreviewDocument::applyPalette(const QPalette &p_palette) {
+
+  if (!m_table) {
+    return;
+  }
+
+  QTextTableFormat format = m_table->format().toTableFormat();
+  // The only colour the table itself owns: everything else (text, selection,
+  // the band behind it) is resolved from the palette by the paint path.
+  format.setBorderBrush(p_palette.brush(QPalette::Mid));
+  m_table->setFormat(format);
+}
+
+// ---------------------------------------------------------------------------
+// TablePreviewSheet
+// ---------------------------------------------------------------------------
+
+namespace {
+// Whether @p_text holds anything a cell could keep once every line separator
+// has been taken out of it.
+bool hasCellContent(const QString &p_text) {
+  for (int i = 0; i < p_text.size(); ++i) {
+    if (!isLineSeparator(p_text.at(i).unicode())) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// Every separator the serializer rejects, collapsed into a single space, so a
+// pasted paragraph still lands in the cell as the one line a table row is.
+QString sanitizeForCell(const QString &p_text) {
+  QString result;
+  result.reserve(p_text.size());
+
+  bool afterSeparator = false;
+  for (int i = 0; i < p_text.size(); ++i) {
+    const QChar ch = p_text.at(i);
+    if (isLineSeparator(ch.unicode())) {
+      // One space for a whole run, so a CRLF pair and a blank line between two
+      // paragraphs both come out as a single gap.
+      if (!afterSeparator) {
+        result.append(QLatin1Char(' '));
+      }
+      afterSeparator = true;
+      continue;
+    }
+
+    afterSeparator = false;
+    result.append(ch);
+  }
+
+  return result;
+}
+} // namespace
+
+TablePreviewSheet::TablePreviewSheet(QWidget *p_parent) : VTextEdit(p_parent) {
+  setFrameShape(QFrame::NoFrame);
+  setLineWrapMode(QTextEdit::WidgetWidth);
+  // The sheet renders at its full natural height, so there is never anything
+  // to scroll to: the editor underneath owns the whole vertical axis.
+  setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  setAcceptRichText(false);
+  // WordWrap alone cannot break an unbroken token and would leave a long URL
+  // or identifier overflowing its column, which with no horizontal scrolling
+  // means unreachable. QTextEdit applies its own mode to whatever document it
+  // is given, so this has to be stated here as well as on the document.
+  setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+  // Tab is intercepted in keyPressEvent() before Qt's focus chain sees it.
+  setTabChangesFocus(false);
+  setFocusPolicy(Qt::StrongFocus);
+
+  // A cell holds RAW Markdown, so VTextEdit's auto-bracket completion would
+  // silently edit the source the user is typing - '(' becoming '()' inside a
+  // half-written link is exactly the wrong help.
+  setAutoBracketsEnabled(false);
+  // Both are already the VTextEdit defaults; stated so a later change to those
+  // defaults cannot quietly give the sheet a content-width margin (which would
+  // narrow the band the host measured) or a scroll-to-centre (which has
+  // nothing to scroll and would fight the editor's own viewport).
+  setMaxContentWidth(0);
+  setCenterCursor(CenterCursor::NeverCenter);
+
+  QSizePolicy policy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+  policy.setHeightForWidth(true);
+  setSizePolicy(policy);
+
+  connect(this, &QTextEdit::cursorPositionChanged, this,
+          &TablePreviewSheet::handleCursorPositionChanged);
+  connect(this, &QTextEdit::selectionChanged, this, &TablePreviewSheet::handleSelectionChanged);
+}
+
+void TablePreviewSheet::setTableDocument(TablePreviewDocument *p_document) {
+  m_document = p_document;
+  if (!p_document || !p_document->document()) {
+    return;
+  }
+
+  // QTextEdit only takes ownership of a document it parented itself, and this
+  // one belongs to TablePreviewDocument.
+  // The one legitimate document swap: the sheet's own binding. Qualified so it
+  // reaches the base implementation rather than the refusing shadow below,
+  // which exists to stop an EXTERNAL caller from replacing the document.
+  QTextEdit::setDocument(p_document->document());
+
+  // QTextEdit pushes its own undo setting onto whatever document it is given,
+  // and this one must not accumulate a second, invisible undo stack: the
+  // granularity the user sees is one whole-table replacement on the editor's.
+  // The input mode's u / Ctrl+R do not need one either - they replay the
+  // sheet's own cell-text snapshot ring instead (decision D2), precisely
+  // because a QTextDocument undo step would also revert a structural mutation
+  // without the C++ metadata that travels beside it.
+  setUndoRedoEnabled(false);
+
+  // VTextEdit's constructor connected its revision-filtered contentsChanged
+  // tracking to the document IT created, and the swap above has just discarded
+  // that document. Those connections therefore describe nothing, and
+  // VTextEdit::contentsChanged() never fires on a sheet. That is deliberate
+  // and nothing here rebinds them: the only listener that matters is
+  // TablePreviewWidget, which connects to QTextDocument::contentsChanged on
+  // the table document directly and applies the same revision filter itself.
+  // Rebinding would need VTextEdit's private revision member and would only
+  // give the sheet a second, redundant copy of that signal.
+
+  if (auto layout = p_document->document()->documentLayout()) {
+    connect(layout, &QAbstractTextDocumentLayout::documentSizeChanged, this,
+            &TablePreviewSheet::handleDocumentSizeChanged);
+  }
+}
+
+int TablePreviewSheet::horizontalChrome() const {
+  // What the frame and the viewport margins really take. Read from the live
+  // geometry once there is one, because a style may inset the viewport by more
+  // than the frame width alone; both scroll bars are off, so neither can
+  // inflate this.
+  const int live = viewport() ? width() - viewport()->width() : 0;
+  return live > 0 ? live : frameWidth() * 2;
+}
+
+int TablePreviewSheet::verticalChrome() const {
+  const int live = viewport() ? height() - viewport()->height() : 0;
+  return live > 0 ? live : frameWidth() * 2;
+}
+
+bool TablePreviewSheet::hasHeightForWidth() const { return true; }
+
+int TablePreviewSheet::heightForWidth(int p_outerWidth) const {
+  auto doc = document();
+  if (!doc) {
+    return 0;
+  }
+
+  // The width conversion is not optional. p_outerWidth is the width the host
+  // is about to assign to the *widget*; the document lays out inside the
+  // viewport, so assigning it straight to setTextWidth() would measure a
+  // narrower band than the sheet gets - and with the scroll bars off, the
+  // content clipped by that mistake would be unreachable.
+  const int chrome = horizontalChrome();
+  const qreal textWidth = p_outerWidth > chrome ? qreal(p_outerWidth - chrome) : qreal(-1);
+
+  // Laying the document out synchronously emits documentSizeChanged, and
+  // handing that straight back to the host is how a measurement loop starts.
+  QScopedValueRollback<bool> guard(m_measuring, true);
+
+  if (textWidth > 0 && !qFuzzyCompare(doc->textWidth() + 1, textWidth + 1)) {
+    doc->setTextWidth(textWidth);
+    if (m_document && !inlinePreviewsDeferred()) {
+      m_document->refreshInlinePreviewSizes();
+    }
+  }
+
+  const int height = qCeil(doc->documentLayout()->documentSize().height()) + verticalChrome();
+
+  // The probed width is deliberately left on the document. The host measures
+  // at the width it is about to assign - preferredSize() feeds the same value
+  // into the reservation, which becomes the widget's geometry in the same call
+  // stack, with no paint in between - so restoring the previous width here
+  // would only pay for a second full relayout and then a third from the
+  // resizeEvent. At the measured cost per cell that is the single most
+  // expensive thing this function could do on an interactive resize.
+  return height;
+}
+
+QSize TablePreviewSheet::sizeHint() const {
+  // Width 0 on purpose: TablePreviewWidget::preferredWidthFraction() is 1.0,
+  // so the host resolves the band to the full available content width rather
+  // than to a natural width the sheet would then have to be re-measured
+  // against. Only the height carries information here, and even that is a
+  // fallback - the host asks heightForWidth() whenever it has a width.
+  return QSize(0, heightForWidth(width()));
+}
+
+QSize TablePreviewSheet::minimumSizeHint() const {
+  // QAbstractScrollArea's own minimum reserves room for scroll bars and a few
+  // characters of text, which would stop the band from ever being narrow.
+  return QSize(0, 0);
+}
+
+int TablePreviewSheet::currentCellIndex() const {
+  const QTextCursor cursor = textCursor();
+  QTextTable *table = cursor.currentTable();
+  if (!table) {
+    return -1;
+  }
+
+  const QTextTableCell cell = table->cellAt(cursor);
+  if (!cell.isValid()) {
+    return -1;
+  }
+
+  return cell.row() * table->columns() + cell.column();
+}
+
+void TablePreviewSheet::commitPreedit() {
+  // QInputMethod has no receiver: it acts on the application's focus object,
+  // exactly as reset() does. A flush runs on background sheets too - the host
+  // flushes every sheet it removes, and every focus-out and debounce timeout
+  // lands here - so committing from a sheet which does not own the focus would
+  // finalize the composition of whatever widget really does. A sheet without
+  // the focus has no composition of its own to lose either.
+  if (QGuiApplication::focusObject() != this) {
+    return;
+  }
+
+  if (auto method = QGuiApplication::inputMethod()) {
+    // The preedit is not in the document yet, so serializing across one would
+    // silently drop whatever the user has already typed into it.
+    method->commit();
+  }
+}
+
+void TablePreviewSheet::cancelComposition() {
+  // QInputMethod has no receiver: it acts on the application's focus object.
+  // Resetting from a sheet which does not own the focus would cancel - or on
+  // some platforms commit - the composition of whatever widget really does,
+  // and a background sheet is revoked on every preview rebuild.
+  if (QGuiApplication::focusObject() != this) {
+    return;
+  }
+
+  // Collapse first. Installing a changed preedit makes QWidgetTextControl
+  // remove the current selection before anything else, and here that would be
+  // a real deletion - both for a synchronous callback from the reset below and
+  // for the explicit clear further down.
+  QTextCursor collapsed = textCursor();
+  if (collapsed.hasSelection()) {
+    collapsed.setPosition(collapsed.position());
+    setTextCursor(collapsed);
+  }
+
+  const int caret = textCursor().position();
+
+  {
+    // The Windows input context hands the composition back as a *commit* event
+    // before it cancels the native context, and other platforms send an empty
+    // clearing event instead. Both re-enter this sheet - which is still
+    // writable, deliberately, so the clear below can reach the control - and
+    // would change the document, which is the opposite of cancelling.
+    QScopedValueRollback<bool> guard(m_cancellingComposition, true);
+    if (auto method = QGuiApplication::inputMethod()) {
+      method->reset();
+    }
+  }
+
+  // reset() only tells the platform. What the text control was already given
+  // lives in the block's QTextLayout, and nothing above clears that, so a
+  // platform which sends no clearing event of its own would leave the preedit
+  // rendered. Delegated straight to the base, so the guard above does not
+  // swallow it.
+  const QTextBlock block = textCursor().block();
+  if (block.isValid() && block.layout() && !block.layout()->preeditAreaText().isEmpty()) {
+    QInputMethodEvent clear;
+    VTextEdit::inputMethodEvent(&clear);
+  }
+
+  QTextCursor restored = textCursor();
+  restored.setPosition(qBound(0, caret, qMax(0, document()->characterCount() - 1)));
+  setTextCursor(restored);
+  clampCursorIntoTable();
+  finishInlinePreviewTransaction();
+}
+
+QPalette TablePreviewSheet::applyPalette() {
+  // The host propagates the editor font and nothing else, so every colour has
+  // to come from this sheet's own effective palette. Re-seed it from the
+  // parent on every pass: setPalette() marks the palette as explicitly set,
+  // which would otherwise stop a later theme change from reaching the sheet.
+  QPalette effective = parentWidget() ? parentWidget()->palette() : QApplication::palette();
+  // The band belongs to the editor. A sheet which fills its own background
+  // would paint an opaque rectangle over whatever the editor draws there.
+  effective.setBrush(QPalette::Base, Qt::transparent);
+  setPalette(effective);
+  if (viewport()) {
+    viewport()->setAutoFillBackground(false);
+  }
+
+  if (m_document) {
+    m_document->applyPalette(effective);
+  }
+
+  return effective;
+}
+
+void TablePreviewSheet::refreshPalette() {
+  if (m_applyingFormats) {
+    return;
+  }
+
+  QScopedValueRollback<bool> guard(m_applyingFormats, true);
+  applyPalette();
+}
+
+void TablePreviewSheet::refreshFormats() {
+  if (m_applyingFormats) {
+    return;
+  }
+
+  QScopedValueRollback<bool> guard(m_applyingFormats, true);
+  applyPalette();
+
+  if (m_document) {
+    m_document->refreshCellSyntaxFormats();
+  }
+}
+
+void TablePreviewSheet::clampCursorIntoTable() {
+  QTextTable *table = m_document ? m_document->table() : nullptr;
+  if (!table) {
+    return;
+  }
+
+  QTextCursor cursor = textCursor();
+  if (cursor.currentTable() == table) {
+    return;
+  }
+
+  // Everything outside the table is the shrunken block a QTextDocument always
+  // keeps after one, so the nearest cell is either the first or the last.
+  const QTextTableCell cell = cursor.position() <= table->firstPosition()
+                                  ? table->cellAt(0, 0)
+                                  : table->cellAt(table->rows() - 1, table->columns() - 1);
+  if (!cell.isValid()) {
+    return;
+  }
+
+  setTextCursor(cursor.position() <= table->firstPosition() ? cell.firstCursorPosition()
+                                                            : cell.lastCursorPosition());
+}
+
+void TablePreviewSheet::resetInsertionFormat() {
+  QTextTable *table = m_document ? m_document->table() : nullptr;
+  if (!table) {
+    return;
+  }
+
+  // Runs on the insertion path, so it is also a gate: whatever is about to be
+  // typed or pasted must land in one cell.
+  collapseComplexSelectionForMutation();
+
+  const QTextTableCell cell = table->cellAt(textCursor());
+
+  if (!cell.isValid()) {
+    return;
+  }
+
+  const auto format = m_document->baselineCellFormat(cell.row());
+  const auto cursor = textCursor();
+  if (cursor.hasSelection()) {
+    m_document->applySourceCharFormat(cursor.selectionStart(), cursor.selectionEnd(), format);
+  } else {
+    setCurrentCharFormat(format);
+  }
+}
+
+void TablePreviewSheet::clampSelectionIntoOneCell() {
+  QTextTable *table = m_document ? m_document->table() : nullptr;
+  if (!table) {
+    return;
+  }
+
+  QTextCursor cursor = textCursor();
+  if (!cursor.hasSelection()) {
+    return;
+  }
+
+  // A CELL RECTANGLE is left alone (decision D-f): it is what Merge acts on and
+  // what the copy actions may read. It is not safe to mutate through, which is
+  // why collapseComplexSelectionForMutation() -- not this -- is the gate every
+  // text-mutating path now goes through.
+  if (cursor.hasComplexSelection()) {
+    return;
+  }
+
+  const QTextTableCell anchorCell = table->cellAt(cursor.anchor());
+
+  const QTextTableCell caretCell = table->cellAt(cursor.position());
+  if (caretCell.isValid() && anchorCell.isValid() && anchorCell == caretCell) {
+    return;
+  }
+
+  // Keep the end the caret is at; the selection is what has to shrink.
+  QTextTableCell target = caretCell.isValid() ? caretCell : anchorCell;
+  if (!target.isValid() && m_lastCellIndex >= 0 && table->columns() > 0) {
+    // Neither end is in a cell at all, which is what Ctrl+A produces: the
+    // anchor lands before the table and the caret in the block after it. Fall
+    // back to the cell the caret was last seen in.
+    target = table->cellAt(m_lastCellIndex / table->columns(), m_lastCellIndex % table->columns());
+  }
+
+  if (!target.isValid()) {
+    clampCursorIntoTable();
+    return;
+  }
+
+  const int first = target.firstPosition();
+  const int last = target.lastPosition();
+  int anchor = first;
+  int caret = last;
+  if (caretCell.isValid() || anchorCell.isValid()) {
+    anchor = qBound(first, cursor.anchor(), last);
+    caret = qBound(first, cursor.position(), last);
+  }
+  // Otherwise the whole cell, which is what "select all" means once it can
+  // only mean "inside this cell".
+
+  cursor.setPosition(anchor);
+  cursor.setPosition(caret, QTextCursor::KeepAnchor);
+  setTextCursor(cursor);
+}
+
+void TablePreviewSheet::collapseComplexSelectionForMutation() {
+  QTextTable *table = m_document ? m_document->table() : nullptr;
+  if (table) {
+    QTextCursor cursor = textCursor();
+    if (cursor.hasComplexSelection()) {
+      int firstRow = 0;
+      int rowCount = 0;
+      int firstColumn = 0;
+      int columnCount = 0;
+      cursor.selectedTableCells(&firstRow, &rowCount, &firstColumn, &columnCount);
+      const QTextTableCell cell = table->cellAt(qMax(0, firstRow), qMax(0, firstColumn));
+      if (cell.isValid()) {
+        // Onto the top-left cell of the rectangle, with nothing selected: a
+        // mutation then acts on one cell, which is the only shape
+        // removeSelectedText() cannot take the frame apart through.
+        setTextCursor(cell.firstCursorPosition());
+      } else {
+        clampCursorIntoTable();
+      }
+    }
+  }
+
+  clampSelectionIntoOneCell();
+}
+
+void TablePreviewSheet::cut() {
+  // No read-only guard of its own: QTextEdit::cut() already refuses on a
+  // read-only control, and duplicating the test here would diverge from it.
+  collapseComplexSelectionForMutation();
+  SourceEditGuard sourceEdit(this);
+  QTextEdit::cut();
+}
+
+void TablePreviewSheet::paste() {
+  // See cut(): the base slot owns the read-only decision.
+  collapseComplexSelectionForMutation();
+  QTextEdit::paste();
+}
+
+// The hidden bulk mutators. Each one would replace or empty the whole document
+// and take the QTextTable with it, so each is refused outright and says so.
+// They are member functions rather than deleted declarations because a
+// connect() by name or a QMetaObject invocation must fail loudly at run time
+// rather than silently reach the base implementation.
+#define VTE_REFUSE_BULK_MUTATOR(p_name)                                                            \
+  qCWarning(previewTableLog) << "table sheet refused an unsupported bulk mutator:" << p_name
+
+void TablePreviewSheet::clear() { VTE_REFUSE_BULK_MUTATOR("clear"); }
+
+void TablePreviewSheet::setText(const QString &p_text) {
+  Q_UNUSED(p_text);
+  VTE_REFUSE_BULK_MUTATOR("setText");
+}
+
+void TablePreviewSheet::setPlainText(const QString &p_text) {
+  Q_UNUSED(p_text);
+  VTE_REFUSE_BULK_MUTATOR("setPlainText");
+}
+
+void TablePreviewSheet::setHtml(const QString &p_html) {
+  Q_UNUSED(p_html);
+  VTE_REFUSE_BULK_MUTATOR("setHtml");
+}
+
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+void TablePreviewSheet::setMarkdown(const QString &p_markdown) {
+  Q_UNUSED(p_markdown);
+  VTE_REFUSE_BULK_MUTATOR("setMarkdown");
+}
+#endif
+
+void TablePreviewSheet::append(const QString &p_text) {
+  Q_UNUSED(p_text);
+  VTE_REFUSE_BULK_MUTATOR("append");
+}
+
+void TablePreviewSheet::insertPlainText(const QString &p_text) {
+  Q_UNUSED(p_text);
+  VTE_REFUSE_BULK_MUTATOR("insertPlainText");
+}
+
+void TablePreviewSheet::insertHtml(const QString &p_html) {
+  Q_UNUSED(p_html);
+  VTE_REFUSE_BULK_MUTATOR("insertHtml");
+}
+
+void TablePreviewSheet::setDocument(QTextDocument *p_document) {
+  Q_UNUSED(p_document);
+  VTE_REFUSE_BULK_MUTATOR("setDocument");
+}
+
+void TablePreviewSheet::removeSelectedText() { VTE_REFUSE_BULK_MUTATOR("removeSelectedText"); }
+
+void TablePreviewSheet::insertFromMimeDataOfBase(const QMimeData *p_source) {
+  Q_UNUSED(p_source);
+  VTE_REFUSE_BULK_MUTATOR("insertFromMimeDataOfBase");
+}
+
+void TablePreviewSheet::setOverriddenSelection(int p_start, int p_end) {
+  Q_UNUSED(p_start);
+  Q_UNUSED(p_end);
+  VTE_REFUSE_BULK_MUTATOR("setOverriddenSelection");
+}
+
+#undef VTE_REFUSE_BULK_MUTATOR
+
+void TablePreviewSheet::clearSelection() {
+  QTextCursor cursor = textCursor();
+  if (!cursor.hasSelection()) {
+    return;
+  }
+
+  // Collapse onto the caret. The caret position is already valid, so no
+  // clamping is needed - and must not happen, since it would move the caret.
+  cursor.setPosition(cursor.position());
+  setTextCursor(cursor);
+}
+
+// ---------------------------------------------------------------------------
+// The input mode seam
+// ---------------------------------------------------------------------------
+
+TablePreviewSheet::~TablePreviewSheet() {
+  // AbstractInputMode holds the interface by RAW pointer, and VTextEdit owns
+  // the mode - which it destroys from ~VTextEdit, i.e. AFTER this class's
+  // members (m_inputModeInterface among them) are already gone. Tearing the
+  // mode down here is what keeps that ordering legal.
+  removeInputMode();
+}
+
+void TablePreviewSheet::setDesiredInputMode(InputMode p_mode) {
+  m_desiredInputMode = p_mode;
+  m_desiredInputModeSet = true;
+
+  // Only a sheet which already HAS a mode is switched now. For every other
+  // sheet this is a recording, and ensureInputMode() spends it on first
+  // interaction (decision D5).
+  if (getInputMode()) {
+    installInputMode(p_mode);
+  }
+}
+
+void TablePreviewSheet::ensureInputMode() {
+  if (getInputMode() || !m_desiredInputModeSet) {
+    return;
+  }
+
+  installInputMode(m_desiredInputMode);
+}
+
+void TablePreviewSheet::installInputMode(InputMode p_mode) {
+  {
+    // Scoped: the owning pointer has to be released before the mode is
+    // replaced, so VTextEdit destroys the outgoing mode while the outgoing
+    // interface is still alive.
+    auto current = getInputMode();
+    if (current && current->mode() == p_mode) {
+      return;
+    }
+  }
+
+  // A mode REPLACEMENT is one of the transitions syncInputMethodToMode()
+  // cannot see, because it cannot tell it apart from a submode change: the
+  // outgoing and incoming modes may agree about the input method (Vi insert to
+  // Normal, for one) and it would then have nothing to do. A composition left
+  // open across the swap is rendered over a cell whose mode is gone, so it is
+  // cancelled here - never committed, because the mode which would decide that
+  // is exactly what is being taken away.
+  cancelComposition();
+
+  // The outgoing mode is destroyed by setInputMode() below, and
+  // ViInputMode::~ViInputMode() asserts its status bar is no longer parented.
+  detachInputModeStatusWidget();
+
+  QScopedPointer<TablePreviewInputMode> newInterface(new TablePreviewInputMode(this));
+
+  auto factory = InputModeMgr::getInst().getFactory(p_mode);
+  Q_ASSERT(factory);
+  auto mode = factory->createInputMode(newInterface.data());
+
+  // Decision D7: this ALREADY deactivates the outgoing mode and activates the
+  // incoming one. Calling activate() afterwards trips Q_ASSERT(!m_active).
+  setInputMode(mode);
+
+  // The outgoing interface ends up in newInterface and dies at the end of this
+  // function - after the mode which pointed at it.
+  m_inputModeInterface.swap(newInterface);
+
+  m_inputModeStatusWidget = mode ? mode->statusWidget() : QSharedPointer<InputModeStatusWidget>();
+  emit inputModeStatusWidgetChanged();
+
+  qCDebug(previewTableLog) << "the table sheet installed input mode" << static_cast<int>(p_mode);
+
+  // A mode is installed in some editorMode() from the start - Vi starts in
+  // normal mode, where the input method must be off. The composition was
+  // already resolved at the top of this function, so this only applies the
+  // state.
+  applyInputMethodState(false);
+}
+
+void TablePreviewSheet::removeInputMode() {
+  if (!getInputMode()) {
+    m_inputModeInterface.reset();
+    return;
+  }
+
+  // See installInputMode(): a composition may not outlive the mode which was
+  // accepting it. This is also the destruction path.
+  cancelComposition();
+
+  detachInputModeStatusWidget();
+
+  setInputMode(QSharedPointer<AbstractInputMode>());
+  m_inputModeInterface.reset();
+
+  // Back to plain typing. Without this the input method would stay disabled by
+  // a mode which no longer exists. The composition was already cancelled at
+  // the top of this function.
+  applyInputMethodState(false);
+}
+
+QSharedPointer<InputModeStatusWidget> TablePreviewSheet::inputModeStatusWidget() const {
+  return m_inputModeStatusWidget;
+}
+
+void TablePreviewSheet::detachInputModeStatusWidget() {
+  if (!m_inputModeStatusWidget) {
+    return;
+  }
+
+  auto widget = m_inputModeStatusWidget->widget();
+  m_inputModeStatusWidget.clear();
+
+  // Let the host unmount it first, then make sure it is really unparented: a
+  // host which never mounted it (no status bar at all) leaves it to us, and
+  // the outgoing mode's destructor asserts on the parentage either way.
+  emit inputModeStatusWidgetChanged();
+
+  if (widget) {
+    widget->hide();
+    widget->setParent(nullptr);
+  }
+}
+
+bool TablePreviewSheet::currentCellRange(int &p_first, int &p_last) const {
+  QTextTable *table = m_document ? m_document->table() : nullptr;
+  if (!table) {
+    return false;
+  }
+
+  const QTextTableCell cell = table->cellAt(textCursor().position());
+  if (!cell.isValid()) {
+    return false;
+  }
+
+  p_first = cell.firstPosition();
+  p_last = cell.lastPosition();
+  return p_first <= p_last;
+}
+
+TablePreviewSheet::SourceSelection TablePreviewSheet::sourceSelection() const {
+  SourceSelection result;
+  if (!m_document || !m_document->isIntact()) {
+    return result;
+  }
+  const auto cursor = textCursor();
+  const auto cell = m_document->table()->cellAt(cursor);
+  if (!cell.isValid() || cursor.hasComplexSelection()) {
+    return result;
+  }
+  result.m_row = cell.row();
+  result.m_column = cell.column();
+  auto offset = [&](int p_position) {
+    return m_document->sourceOffset(cell.row(), cell.column(), p_position);
+  };
+  result.m_anchor = offset(cursor.anchor());
+  result.m_caret = offset(cursor.position());
+  const auto selection = getSelection();
+  result.m_overridden = selection.isValid() && (selection.start() != cursor.selectionStart() ||
+                                                selection.end() != cursor.selectionEnd());
+  result.m_selectionStart = offset(selection.start());
+  result.m_selectionEnd = offset(selection.end());
+  return result;
+}
+
+void TablePreviewSheet::restoreSourceSelection(const SourceSelection &p_selection) {
+  if (!m_document || !m_document->isOrigin(p_selection.m_row, p_selection.m_column)) {
+    return;
+  }
+  QScopedValueRollback<bool> clamping(m_clampingCursor, true);
+  auto position = [&](int p_offset, bool p_after = true) {
+    return m_document->documentPosition(p_selection.m_row, p_selection.m_column, p_offset, p_after);
+  };
+  const bool forward = p_selection.m_anchor < p_selection.m_caret;
+  QTextCursor cursor(document());
+  cursor.setPosition(
+      position(p_selection.m_anchor, forward || p_selection.m_anchor == p_selection.m_caret));
+  cursor.setPosition(position(p_selection.m_caret, !forward), QTextCursor::KeepAnchor);
+  VTextEdit::clearOverriddenSelection();
+  setTextCursor(cursor);
+  if (p_selection.m_overridden) {
+    VTextEdit::setOverriddenSelection(position(p_selection.m_selectionStart),
+                                      position(p_selection.m_selectionEnd, false));
+  }
+}
+
+TablePreviewSheet::SourceEditGuard::SourceEditGuard(TablePreviewSheet *p_sheet) : m_sheet(p_sheet) {
+  if (m_sheet && ++m_sheet->m_sourceEditDepth == 1) {
+    const auto selection = m_sheet->sourceSelection();
+    m_sheet->suspendInlinePreviews();
+    m_parsingInlinePreviews = !m_sheet->m_suspendedInlinePreviews.isEmpty() ||
+                              !m_sheet->m_document->m_inlinePreviews.isEmpty();
+    if (m_parsingInlinePreviews) {
+      ++m_sheet->m_document->m_inlinePreviewEdits;
+    }
+    m_sheet->restoreSourceSelection(selection);
+  }
+}
+
+TablePreviewSheet::SourceEditGuard::~SourceEditGuard() {
+  if (m_sheet && m_sheet->m_sourceEditDepth == 1) {
+    const auto selection = m_sheet->sourceSelection();
+    m_sheet->restoreInlinePreviews();
+    if (m_parsingInlinePreviews) {
+      --m_sheet->m_document->m_inlinePreviewEdits;
+    }
+    m_sheet->restoreSourceSelection(selection);
+  }
+  if (m_sheet && --m_sheet->m_sourceEditDepth == 0) {
+    m_sheet->finishInlinePreviewTransaction();
+  }
+}
+
+bool TablePreviewSheet::inlinePreviewsDeferred() const {
+  if (m_sourceEditDepth > 0 || m_inputMethodEventDepth > 0) {
+    return true;
+  }
+  const auto block = textCursor().block();
+  return block.isValid() && block.layout() && !block.layout()->preeditAreaText().isEmpty();
+}
+
+void TablePreviewSheet::finishInlinePreviewTransaction() {
+  if (inlinePreviewsDeferred()) {
+    return;
+  }
+  emit inlinePreviewsReady();
+  if (m_document) {
+    m_document->refreshInlinePreviewSizes();
+  }
+  handleDocumentSizeChanged();
+}
+
+void TablePreviewSheet::suspendInlinePreviews() {
+  m_suspendedInlinePreviews.clear();
+  const auto selection = sourceSelection();
+  m_suspendedRow = selection.m_row;
+  m_suspendedColumn = selection.m_column;
+  if (!m_document || !m_document->isOrigin(m_suspendedRow, m_suspendedColumn)) {
+    return;
+  }
+  m_suspendedStructure = m_document->structureGeneration();
+  QScopedValueRollback<bool> clamping(m_clampingCursor, true);
+  m_document->suspendInlinePreviews(m_suspendedRow, m_suspendedColumn);
+  const auto cell = m_document->table()->cellAt(m_suspendedRow, m_suspendedColumn);
+  QVector<int> positions;
+  for (auto it = cell.begin(); it != cell.end(); ++it) {
+    const auto block = it.currentBlock();
+    for (auto fragment = block.begin(); !fragment.atEnd(); ++fragment) {
+      const auto run = fragment.fragment();
+      if (run.charFormat().property(TablePreviewDocument::c_inlinePreviewProperty) != true) {
+        continue;
+      }
+      const auto text = run.text();
+      for (int i = 0; i < text.size(); ++i) {
+        if (text.at(i) == QChar::ObjectReplacementCharacter) {
+          positions.append(run.position() + i);
+        }
+      }
+    }
+  }
+  if (positions.isEmpty()) {
+    return;
+  }
+  const auto source = m_document->sourceText(cell.firstPosition(), cell.lastPosition());
+  const auto &parsed = m_document->cellInlineData(source);
+  TablePreviewDocument::InlinePreviewGuard presentation(m_document);
+  for (auto it = positions.crbegin(); it != positions.crend(); ++it) {
+    const int end = m_document->sourceOffset(cell.row(), cell.column(), *it);
+    int start = -1;
+    bool image = true;
+    for (const auto &element : parsed.imageElements) {
+      if (element.m_endPos == end) {
+        start = element.m_startPos;
+        break;
+      }
+    }
+    if (start < 0) {
+      for (const auto &element : parsed.mathElements) {
+        if (element.m_endPos == end) {
+          start = element.m_startPos;
+          image = false;
+          break;
+        }
+      }
+    }
+    QTextCursor object(document());
+    object.setPosition(*it);
+    object.setPosition(*it + 1, QTextCursor::KeepAnchor);
+    if (start >= 0) {
+      SuspendedInlinePreview preview;
+      preview.m_start = QTextCursor(document());
+      preview.m_start.setPosition(m_document->documentPosition(cell.row(), cell.column(), start));
+      preview.m_start.setKeepPositionOnInsert(false);
+      preview.m_end = QTextCursor(document());
+      preview.m_end.setPosition(*it);
+      preview.m_end.setKeepPositionOnInsert(true);
+      preview.m_source = source.mid(start, end - start);
+      preview.m_format = object.charFormat().toImageFormat();
+      preview.m_image = image;
+      preview.m_generation =
+          m_document
+              ->m_inlinePreviewGenerations[image ? PreviewData::ImageLink : PreviewData::MathBlock];
+      m_suspendedInlinePreviews.append(preview);
+    }
+    object.removeSelectedText();
+  }
+}
+
+void TablePreviewSheet::restoreInlinePreviews() {
+  QScopedValueRollback<bool> clamping(m_clampingCursor, true);
+  m_document->resumeInlinePreviews();
+  if (m_suspendedInlinePreviews.isEmpty()) {
+    return;
+  }
+  if (!m_document->isIntact() || m_document->structureGeneration() != m_suspendedStructure ||
+      m_document->syntax() != PreviewTableSyntax::Markdown) {
+    m_suspendedInlinePreviews.clear();
+    return;
+  }
+  const auto cell = m_document->table()->cellAt(m_suspendedRow, m_suspendedColumn);
+  const auto source = m_document->sourceText(cell.firstPosition(), cell.lastPosition());
+  const auto &parsed = m_document->cellInlineData(source);
+  TablePreviewDocument::InlinePreviewGuard presentation(m_document);
+  for (const auto &preview : m_suspendedInlinePreviews) {
+    if (preview.m_generation !=
+        m_document->m_inlinePreviewGenerations[preview.m_image ? PreviewData::ImageLink
+                                                               : PreviewData::MathBlock]) {
+      continue;
+    }
+    const int start =
+        m_document->sourceOffset(cell.row(), cell.column(), preview.m_start.position());
+    const int end = m_document->sourceOffset(cell.row(), cell.column(), preview.m_end.position());
+    if (source.mid(start, end - start) != preview.m_source) {
+      continue;
+    }
+    bool valid = false;
+    if (preview.m_image) {
+      for (const auto &element : parsed.imageElements) {
+        valid |= element.m_startPos == start && element.m_endPos == end;
+      }
+    } else {
+      for (const auto &element : parsed.mathElements) {
+        valid |= element.m_startPos == start && element.m_endPos == end;
+      }
+    }
+    if (valid) {
+      QTextCursor cursor(document());
+      // A left-affine live cursor can acquire an anchor across an insertion.
+      // Only its position is the binding; never replace that incidental selection.
+      cursor.setPosition(preview.m_end.position());
+      cursor.insertImage(preview.m_format);
+    }
+  }
+  m_suspendedInlinePreviews.clear();
+}
+
+void TablePreviewSheet::handleTypeAction(TypeAction p_action) {
+  if (!m_document || !m_document->table() || isReadOnly()) {
+    return;
+  }
+
+  switch (p_action) {
+  case TypeAction::TypeBold:
+  case TypeAction::TypeItalic:
+  case TypeAction::TypeStrikethrough:
+  case TypeAction::TypeMark:
+  case TypeAction::TypeCode:
+  case TypeAction::TypeMath:
+    break;
+  default:
+    return;
+  }
+
+  commitPreedit();
+  clampCursorIntoTable();
+  collapseComplexSelectionForMutation();
+
+  int first = 0;
+  int last = 0;
+  if (!currentCellRange(first, last)) {
+    return;
+  }
+
+  SourceEditGuard sourceEdit(this);
+  const QTextCursor before = textCursor();
+  const bool hadSelection = before.hasSelection();
+  const int selectionStart = before.selectionStart();
+  const int selectionEnd = before.selectionEnd();
+  const int documentLength = document()->characterCount();
+
+  commitUndoCheckpoint();
+  switch (p_action) {
+  case TypeAction::TypeBold:
+    MarkdownUtils::typeBold(this);
+    break;
+  case TypeAction::TypeItalic:
+    MarkdownUtils::typeItalic(this);
+    break;
+  case TypeAction::TypeStrikethrough:
+    MarkdownUtils::typeStrikethrough(this);
+    break;
+  case TypeAction::TypeMark:
+    MarkdownUtils::typeMark(this);
+    break;
+  case TypeAction::TypeCode:
+    MarkdownUtils::typeCode(this);
+    break;
+  case TypeAction::TypeMath:
+    MarkdownUtils::typeMath(this);
+    break;
+  default:
+    Q_UNREACHABLE();
+  }
+  if (hadSelection) {
+    QTextCursor selected(document());
+    selected.setPosition(selectionStart);
+    selected.setPosition(selectionEnd + document()->characterCount() - documentLength,
+                         QTextCursor::KeepAnchor);
+    setTextCursor(selected);
+  }
+
+  commitUndoCheckpoint();
+}
+
+QString TablePreviewSheet::sanitizeCellPayload(const QString &p_text) {
+  if (!hasLineSeparator(p_text)) {
+    return p_text;
+  }
+
+  // Same policy as a paste and as an input method commit: a payload which is
+  // nothing but separators is refused outright rather than collapsed into a
+  // space, because that would insert content the user never typed.
+  return hasCellContent(p_text) ? sanitizeForCell(p_text) : QString();
+}
+
+bool TablePreviewSheet::isTextInsertingMode() const {
+  auto mode = getInputMode();
+  // No mode installed is ordinary typing: that is what the sheet was before
+  // this feature, and what it still is until the host installs one.
+  return !mode || isTextInsertingEditorMode(mode->editorMode());
+}
+
+void TablePreviewSheet::syncInputMethodToMode() { applyInputMethodState(true); }
+
+void TablePreviewSheet::applyInputMethodState(bool p_resolveComposition) {
+  const bool enable = isTextInsertingMode();
+
+  if (!hasFocus()) {
+    // RECORD ONLY. Everything below reaches QInputMethod, which has no
+    // receiver: it acts on the application's FOCUS OBJECT. A background sheet
+    // - and every sheet is one at the moment its mode is installed - would
+    // therefore reset, and on Windows finalize, the composition of whatever
+    // widget really does have the focus: the editor, or another sheet the user
+    // is typing CJK into.
+    //
+    // m_inputMethodApplied is cleared rather than set, so focusInEvent() -
+    // which calls this again - really does apply it instead of finding the
+    // desired value already recorded and returning early.
+    m_inputMethodDesired = enable;
+    m_inputMethodApplied = false;
+    return;
+  }
+
+  if (m_inputMethodApplied && m_inputMethodDesired == enable) {
+    // Nothing to do, and nothing to reset - which matters, because the reset
+    // below is the reentrancy hazard this whole function exists to contain.
+    //
+    // Deliberately compared against the sheet's OWN desired value rather than
+    // against inputMethodQuery(Qt::ImEnabled): the query also folds in
+    // VTextEdit::forceInputMethodDisabled(), a process-wide static owned by
+    // the application. Comparing against the effective value would make a
+    // transition into Vi normal mode look like a no-op while the force is set,
+    // and the sheet would come out of it input-method ENABLED once the
+    // application lifted the force.
+    return;
+  }
+
+  m_inputMethodDesired = enable;
+  m_inputMethodApplied = true;
+
+  // COMPOSITION POLICY. setInputMethodEnabled() calls QInputMethod::reset(),
+  // and on Windows the input context answers a reset by handing the open
+  // composition back as a synchronous *commit* event to the focus object -
+  // this widget - while katevi is still inside handleKeyPress() for the key
+  // that caused the transition. Other platforms send an empty clearing event
+  // instead. Either way the preedit is resolved deliberately rather than left
+  // to whatever the platform does.
+  //
+  // @p_resolveComposition says whether resolving it is THIS call's job. It is
+  // false for the two callers which have already resolved it themselves and
+  // know something this function cannot see: installInputMode() and
+  // removeInputMode() cancel, because the mode which would decide otherwise is
+  // exactly what is being taken away, and the enable flag can be unchanged
+  // across such a swap (Vi insert to Normal) so nothing here would fire.
+  //
+  // When it is true the transition is a SUBMODE change, which has two cases:
+  //
+  //  - leaving an inserting submode (insert/replace -> normal or visual, which
+  //    is the Escape path) COMMITS. The characters are ones the user has
+  //    already typed and can see; dropping them on Escape would be a silent
+  //    loss.
+  //  - entering one CANCELS. There is nothing worth keeping - a command-mode
+  //    sheet refuses input method events - and a stale preedit rendered over
+  //    the cell would be finished into it by the next keystroke.
+  //
+  // The remaining transitions are owned by their own call sites too:
+  // focusOutEvent() commits, and TablePreviewWidget::applyEditability() cancels
+  // on the way to read-only.
+  if (p_resolveComposition) {
+    if (!enable) {
+      commitPreedit();
+    } else {
+      cancelComposition();
+    }
+  }
+
+  // The reset inside setInputMethodEnabled() is a SECOND one, after the
+  // deliberate resolution above, and it is the one whose synchronous callback
+  // would otherwise land in the document unguarded. Cancelling is neither
+  // committing nor deleting, and there is nothing left to commit anyway.
+  QScopedValueRollback<bool> guard(m_cancellingComposition, true);
+  setInputMethodEnabled(enable);
+}
+
+// ---------------------------------------------------------------------------
+// The undo ring (decision D2)
+// ---------------------------------------------------------------------------
+
+const int TablePreviewSheet::c_maxUndoDepth = 64;
+
+QByteArray TablePreviewSheet::tableStructureFingerprint() const {
+  QTextTable *table = m_document ? m_document->table() : nullptr;
+  if (!table) {
+    return QByteArray();
+  }
+
+  const int rows = table->rows();
+  const int columns = table->columns();
+
+  QByteArray fingerprint;
+  fingerprint.reserve(24 + rows * columns * 4);
+  // The document's STRUCTURE GENERATION first, and it is what actually makes
+  // this monotonic. The shape below is reversible - a merge followed by a
+  // split restores the row and column counts and every slot's owner while
+  // leaving the cell TEXT rearranged - so a ring keyed only to the shape would
+  // come back to life and replay a pre-merge cell over a post-split one. A
+  // counter cannot.
+  //
+  // The shape is kept as well, as the belt to that counter's braces: a
+  // structural mutation added later which forgets to call
+  // noteStructuralChange() is still caught, just not a reversible pair of
+  // them.
+  fingerprint.append(QByteArray::number(m_document->structureGeneration())).append('#');
+  fingerprint.append(QByteArray::number(rows)).append(':');
+  fingerprint.append(QByteArray::number(columns)).append(';');
+
+  // Every slot, not just the origins: what has to be detected is a slot
+  // changing OWNER, which a merge or a split does without changing the row or
+  // column count at all.
+  for (int r = 0; r < rows; ++r) {
+    for (int c = 0; c < columns; ++c) {
+      const QTextTableCell cell = table->cellAt(r, c);
+      fingerprint.append(QByteArray::number(cell.row()));
+      fingerprint.append(',');
+      fingerprint.append(QByteArray::number(cell.column()));
+      fingerprint.append(' ');
+    }
+  }
+
+  return fingerprint;
+}
+
+bool TablePreviewSheet::isUndoRingLive() {
+  const QByteArray fingerprint = tableStructureFingerprint();
+  if (fingerprint.isEmpty()) {
+    clearUndoRing();
+    return false;
+  }
+
+  if (fingerprint != m_undoRingFingerprint) {
+    if (!m_undoRing.isEmpty() || !m_redoRing.isEmpty() || m_undoBaseline.m_cell >= 0) {
+      qCDebug(previewTableLog) << "the table's shape moved - dropped the sheet's undo ring";
+    }
+    clearUndoRing();
+  }
+
+  return true;
+}
+
+void TablePreviewSheet::clearUndoRing() {
+  m_undoRing.clear();
+  m_redoRing.clear();
+  m_undoRingFingerprint = tableStructureFingerprint();
+
+  // The BASELINE is re-anchored, not merely dropped. Only the mode's own
+  // mutations take a checkpoint before they run; ordinary typing, a paste and
+  // an input method commit rely on a baseline that was captured earlier. So a
+  // clear which left none would make the first edit after it unrecoverable -
+  // the next checkpoint would record the ALREADY MUTATED cell as the state to
+  // go back to. That is precisely the edit which follows an accepted commit,
+  // i.e. the common case.
+  m_undoBaseline = CellSnapshot();
+  const int index = currentCellIndex();
+  if (index >= 0) {
+    m_undoBaseline.m_cell = index;
+    m_undoBaseline.m_text = cellTextAt(index);
+  }
+}
+
+QString TablePreviewSheet::cellTextAt(int p_cell) const {
+  QTextTable *table = m_document ? m_document->table() : nullptr;
+  if (!table || p_cell < 0 || table->columns() <= 0) {
+    return QString();
+  }
+
+  const int row = p_cell / table->columns();
+  const int column = p_cell % table->columns();
+  if (row >= table->rows()) {
+    return QString();
+  }
+
+  const QTextTableCell cell = table->cellAt(row, column);
+  if (!cell.isValid()) {
+    return QString();
+  }
+
+  return m_document->sourceText(cell.firstPosition(), cell.lastPosition());
+}
+
+bool TablePreviewSheet::setCellTextAt(int p_cell, const QString &p_text) {
+  QTextTable *table = m_document ? m_document->table() : nullptr;
+  if (!table || p_cell < 0 || table->columns() <= 0) {
+    return false;
+  }
+
+  const int row = p_cell / table->columns();
+  const int column = p_cell % table->columns();
+  if (row >= table->rows()) {
+    return false;
+  }
+
+  const QTextTableCell cell = table->cellAt(row, column);
+  if (!cell.isValid()) {
+    return false;
+  }
+
+  QTextCursor cursor = cell.firstCursorPosition();
+  cursor.setPosition(cell.lastPosition(), QTextCursor::KeepAnchor);
+  // The cell's baseline format, never the format of whatever happens to sit at
+  // its start: a replay must not resurrect a highlight run the parse has since
+  // moved on from.
+  cursor.setCharFormat(m_document->baselineCellFormat(cell.row()));
+  cursor.insertText(p_text);
+  setTextCursor(cursor);
+  return true;
+}
+
+void TablePreviewSheet::captureUndoBaseline() {
+  m_undoBaseline = CellSnapshot();
+  if (!isUndoRingLive()) {
+    return;
+  }
+
+  const int index = currentCellIndex();
+  if (index < 0) {
+    return;
+  }
+
+  m_undoBaseline.m_cell = index;
+  m_undoBaseline.m_text = cellTextAt(index);
+}
+
+void TablePreviewSheet::commitUndoCheckpoint() {
+  if (m_replayingRing || m_applyingFormats ||
+      (m_document && m_document->isApplyingInlinePreviews())) {
+    return;
+  }
+
+  if (!isUndoRingLive()) {
+    return;
+  }
+
+  if (m_undoBaseline.m_cell < 0) {
+    captureUndoBaseline();
+    return;
+  }
+
+  const QString current = cellTextAt(m_undoBaseline.m_cell);
+  if (current == m_undoBaseline.m_text) {
+    // Nothing has happened since the last checkpoint. Re-anchor on the caret's
+    // cell so a checkpoint taken after a plain cursor move follows it.
+    captureUndoBaseline();
+    return;
+  }
+
+  m_undoRing.append(m_undoBaseline);
+  while (m_undoRing.size() > c_maxUndoDepth) {
+    m_undoRing.removeFirst();
+  }
+
+  // A fresh edit invalidates the redo branch, exactly as a text editor's undo
+  // stack does.
+  m_redoRing.clear();
+
+  captureUndoBaseline();
+}
+
+bool TablePreviewSheet::replaySnapshot(QVector<CellSnapshot> &p_from, QVector<CellSnapshot> &p_to) {
+  if (isReadOnly()) {
+    return false;
+  }
+
+  // Flush an uncommitted in-cell edit first, so `u` after typing undoes the
+  // typing rather than skipping past it.
+  commitUndoCheckpoint();
+
+  if (p_from.isEmpty()) {
+    return false;
+  }
+
+  const CellSnapshot entry = p_from.takeLast();
+
+  CellSnapshot inverse;
+  inverse.m_cell = entry.m_cell;
+  inverse.m_text = cellTextAt(entry.m_cell);
+
+  QScopedValueRollback<bool> guard(m_replayingRing, true);
+  if (!setCellTextAt(entry.m_cell, entry.m_text)) {
+    // The slot is gone. The fingerprint check should have made this
+    // unreachable; drop the whole ring rather than guess.
+    qCWarning(previewTableLog) << "an undo ring entry no longer resolves to a cell -"
+                               << "dropped the ring";
+    clearUndoRing();
+    return false;
+  }
+
+  p_to.append(inverse);
+  while (p_to.size() > c_maxUndoDepth) {
+    p_to.removeFirst();
+  }
+
+  m_undoBaseline = entry;
+  return true;
+}
+
+bool TablePreviewSheet::undoFromRing() { return replaySnapshot(m_undoRing, m_redoRing); }
+
+bool TablePreviewSheet::redoFromRing() { return replaySnapshot(m_redoRing, m_undoRing); }
+
+int TablePreviewSheet::undoRingDepth() const {
+  if (m_undoRing.isEmpty() && m_undoBaseline.m_cell < 0) {
+    return 0;
+  }
+
+  if (tableStructureFingerprint() != m_undoRingFingerprint) {
+    // The table's shape moved since the ring was recorded, so none of it is
+    // replayable anymore. Reported as empty rather than cleared, because this
+    // is the const path - the next replay or checkpoint drops it for real.
+    return 0;
+  }
+
+  int depth = m_undoRing.size();
+  if (m_undoBaseline.m_cell >= 0 && cellTextAt(m_undoBaseline.m_cell) != m_undoBaseline.m_text) {
+    // An in-cell edit which has not been checkpointed yet is still one step
+    // away from being undoable, and katevi asks before it acts.
+    ++depth;
+  }
+  return depth;
+}
+
+int TablePreviewSheet::redoRingDepth() const {
+  if (m_redoRing.isEmpty() || tableStructureFingerprint() != m_undoRingFingerprint) {
+    return 0;
+  }
+
+  return m_redoRing.size();
+}
+
+void TablePreviewSheet::handleCursorPositionChanged() {
+  if (!m_clampingCursor) {
+    // Both clamps rewrite the cursor, which re-enters this slot.
+    QScopedValueRollback<bool> guard(m_clampingCursor, true);
+    clampCursorIntoTable();
+    clampSelectionIntoOneCell();
+  }
+
+  const int index = currentCellIndex();
+  if (index == m_lastCellIndex) {
+    return;
+  }
+
+  const bool leftACell = m_lastCellIndex >= 0;
+  m_lastCellIndex = index;
+
+  // Leaving a cell ends an undo step, exactly as it ends a commit debounce:
+  // what was typed in the cell just left is one thing the user did.
+  commitUndoCheckpoint();
+
+  if (leftACell) {
+    emit cellLeft();
+  }
+}
+
+void TablePreviewSheet::handleSelectionChanged() {
+  if (m_clampingCursor) {
+    return;
+  }
+
+  // Only the selection: collapsing the caret here would undo a legitimate
+  // in-cell selection the user is still dragging out.
+  QScopedValueRollback<bool> guard(m_clampingCursor, true);
+  clampSelectionIntoOneCell();
+}
+
+void TablePreviewSheet::handleDocumentSizeChanged() {
+  if (m_measuring || m_applyingGeometry || m_applyingFormats || inlinePreviewsDeferred() ||
+      (m_document && m_document->isApplyingInlinePreviews())) {
+    // Either this sheet is measuring itself, or it is answering a geometry the
+    // host has just chosen. Reporting either one back would feed the
+    // measurement into itself.
+    return;
+  }
+
+  const int outerWidth = width();
+  const int height = heightForWidth(outerWidth);
+  if (outerWidth == m_notifiedOuterWidth && height == m_notifiedHeight) {
+    // The host caches its measurements and re-publishes on a layout request,
+    // so an unchanged answer has to terminate here rather than bounce.
+    return;
+  }
+
+  m_notifiedOuterWidth = outerWidth;
+  m_notifiedHeight = height;
+
+  qCDebug(previewTableLog) << "the sheet settled on" << height << "at width" << outerWidth;
+  emit preferredGeometryChanged();
+}
+
+bool TablePreviewSheet::moveToAdjacentCell(bool p_forward) {
+  QTextTable *table = m_document ? m_document->table() : nullptr;
+  if (!table || table->rows() <= 0 || table->columns() <= 0) {
+    return false;
+  }
+
+  // Leaving a cell commits it, so whatever the input method still holds has to
+  // land in the document first.
+  commitPreedit();
+  clampCursorIntoTable();
+
+  QTextCursor cursor = textCursor();
+  if (!cursor.movePosition(p_forward ? QTextCursor::NextCell : QTextCursor::PreviousCell)) {
+    // Past the last cell, or before the first. Deliberately NOT a wrap any
+    // more (decision D3): Escape is the input mode's now, so Tab past the end
+    // and Backtab past the start are - with the edge arrows - the only way
+    // left to hand the caret back to the editor. Wrapping would make the sheet
+    // a keyboard trap for a Vi user, who has no Escape to fall back on.
+    return false;
+  }
+
+  setTextCursor(cursor);
+  return true;
+}
+
+bool TablePreviewSheet::deleteWithinCell(const QKeyEvent *p_event) {
+  QTextTable *table = m_document ? m_document->table() : nullptr;
+  if (!table) {
+    return false;
+  }
+
+  const bool completeLine = p_event->matches(QKeySequence::DeleteCompleteLine);
+  QTextCursor::MoveOperation operation = QTextCursor::NoMove;
+  if (p_event->matches(QKeySequence::DeleteEndOfWord)) {
+    operation = QTextCursor::NextWord;
+  } else if (p_event->matches(QKeySequence::DeleteStartOfWord)) {
+    operation = QTextCursor::PreviousWord;
+  } else if (p_event->matches(QKeySequence::DeleteEndOfLine)) {
+    operation = QTextCursor::EndOfLine;
+  } else if (!completeLine) {
+    return false;
+  }
+
+  clampCursorIntoTable();
+  collapseComplexSelectionForMutation();
+  // Word boundaries come from source; visual EndOfLine must use the decorated layout.
+  SourceEditGuard wordEdit(operation != QTextCursor::EndOfLine ? this : nullptr);
+
+  QTextCursor cursor = textCursor();
+  const QTextTableCell cell = table->cellAt(cursor.position());
+  if (!cell.isValid()) {
+    // Swallowed rather than handed to the base, which would delete outside the
+    // table.
+    return true;
+  }
+
+  const int first = cell.firstPosition();
+  const int last = cell.lastPosition();
+
+  if (!cursor.hasSelection()) {
+    if (completeLine) {
+      // A cell is one block, so "the whole line" is the whole cell.
+      cursor.setPosition(first);
+      cursor.setPosition(last, QTextCursor::KeepAnchor);
+    } else {
+      cursor.movePosition(operation, QTextCursor::KeepAnchor);
+    }
+  }
+
+  // Whatever the move reached for, the deletion stays inside the cell.
+  const int sourceAnchor =
+      m_document->sourceOffset(cell.row(), cell.column(), qBound(first, cursor.anchor(), last));
+  const int sourcePosition =
+      m_document->sourceOffset(cell.row(), cell.column(), qBound(first, cursor.position(), last));
+  SourceEditGuard sourceEdit(this);
+  const int anchor = m_document->documentPosition(cell.row(), cell.column(), sourceAnchor);
+  const int position = m_document->documentPosition(cell.row(), cell.column(), sourcePosition);
+  cursor.setPosition(anchor);
+  if (anchor != position) {
+    cursor.setPosition(position, QTextCursor::KeepAnchor);
+    cursor.removeSelectedText();
+  }
+
+  setTextCursor(cursor);
+  return true;
+}
+
+bool TablePreviewSheet::isAtTopEdge() const {
+  QTextCursor probe = textCursor();
+  if (!probe.currentTable()) {
+    return true;
+  }
+
+  // Ask the layout rather than counting rows: a wrapped cell has several
+  // visual lines and only the first one is an edge.
+  if (!probe.movePosition(QTextCursor::Up)) {
+    return true;
+  }
+
+  return probe.currentTable() == nullptr;
+}
+
+bool TablePreviewSheet::isAtBottomEdge() const {
+  QTextCursor probe = textCursor();
+  if (!probe.currentTable()) {
+    return true;
+  }
+
+  if (!probe.movePosition(QTextCursor::Down)) {
+    return true;
+  }
+
+  return probe.currentTable() == nullptr;
+}
+
+bool TablePreviewSheet::appendRowFromLastCell() {
+  // Everything below the accept point is a preflight: it must not touch the
+  // document or the cursor, because a refused Enter has to remain the inert
+  // swallow it has always been.
+  if (isReadOnly()) {
+    // applyEditability() is the single writer of this flag and already folds in
+    // the editor's read-only state, a revoked authority and a table which is
+    // not round-trippable, so this one test covers all of them.
+    return false;
+  }
+
+  QTextTable *table = m_document ? m_document->table() : nullptr;
+  if (!table || table->rows() <= 0 || table->columns() <= 0) {
+    return false;
+  }
+
+  const auto isInLastCell = [](const QTextTable *p_table, const QTextCursor &p_cursor) {
+    const QTextTableCell cell = p_table->cellAt(p_cursor.position());
+    return cell.isValid() && cell.row() == p_table->rows() - 1 &&
+           cell.column() == p_table->columns() - 1;
+  };
+
+  if (!isInLastCell(table, textCursor()) || !m_document->canAppendRow()) {
+    return false;
+  }
+
+  // Accepted from here on, so the side effects may run. The preedit has to
+  // land in the document before the row is added, otherwise the composition
+  // would be committed into a cell the caret has already left.
+  commitPreedit();
+  clampCursorIntoTable();
+  clearSelection();
+
+  // commitPreedit() can insert text synchronously, which moves the caret and
+  // changes the document, so both conditions are re-resolved rather than
+  // trusted from before it ran.
+  table = m_document->table();
+  if (!table || !isInLastCell(table, textCursor()) || !m_document->canAppendRow()) {
+    return false;
+  }
+
+  if (!m_document->appendRow()) {
+    return false;
+  }
+
+  const QTextTableCell target = table->cellAt(table->rows() - 1, 0);
+  if (!target.isValid()) {
+    return false;
+  }
+
+  // Moving the caret out of the previous cell is what emits cellLeft(), and
+  // therefore what commits the row the user has just finished typing.
+  setTextCursor(target.firstCursorPosition());
+  return true;
+}
+
+void TablePreviewSheet::keyPressEvent(QKeyEvent *p_event) {
+  // The lazy install is triggered here as well as from focusInEvent(). A key
+  // press means the sheet is being typed into, which is the same condition,
+  // and it does not depend on a focus event having been delivered - which a
+  // synthesized key event, and an embedding which moves the focus in ways Qt
+  // does not report, both skip. Idempotent, so the common path pays one null
+  // check.
+  ensureInputMode();
+
+  // katevi exposes no key boundary of its own, and the undo ring needs one:
+  // see TablePreviewInputMode::setUndoMergeAllEdits().
+  if (m_inputModeInterface) {
+    m_inputModeInterface->notifyKeyPressBegin();
+  }
+
+  // PER-KEY PRECEDENCE. Everything in this function runs BEFORE the input
+  // mode, which VTextEdit::keyPressEvent() consults at the very bottom.
+  //
+  // That ordering is a decision, not an accident. The keys below are the
+  // sheet's TABLE vocabulary and have to mean the same thing in all three
+  // input modes, and katevi claims several of them outright: Return is a
+  // normal-mode motion ("down, first non-blank"), the arrow keys are motions
+  // too, and Escape is answered unconditionally by
+  // KateVi::NormalViMode::handleKeyPress(). Letting the mode refuse them first
+  // would therefore silently give Vi users a different table, with no Enter to
+  // append a row. So they are intercepted here instead, in every mode.
+  //
+  // Everything the mode legitimately owns - motions, operators, counts,
+  // registers, the ':' command bar - falls straight through to it.
+
+  // Undo and redo. The mode's own u / Ctrl+R never reach here: katevi handles
+  // them internally and calls back into undo()/redo() on the interface, which
+  // replays the sheet's snapshot ring. This is the plain Ctrl+Z / Ctrl+Y path,
+  // which is relayed to the editor once the ring is exhausted - a pending edit
+  // has to be written back before the editor's stack is moved.
+  if (p_event->matches(QKeySequence::Undo)) {
+    if (!undoFromRing()) {
+      emit undoRequested();
+    }
+    p_event->accept();
+    return;
+  }
+
+  if (p_event->matches(QKeySequence::Redo)) {
+    if (!redoFromRing()) {
+      emit redoRequested();
+    }
+    p_event->accept();
+    return;
+  }
+
+  const Qt::KeyboardModifiers modifiers = p_event->modifiers();
+  switch (p_event->key()) {
+  case Qt::Key_Return:
+  case Qt::Key_Enter:
+    // One cell is one line: a table row is a single source line, and every
+    // separator that could end it is rejected by the serializer. So Enter
+    // never inserts anything - but in the last cell of the last row it means
+    // "one more row", the way it does in every other table editor.
+    //
+    // KeypadModifier is masked off rather than compared away: the keypad's
+    // Enter is the very key Qt::Key_Enter stands for, and native events carry
+    // that modifier, so requiring Qt::NoModifier would make the branch
+    // unreachable for it. Every semantic modifier still swallows.
+    if (!(modifiers & ~Qt::KeypadModifier)) {
+      appendRowFromLastCell();
+    }
+    // Accepted either way, so Enter is never handed on - not to the input
+    // mode, and not to QTextEdit, which would split the cell into two blocks.
+    p_event->accept();
+    return;
+
+  case Qt::Key_Tab:
+    if (!modifiers.testFlag(Qt::ControlModifier)) {
+      if (moveToAdjacentCell(true)) {
+        p_event->accept();
+        return;
+      }
+
+      // Past the last cell: hand the caret back below the table, which is
+      // where the next thing to type is (decision D3).
+      commitPreedit();
+      emit focusEscapeRequested(FocusEscapeDirection::Down);
+      p_event->accept();
+      return;
+    }
+    break;
+
+  case Qt::Key_Backtab:
+    if (!modifiers.testFlag(Qt::ControlModifier)) {
+      if (moveToAdjacentCell(false)) {
+        p_event->accept();
+        return;
+      }
+
+      commitPreedit();
+      emit focusEscapeRequested(FocusEscapeDirection::Up);
+      p_event->accept();
+      return;
+    }
+    break;
+
+  case Qt::Key_Up:
+    if (modifiers == Qt::NoModifier && isAtTopEdge()) {
+      commitPreedit();
+      emit focusEscapeRequested(FocusEscapeDirection::Up);
+      p_event->accept();
+      return;
+    }
+    break;
+
+  case Qt::Key_Down:
+    if (modifiers == Qt::NoModifier && isAtBottomEdge()) {
+      commitPreedit();
+      emit focusEscapeRequested(FocusEscapeDirection::Down);
+      p_event->accept();
+      return;
+    }
+    break;
+
+  default:
+    // DELIBERATELY NO Qt::Key_Escape BRANCH (decision D3). Escape used to hand
+    // the caret back to the editor; it now belongs to the input mode, which is
+    // the only key Vi cannot do without - it is how insert and visual mode are
+    // left, and NormalViMode answers it unconditionally, so "offer it to the
+    // mode and hand focus back if it declines" is unreachable by construction.
+    // The hand-back affordances are Tab past the last cell, Backtab before the
+    // first, and the arrow keys at the table's edges - all above. This is a
+    // visible change for Normal and vscode users too, and an accepted one.
+    break;
+  }
+
+  // Defence in depth. The selection is already confined whenever the cursor
+  // moves, but a mutating key is the one thing which must never see a
+  // selection which crosses a cell boundary.
+  //
+  // Deliberately NOT run for Copy or Select All: decision D-f keeps a cell
+  // rectangle alive precisely so the copy actions and Merge can read it, and
+  // collapsing it here would make Ctrl+C on a rectangle copy nothing.
+  const bool nonMutating =
+      p_event->matches(QKeySequence::Copy) || p_event->matches(QKeySequence::SelectAll);
+  if (!isReadOnly() && !nonMutating) {
+    collapseComplexSelectionForMutation();
+
+    // The delete shortcuts are the exception the clamps cannot cover: they
+    // build their selection and remove it in one base-handler call. See
+    // deleteWithinCell().
+    if (deleteWithinCell(p_event)) {
+      p_event->accept();
+      return;
+    }
+
+    // Whatever this key inserts must not inherit the highlighting of the
+    // character to its left.
+    //
+    // Skipped in Vi's normal and visual modes only. There the key inserts
+    // nothing at all, and QTextEdit::setCurrentCharFormat() applies to the
+    // SELECTION when there is one - which visual mode always has, so this
+    // would recolour the very range the operator is about to act on. Every
+    // other mode, installed or not, is ordinary typing and wants it.
+    if (isTextInsertingMode()) {
+      const bool inserts =
+          (!p_event->text().isEmpty() &&
+           (modifiers & (Qt::ControlModifier | Qt::MetaModifier)) == 0) ||
+          p_event->key() == Qt::Key_Backspace || p_event->key() == Qt::Key_Delete ||
+          p_event->matches(QKeySequence::Cut) || p_event->matches(QKeySequence::Paste);
+      if (inserts) {
+        SourceEditGuard sourceEdit(this);
+        resetInsertionFormat();
+        VTextEdit::keyPressEvent(p_event);
+        return;
+      }
+    }
+  }
+
+  VTextEdit::keyPressEvent(p_event);
+  if (isTextInsertingMode() &&
+      (p_event->key() == Qt::Key_Left || p_event->key() == Qt::Key_Right) &&
+      (modifiers & ~Qt::ShiftModifier) == 0 && m_document) {
+    QTextCursor cursor = textCursor();
+    if (m_document->isInlinePreviewAt(cursor.position())) {
+      cursor.movePosition(p_event->key() == Qt::Key_Right ? QTextCursor::NextCharacter
+                                                          : QTextCursor::PreviousCharacter,
+                          modifiers.testFlag(Qt::ShiftModifier) ? QTextCursor::KeepAnchor
+                                                                : QTextCursor::MoveAnchor);
+      setTextCursor(cursor);
+    }
+  }
+}
+
+void TablePreviewSheet::wheelEvent(QWheelEvent *p_event) {
+  // Nothing to scroll and nothing to zoom: the movement is the editor's.
+  p_event->ignore();
+}
+
+void TablePreviewSheet::focusInEvent(QFocusEvent *p_event) {
+  VTextEdit::focusInEvent(p_event);
+  // Decision D5: the mode is built here, on the sheet the user actually moved
+  // into, rather than for every previewed table on the page.
+  ensureInputMode();
+  clampCursorIntoTable();
+  m_lastCellIndex = currentCellIndex();
+  // A command-bar operator may edit the cell while the sheet lacks focus.
+  // Preserve that pending change before re-anchoring the baseline. A change
+  // operator entering insert mode keeps its deletion and insertion in one step.
+  if (!m_inputModeInterface || !m_inputModeInterface->isUndoMergeAllEditsEnabled()) {
+    commitUndoCheckpoint();
+  }
+  // Decision D7: only focusIn()/focusOut() are driven from here. For Vi this
+  // is what restores the caret's blink state; the mode itself is neither
+  // activated nor deactivated by a focus change.
+  if (auto mode = getInputMode()) {
+    mode->focusIn();
+  }
+  // The sheet is the focus object now, so its mode - not the editor's - owns
+  // input method enablement.
+  syncInputMethodToMode();
+}
+
+void TablePreviewSheet::focusOutEvent(QFocusEvent *p_event) {
+  commitPreedit();
+  // The cell the user was typing in is finished; the same edge that flushes
+  // the commit debounce closes the undo step.
+  commitUndoCheckpoint();
+  if (auto mode = getInputMode()) {
+    mode->focusOut();
+  }
+  VTextEdit::focusOutEvent(p_event);
+  emit focusLost();
+}
+
+void TablePreviewSheet::mousePressEvent(QMouseEvent *p_event) {
+  // A press INSIDE a cell rectangle collapses it first.
+  //
+  // This is the only place external move-drag can be stopped: on both Qt
+  // majors QWidgetTextControlPrivate::startDrag() removes the source selection
+  // after a successful Qt::MoveAction whose target is another widget, after the
+  // drag returns and without passing through dropEvent(),
+  // insertFromMimeData() or keyPressEvent(). With nothing selected there is
+  // nothing for Qt to arm a drag from. A press OUTSIDE the rectangle is left
+  // alone, so rubber-banding a new one still works.
+  if (p_event && (p_event->buttons() & Qt::LeftButton) && !isReadOnly()) {
+    const QTextCursor cursor = textCursor();
+    if (cursor.hasComplexSelection()) {
+      const QTextCursor clicked = cursorForPosition(p_event->pos());
+      const int first = qMin(cursor.anchor(), cursor.position());
+      const int last = qMax(cursor.anchor(), cursor.position());
+      if (!clicked.isNull() && clicked.position() >= first && clicked.position() <= last) {
+        collapseComplexSelectionForMutation();
+      }
+    }
+  }
+
+  // The base handler puts the caret at the exact character under the pointer,
+  // which is the whole point of this substrate; it can also park it in the
+  // block after the table when the click lands below the last row.
+  VTextEdit::mousePressEvent(p_event);
+  clampCursorIntoTable();
+  QTextCursor cursor = textCursor();
+  if (m_document && m_document->isInlinePreviewAt(cursor.position())) {
+    cursor.setPosition(cursor.position() + 1, p_event->modifiers().testFlag(Qt::ShiftModifier)
+                                                  ? QTextCursor::KeepAnchor
+                                                  : QTextCursor::MoveAnchor);
+    setTextCursor(cursor);
+  }
+}
+
+void TablePreviewSheet::dropEvent(QDropEvent *p_event) {
+  if (isReadOnly()) {
+    VTextEdit::dropEvent(p_event);
+    return;
+  }
+
+  // A drop is where an INTERNAL move-drag removes its source, and where a
+  // replacement lands on whatever is selected. Both must act on one cell.
+  collapseComplexSelectionForMutation();
+  VTextEdit::dropEvent(p_event);
+  clampCursorIntoTable();
+}
+
+void TablePreviewSheet::focusCell(int p_row, int p_column) {
+  QTextTable *table = m_document ? m_document->table() : nullptr;
+  if (!table || table->rows() <= 0 || table->columns() <= 0) {
+    return;
+  }
+
+  // Clamped rather than trusted: after a delete the index the caret came from
+  // may no longer exist, and removeRows()/removeColumns() can park the caret
+  // in the trailing block a QTextDocument always keeps after a table.
+  const QTextTableCell cell =
+      table->cellAt(qBound(0, p_row, table->rows() - 1), qBound(0, p_column, table->columns() - 1));
+  if (cell.isValid()) {
+    setTextCursor(cell.firstCursorPosition());
+  }
+
+  clampCursorIntoTable();
+  clampSelectionIntoOneCell();
+}
+
+QPoint TablePreviewSheet::gridSlotAt(const QPoint &p_viewportPos) const {
+  QTextTable *table = m_document ? m_document->table() : nullptr;
+  if (!table) {
+    return QPoint(-1, -1);
+  }
+
+  const QTextCursor clicked = cursorForPosition(p_viewportPos);
+  if (clicked.isNull() || clicked.currentTable() != table) {
+    return QPoint(-1, -1);
+  }
+
+  const QTextTableCell cell = table->cellAt(clicked);
+  if (!cell.isValid()) {
+    return QPoint(-1, -1);
+  }
+
+  int row = cell.row();
+  int column = cell.column();
+  const int rowSpan = qMax(1, cell.rowSpan());
+  const int colSpan = qMax(1, cell.columnSpan());
+  if (rowSpan <= 1 && colSpan <= 1) {
+    return QPoint(column, row);
+  }
+
+  // Inside a spanning cell the cell itself cannot answer which slot was hit:
+  // QTextTableCell::row()/column() report the ORIGIN for every covered slot.
+  // Compare the pointer against a row (or column) in which the candidate is one
+  // slot wide instead. When every one of them spans it too there is nothing to
+  // distinguish and the origin stands.
+  auto *layout = m_document->document()->documentLayout();
+  const QPointF docPos(p_viewportPos.x() + horizontalScrollBar()->value(),
+                       p_viewportPos.y() + verticalScrollBar()->value());
+
+  auto slotRect = [&](int p_row, int p_column, QRectF &p_rect) {
+    if (!m_document->isOrigin(p_row, p_column) || m_document->colSpanAt(p_row, p_column) > 1 ||
+        m_document->rowSpanAt(p_row, p_column) > 1) {
+      return false;
+    }
+    const QTextTableCell probe = table->cellAt(p_row, p_column);
+    if (!probe.isValid()) {
+      return false;
+    }
+    p_rect = layout->blockBoundingRect(probe.firstCursorPosition().block());
+    return p_rect.isValid();
+  };
+
+  if (colSpan > 1) {
+    for (int c = column; c < column + colSpan; ++c) {
+      for (int r = 0; r < table->rows(); ++r) {
+        QRectF rect;
+        if (!slotRect(r, c, rect)) {
+          continue;
+        }
+        if (docPos.x() >= rect.left() && docPos.x() < rect.right()) {
+          column = c;
+        }
+        break;
+      }
+    }
+  }
+
+  if (rowSpan > 1) {
+    for (int r = row; r < row + rowSpan; ++r) {
+      for (int c = 0; c < table->columns(); ++c) {
+        QRectF rect;
+        if (!slotRect(r, c, rect)) {
+          continue;
+        }
+        if (docPos.y() >= rect.top() && docPos.y() < rect.bottom()) {
+          row = r;
+        }
+        break;
+      }
+    }
+  }
+
+  return QPoint(column, row);
+}
+
+QMenu *TablePreviewSheet::buildTableMenu(QMenu *p_parent, bool p_offerMutations,
+                                         const QPoint &p_slot) {
+  QTextTable *table = m_document ? m_document->table() : nullptr;
+  if (!table) {
+    return nullptr;
+  }
+
+  const QTextTableCell cell = table->cellAt(textCursor());
+  if (!cell.isValid()) {
+    // No cell to be relative to, so "this row" and "this column" mean nothing.
+    return nullptr;
+  }
+
+  // The LOGICAL slot the pointer resolved to, falling back to the caret's
+  // origin when the click did not resolve one.
+  const int row = p_slot.y() >= 0 ? p_slot.y() : cell.row();
+  const int column = p_slot.x() >= 0 ? p_slot.x() : cell.column();
+
+  // isReadOnly() is the single test which covers all of it: applyEditability()
+  // already folds the editor's read-only state, a revoked authority and a
+  // table which is not round-trippable into this one flag.
+  const bool writable = !isReadOnly();
+
+  auto menu = new QMenu(tr("Table"), p_parent);
+  menu->setObjectName(QStringLiteral("TablePreviewTableMenu"));
+
+  // Merge and Split are emitted unconditionally, unlike everything below.
+  // Merge needs a live MULTI-CELL selection, and @p_offerMutations is false
+  // precisely when a selection survived the click - which is exactly when a
+  // merge is possible - so that suppression cannot gate it. Split is relative
+  // to one cell like the row and column entries, but offering it beside Merge
+  // is what makes the pair legible.
+  {
+    const QTextCursor selection = textCursor();
+    QAction *merge = menu->addAction(tr("Merge Cells"));
+    merge->setObjectName(QStringLiteral("MergeCells"));
+    merge->setEnabled(writable && m_document->canMergeCells(selection));
+    connect(merge, &QAction::triggered, this, [this, selection, row, column]() {
+      if (m_document->mergeCells(selection)) {
+        focusCell(row, column);
+      }
+    });
+
+    QAction *split = menu->addAction(tr("Split Cell"));
+    split->setObjectName(QStringLiteral("SplitCell"));
+    split->setEnabled(writable && m_document->canSplitCell(row, column));
+    connect(split, &QAction::triggered, this, [this, row, column]() {
+      if (m_document->splitCell(row, column)) {
+        focusCell(row, column);
+      }
+    });
+
+    menu->addSeparator();
+  }
+
+  if (p_offerMutations) {
+    auto addOperation = [this, menu, writable](const QString &p_text, const QString &p_name,
+                                               bool p_allowed, std::function<void()> p_operation) {
+      QAction *action = menu->addAction(p_text);
+      action->setObjectName(p_name);
+      action->setEnabled(writable && p_allowed);
+      connect(action, &QAction::triggered, this, p_operation);
+      return action;
+    };
+
+    addOperation(tr("Insert Row Above"), QStringLiteral("InsertRowAbove"),
+                 row > 0 && m_document->canInsertRow(), [this, row, column]() {
+                   if (m_document->insertRow(row)) {
+                     focusCell(row, column);
+                   }
+                 });
+
+    addOperation(tr("Insert Row Below"), QStringLiteral("InsertRowBelow"),
+                 m_document->canInsertRow(), [this, row, column]() {
+                   if (m_document->insertRow(row + 1)) {
+                     focusCell(row + 1, column);
+                   }
+                 });
+
+    addOperation(tr("Delete Row"), QStringLiteral("DeleteRow"), m_document->canDeleteRow(row),
+                 [this, row, column]() {
+                   if (m_document->removeRow(row)) {
+                     focusCell(row, column);
+                   }
+                 });
+
+    menu->addSeparator();
+
+    addOperation(tr("Insert Column Left"), QStringLiteral("InsertColumnLeft"),
+                 m_document->canInsertColumn(), [this, row, column]() {
+                   if (m_document->insertColumn(column)) {
+                     focusCell(row, column);
+                   }
+                 });
+
+    addOperation(tr("Insert Column Right"), QStringLiteral("InsertColumnRight"),
+                 m_document->canInsertColumn(), [this, row, column]() {
+                   if (m_document->insertColumn(column + 1)) {
+                     focusCell(row, column + 1);
+                   }
+                 });
+
+    addOperation(tr("Delete Column"), QStringLiteral("DeleteColumn"),
+                 m_document->canDeleteColumn(column), [this, row, column]() {
+                   if (m_document->removeColumn(column)) {
+                     focusCell(row, column);
+                   }
+                 });
+
+    menu->addSeparator();
+
+    auto alignmentMenu = menu->addMenu(tr("Alignment"));
+    alignmentMenu->setObjectName(QStringLiteral("TablePreviewAlignmentMenu"));
+    auto group = new QActionGroup(alignmentMenu);
+    group->setExclusive(true);
+
+    const PreviewTableAlignment current = m_document->columnAlignment(column);
+    // Decision D-m: a cell spanning this column carries ONE `align` attribute,
+    // so setting one covered column alone is not representable. Splitting the
+    // cell restores the control. Insert/Delete Column stay enabled above and
+    // act on the LOGICAL column resolved geometrically.
+    const bool alignable = !m_document->isColumnSpanned(column);
+
+    const struct {
+      PreviewTableAlignment m_alignment;
+      const char *m_name;
+      QString m_text;
+    } entries[] = {
+        {PreviewTableAlignment::None, "AlignmentDefault", tr("Default")},
+        {PreviewTableAlignment::Left, "AlignmentLeft", tr("Left")},
+        {PreviewTableAlignment::Center, "AlignmentCenter", tr("Center")},
+        {PreviewTableAlignment::Right, "AlignmentRight", tr("Right")},
+    };
+
+    for (const auto &entry : entries) {
+      QAction *action = alignmentMenu->addAction(entry.m_text);
+      action->setObjectName(QString::fromLatin1(entry.m_name));
+      action->setCheckable(true);
+      action->setChecked(entry.m_alignment == current);
+      action->setEnabled(writable && alignable);
+      group->addAction(action);
+
+      const PreviewTableAlignment alignment = entry.m_alignment;
+      connect(action, &QAction::triggered, this, [this, row, column, alignment]() {
+        // A no-op returns false and arms nothing; a real change reaches the
+        // commit machinery as the document change the re-formatting is.
+        if (m_document->setColumnAlignment(column, alignment)) {
+          focusCell(row, column);
+        }
+      });
+    }
+
+    // Only after entries were actually emitted: without them the submenu would
+    // otherwise open with a leading separator.
+    menu->addSeparator();
+  }
+
+  // Deliberately not routed through addOperation(): copying is a read, so it
+  // must not be gated by writable. The payloads are computed once, here, so
+  // the enabled state and what lands on the clipboard cannot disagree - the
+  // serializer returns an empty string for contents it cannot represent (an
+  // empty matrix, a zero width, a cell holding a line separator).
+  const QString markdown = m_document->toStandaloneMarkdown(m_alignSource);
+  const QString html = m_document->toHtml();
+
+  QAction *copyMarkdown = menu->addAction(tr("Copy as Markdown"));
+  copyMarkdown->setObjectName(QStringLiteral("CopyAsMarkdown"));
+  copyMarkdown->setEnabled(!markdown.isEmpty());
+  connect(copyMarkdown, &QAction::triggered, this,
+          [markdown]() { QGuiApplication::clipboard()->setText(markdown); });
+
+  QAction *copyHtml = menu->addAction(tr("Copy as HTML"));
+  copyHtml->setObjectName(QStringLiteral("CopyAsHtml"));
+  copyHtml->setEnabled(!html.isEmpty());
+  connect(copyHtml, &QAction::triggered, this, [html]() {
+    // Both flavours on purpose: a rich target pastes the rendered table, and a
+    // plain-text target gets the markup rather than nothing.
+    auto mime = new QMimeData();
+    mime->setHtml(html);
+    mime->setText(html);
+    // The clipboard takes ownership.
+    QGuiApplication::clipboard()->setMimeData(mime);
+  });
+
+  return menu;
+}
+
+QMenu *TablePreviewSheet::createContextMenu(const QPoint &p_viewportPos) {
+  QTextTable *table = m_document ? m_document->table() : nullptr;
+  const QTextCursor clicked = cursorForPosition(p_viewportPos);
+  // Deliberately not clamped: a click below the last row lands in the shrunken
+  // block a QTextDocument always keeps after a table, and clamping that into
+  // the nearest cell would offer row and column operations relative to a cell
+  // the user never pointed at.
+  const bool hitACell = table && !clicked.isNull() && clicked.currentTable() == table &&
+                        table->cellAt(clicked).isValid();
+
+  if (hitACell) {
+    // "This row" and "this column" have to mean the cell the user pointed at,
+    // not the one the caret happens to be in. A click inside an existing
+    // selection is left alone, so a right click on a selection can still act
+    // on it - that is what the standard menu's Cut and Copy are relative to.
+    const QTextCursor caret = textCursor();
+    const bool insideSelection = caret.hasSelection() &&
+                                 clicked.position() >= qMin(caret.anchor(), caret.position()) &&
+                                 clicked.position() <= qMax(caret.anchor(), caret.position());
+    if (!insideSelection) {
+      setTextCursor(clicked);
+    }
+  }
+
+  // A surviving selection means the right click was aimed at the text, not at
+  // the table: the standard menu's Cut, Copy and Delete are what it is for,
+  // and a row or column operation would silently act on something else. The
+  // whole-table copies are a read and stay offered either way. Read after the
+  // retargeting above, which collapses the selection whenever the click landed
+  // outside it.
+  const bool offerMutations = !textCursor().hasSelection();
+
+  // Null for a document which cannot offer one at all; the caller still gets a
+  // menu, because the table operations below are appended to it.
+  QMenu *menu = createStandardContextMenu(p_viewportPos);
+  if (!menu) {
+    menu = new QMenu(this);
+  }
+
+  // The standard menu's Cut and Delete never reach keyPressEvent(), so they are
+  // re-pointed at gated handlers. Qt names them; disconnecting first is what
+  // makes this a replacement rather than an extra handler running after the
+  // base one has already mutated.
+  for (QAction *action : menu->actions()) {
+    const QString name = action->objectName();
+    if (name == QStringLiteral("edit-cut")) {
+      action->disconnect();
+      connect(action, &QAction::triggered, this, [this]() { cut(); });
+    } else if (name == QStringLiteral("edit-delete")) {
+      action->disconnect();
+      connect(action, &QAction::triggered, this, [this]() {
+        if (isReadOnly()) {
+          return;
+        }
+        collapseComplexSelectionForMutation();
+        QTextCursor cursor = textCursor();
+        if (cursor.hasSelection()) {
+          cursor.removeSelectedText();
+        }
+      });
+    }
+  }
+
+  if (hitACell) {
+    if (QMenu *tableMenu = buildTableMenu(menu, offerMutations, gridSlotAt(p_viewportPos))) {
+
+      // At the front, not appended: the table operations are what the sheet is
+      // right-clicked for, and QTextEdit's standard menu ends with entries -
+      // Select All among them - which would otherwise bury them.
+      QAction *first = menu->actions().isEmpty() ? nullptr : menu->actions().first();
+      if (first) {
+        menu->insertMenu(first, tableMenu);
+        menu->insertSeparator(first);
+      } else {
+        menu->addMenu(tableMenu);
+      }
+    }
+  }
+
+  return menu;
+}
+
+void TablePreviewSheet::contextMenuEvent(QContextMenuEvent *p_event) {
+  // Already in viewport coordinates: the scroll area forwards the click which
+  // landed on its viewport without retranslating it, and both scroll bars are
+  // off, so there is no offset to add either.
+  QScopedPointer<QMenu> menu(createContextMenu(p_event->pos()));
+  menu->exec(p_event->globalPos());
+  p_event->accept();
+}
+
+void TablePreviewSheet::resizeEvent(QResizeEvent *p_event) {
+  // QTextEdit re-lays the document out for the new viewport width, which emits
+  // documentSizeChanged for a size the host itself chose.
+  QScopedValueRollback<bool> guard(m_applyingGeometry, true);
+  VTextEdit::resizeEvent(p_event);
+  if (m_document && !inlinePreviewsDeferred()) {
+    m_document->refreshInlinePreviewSizes();
+  }
+}
+
+QVariant TablePreviewSheet::inputMethodQuery(Qt::InputMethodQuery p_query) const {
+  const auto selection = sourceSelection();
+  if (selection.m_row < 0) {
+    return VTextEdit::inputMethodQuery(p_query);
+  }
+  const auto cell = m_document->table()->cellAt(selection.m_row, selection.m_column);
+  switch (p_query) {
+  case Qt::ImSurroundingText:
+    return m_document->sourceText(cell.firstPosition(), cell.lastPosition());
+  case Qt::ImCurrentSelection: {
+    const auto effective = getSelection();
+    return effective.isValid() ? m_document->sourceText(effective.start(), effective.end())
+                               : QString();
+  }
+  case Qt::ImCursorPosition:
+  case Qt::ImAbsolutePosition:
+    return selection.m_caret;
+  case Qt::ImAnchorPosition:
+    return selection.m_anchor;
+  case Qt::ImTextBeforeCursor:
+    return m_document->sourceText(cell.firstPosition(), textCursor().position());
+  case Qt::ImTextAfterCursor:
+    return m_document->sourceText(textCursor().position(), cell.lastPosition());
+  default:
+    // In particular ImCursorRectangle remains in the actual decorated layout.
+    return VTextEdit::inputMethodQuery(p_query);
+  }
+}
+
+void TablePreviewSheet::inputMethodEvent(QInputMethodEvent *p_event) {
+  if (!p_event) {
+    VTextEdit::inputMethodEvent(p_event);
+    return;
+  }
+
+  if (m_cancellingComposition) {
+    // A platform callback from inside cancelComposition()'s reset(). Cancelling
+    // is neither committing nor deleting, so it is discarded outright.
+    qCDebug(previewTableLog) << "discarded an input method event raised by the reset";
+    p_event->accept();
+    return;
+  }
+
+  if (isReadOnly()) {
+    // Qt does not enforce read-only on this path at all: a read-only QTextEdit
+    // keeps Qt::TextSelectableByMouse, and QWidgetTextControl accepts an input
+    // method event for a selectable control. Stripping the commit is not
+    // enough either - installing a *changed* preedit removes the current
+    // selection first, so even a commit-free event would delete cell text. So
+    // the whole event is refused, and a composition which was still open when
+    // the sheet became a viewer is cancelled by the reset in
+    // TablePreviewWidget::applyEditability().
+    qCDebug(previewTableLog) << "refused an input method event on a read-only sheet";
+    p_event->accept();
+    return;
+  }
+
+  ++m_inputMethodEventDepth;
+  struct EventGuard {
+    TablePreviewSheet *m_sheet;
+    ~EventGuard() {
+      --m_sheet->m_inputMethodEventDepth;
+      m_sheet->finishInlinePreviewTransaction();
+    }
+  } eventGuard{this};
+
+  // A Selection attribute is resolved by QWidgetTextControl in an intermediate
+  // document state - after the current selection has been removed and after
+  // the commit has been applied - which no pre-flight check can predict, and
+  // it emits neither cursorPositionChanged() nor selectionChanged() when only
+  // the anchor moves, so neither clamp would catch the result. Honoring one
+  // which leaves the cell would hand a cross-frame selection to the next Cut
+  // or Delete, and removing a selection across a frame boundary removes the
+  // frame. So they are dropped rather than guessed at, and an ordinary
+  // composition only needs the caret to follow the commit, which it does.
+  bool droppedSelection = false;
+  QList<QInputMethodEvent::Attribute> attributes;
+  attributes.reserve(p_event->attributes().size());
+  for (const auto &attribute : p_event->attributes()) {
+    if (attribute.type == QInputMethodEvent::Selection) {
+      droppedSelection = true;
+      continue;
+    }
+
+    attributes.append(attribute);
+  }
+
+  // Forward everything except the commit, so the composition state stays
+  // consistent while the document contents are left alone.
+  auto forwardWithoutTheCommit = [this, p_event, &attributes]() {
+    QInputMethodEvent filtered(p_event->preeditString(), attributes);
+    VTextEdit::inputMethodEvent(&filtered);
+    p_event->accept();
+  };
+
+  const QString commit = p_event->commitString();
+  const int replacementLength = p_event->replacementLength();
+  // An empty commit string with a replacement length is not a pure preedit -
+  // that is how an input method deletes surrounding text.
+  if (commit.isEmpty() && replacementLength == 0) {
+    // A preedit is not in the document at all, so nothing else has to be
+    // confined -- but INSTALLING one removes the current selection first, so a
+    // cell rectangle still has to be collapsed before Qt can take the frame
+    // apart through it.
+    collapseComplexSelectionForMutation();
+    SourceEditGuard sourceEdit(hasSelection() ? this : nullptr);
+    if (!droppedSelection) {
+      VTextEdit::inputMethodEvent(p_event);
+      return;
+    }
+
+    qCDebug(previewTableLog) << "dropped an input method selection";
+    forwardWithoutTheCommit();
+    return;
+  }
+
+  // Classify before touching the document. A payload which is nothing but
+  // line separators is refused exactly as a paste is, and refusing it must not
+  // delete what is selected - which is why this comes before the removal
+  // below. The same separator policy otherwise: a cell holds one block.
+  const QString sanitized = hasLineSeparator(commit)
+                                ? (hasCellContent(commit) ? sanitizeForCell(commit) : QString())
+                                : commit;
+  if (sanitized.isEmpty() && replacementLength == 0) {
+    qCDebug(previewTableLog) << "refused an input method commit which is nothing but line"
+                             << "separators";
+    forwardWithoutTheCommit();
+    return;
+  }
+
+  if (sanitized != commit) {
+    qCDebug(previewTableLog) << "sanitized a committed input method string";
+  }
+
+  // Everything below changes the document.
+  clampCursorIntoTable();
+  collapseComplexSelectionForMutation();
+
+  SourceEditGuard sourceEdit(this);
+
+  // Remove the - by now confined - selection here rather than letting the base
+  // do it. QWidgetTextControl resolves replacementStart()/replacementLength()
+  // against the cursor it is left with *after* that removal, so collapsing it
+  // first is what makes the interval computed below the one it will really
+  // use; clamping against the pre-removal caret would not bound anything.
+  {
+    QTextCursor selection = textCursor();
+    if (selection.hasSelection()) {
+      selection.removeSelectedText();
+      setTextCursor(selection);
+    }
+  }
+
+  QTextTable *table = m_document ? m_document->table() : nullptr;
+  const QTextCursor cursor = textCursor();
+  const QTextTableCell cell = table ? table->cellAt(cursor.position()) : QTextTableCell();
+  if (!cell.isValid()) {
+    // Nothing to anchor the replacement against, and letting it land outside
+    // the table is exactly what must not happen.
+    p_event->accept();
+    return;
+  }
+
+  const int position = cursor.position();
+  const int first = cell.firstPosition();
+  const int last = cell.lastPosition();
+
+  // The range the base will apply, now that the cursor is collapsed:
+  // [position + replacementStart(), + replacementLength()). A negative start
+  // or an overlong length would reach across the frame boundary.
+  const qint64 rawStart = qint64(position) + p_event->replacementStart();
+  const int start = int(qBound(qint64(first), rawStart, qint64(last)));
+  const int end = int(qBound(qint64(start), rawStart + replacementLength, qint64(last)));
+
+  QInputMethodEvent replacement(p_event->preeditString(), attributes);
+  replacement.setCommitString(sanitized, start - position, end - start);
+  // The commit is an insertion like any other: it must not inherit the
+  // highlighting of the character to its left.
+  resetInsertionFormat();
+  VTextEdit::inputMethodEvent(&replacement);
+  p_event->accept();
+}
+
+bool TablePreviewSheet::canInsertFromMimeData(const QMimeData *p_source) const {
+  // Plain text only. A cell holds raw Markdown, so rich text would either be
+  // flattened anyway or land in the document as structure a table row cannot
+  // express.
+  return p_source && p_source->hasText() && hasCellContent(p_source->text());
+}
+
+QMimeData *TablePreviewSheet::createMimeDataFromSelection() const {
+  auto mime = new QMimeData();
+  if (m_document && m_document->isIntact()) {
+    const auto cursor = textCursor();
+    if (cursor.hasComplexSelection()) {
+      const QRect rectangle = m_document->selectionRect(cursor);
+      QStringList rows;
+      for (int row = rectangle.top(); row <= rectangle.bottom(); ++row) {
+        QStringList cells;
+        for (int column = rectangle.left(); column <= rectangle.right(); ++column) {
+          if (m_document->isOrigin(row, column)) {
+            const auto cell = m_document->table()->cellAt(row, column);
+            cells.append(m_document->sourceText(cell.firstPosition(), cell.lastPosition()));
+          } else {
+            cells.append(QString());
+          }
+        }
+        rows.append(cells.join(QLatin1Char('\t')));
+      }
+      mime->setText(rows.join(QLatin1Char('\n')));
+    } else {
+      const auto selection = getSelection();
+      if (selection.isValid()) {
+        mime->setText(m_document->sourceText(selection.start(), selection.end()));
+      }
+    }
+  }
+  emit const_cast<TablePreviewSheet *>(this)->createMimeDataFromSelectionRequested(mime);
+  return mime;
+}
+
+void TablePreviewSheet::insertFromMimeData(const QMimeData *p_source) {
+  if (!p_source || isReadOnly()) {
+    return;
+  }
+
+  // A drop puts the caret where it landed, which can be the block after the
+  // table, and a paste replaces whatever is selected.
+  clampCursorIntoTable();
+  collapseComplexSelectionForMutation();
+
+  const QString text = p_source->text();
+  if (!hasCellContent(text)) {
+    qCDebug(previewTableLog) << "refused a payload which is nothing but line separators";
+    return;
+  }
+
+  // Drops arrive here after Qt has resolved the decorated hit position.
+  SourceEditGuard sourceEdit(this);
+  resetInsertionFormat();
+  // THE one controlled insertion route. Qualified so it reaches the base
+  // implementation rather than the refusing shadow: everything dangerous about
+  // insertPlainText() has already been answered above - the selection has been
+  // collapsed into one cell, the caret is inside the table, and the payload has
+  // been stripped of every separator the serializer rejects.
+  QTextEdit::insertPlainText(sanitizeForCell(text));
+}
+
+// ---------------------------------------------------------------------------
+// TablePreviewWidget
+// ---------------------------------------------------------------------------
+
+const qreal TablePreviewWidget::c_widthFraction = 1.0;
+
+const int TablePreviewWidget::c_commitDebounceMs = 1000;
+
+TablePreviewWidget::TablePreviewWidget(PreviewWidgetContext *p_context, QWidget *p_parent)
+    : PreviewWidget(p_context, p_parent), m_document(new TablePreviewDocument()) {
+  auto layout = new QVBoxLayout(this);
+  layout->setContentsMargins(0, 0, 0, 0);
+  layout->setSpacing(0);
+
+  m_sheet = new TablePreviewSheet(this);
+  m_sheet->setTableDocument(m_document.data());
+  layout->addWidget(m_sheet);
+
+  // The host only consults heightForWidth() when the policy advertises it, and
+  // that is the only hook which sees the width the band actually gets.
+  QSizePolicy policy = sizePolicy();
+  policy.setHeightForWidth(true);
+  setSizePolicy(policy);
+
+  m_commitTimer = new QTimer(this);
+  m_commitTimer->setSingleShot(true);
+  m_commitTimer->setInterval(c_commitDebounceMs);
+  connect(m_commitTimer, &QTimer::timeout, this, &TablePreviewWidget::handleCommitTimeout);
+
+  connect(m_document->document(), &QTextDocument::contentsChanged, this,
+          &TablePreviewWidget::handleContentsChanged);
+  // Records which revision really changed characters; see
+  // handleContentsChanged(). Connected first so the revision is up to date by
+  // the time the paired contentsChanged is delivered - Qt emits
+  // contentsChange before contentsChanged.
+  connect(m_document->document(), &QTextDocument::contentsChange, this,
+          [this](int p_position, int p_charsRemoved, int p_charsAdded) {
+            if (m_applyingSource || m_document->isApplyingInlinePreviews() ||
+                (p_charsRemoved == 0 && p_charsAdded == 0)) {
+              return;
+            }
+            m_sourceChangePending = true;
+            if (m_pendingHighlightStart >= 0) {
+              // Further edits can shift the earlier interval's endpoints.
+              m_pendingHighlightAll = true;
+            } else {
+              m_pendingHighlightStart = p_position;
+              m_pendingHighlightEnd = p_position + p_charsAdded;
+            }
+          });
+  connect(m_sheet, &TablePreviewSheet::cellLeft, this, &TablePreviewWidget::handleCellLeft);
+  connect(m_sheet, &TablePreviewSheet::focusLost, this, &TablePreviewWidget::handleFocusLost);
+  connect(m_sheet, &TablePreviewSheet::focusEscapeRequested, this,
+          &TablePreviewWidget::handleEscapeRequested);
+  connect(m_sheet, &TablePreviewSheet::undoRequested, this,
+          &TablePreviewWidget::handleUndoRequested);
+  connect(m_sheet, &TablePreviewSheet::redoRequested, this,
+          &TablePreviewWidget::handleRedoRequested);
+  connect(m_sheet, &TablePreviewSheet::inputModeStatusWidgetChanged, this,
+          &TablePreviewWidget::inputModeStatusWidgetChanged);
+
+  // The host's event filter watches this widget, not the sheet inside it, so
+  // the sheet cannot reach it through updateGeometry() alone.
+  connect(m_sheet, &TablePreviewSheet::preferredGeometryChanged, this,
+          &TablePreviewWidget::handlePreferredGeometryChanged);
+  connect(m_sheet, &TablePreviewSheet::inlinePreviewsReady, this,
+          &TablePreviewWidget::applyDeferredInlinePreviews);
+
+  if (p_context) {
+    connect(p_context, &PreviewWidgetContext::replacementFinished, this,
+            &TablePreviewWidget::handleReplacementFinished);
+  }
+
+  m_sheet->refreshFormats();
+}
+
+TablePreviewWidget::~TablePreviewWidget() {
+  // The sheet renders the document m_document owns, and members are destroyed
+  // before ~QObject tears the child widgets down. Drop the sheet here so it
+  // can never lay out a document which is already gone.
+  delete m_sheet;
+  m_sheet = nullptr;
+}
+
+QVector<PreviewElementType> TablePreviewWidget::supportedTypes() const {
+  return QVector<PreviewElementType>() << PreviewElementType::Table;
+}
+
+void TablePreviewWidget::setSyntaxStyles(const QVector<QTextCharFormat> &p_styles) {
+  QScopedValueRollback<bool> applying(m_applyingSource, true);
+  m_document->setSyntaxStyles(p_styles);
+  if (m_document->refreshCellSyntaxFormats()) {
+    updateGeometry();
+  }
+}
+
+void TablePreviewWidget::setInlinePreviews(PreviewData::Source p_source,
+                                           const QVector<TableCellInlinePreview> &p_previews) {
+  if (p_source != PreviewData::ImageLink && p_source != PreviewData::MathBlock) {
+    return;
+  }
+  const auto structure = m_document->structureGeneration();
+  if (structure != m_pendingInlinePreviewStructure) {
+    m_pendingInlinePreviews.clear();
+    m_pendingInlinePreviewStructure = structure;
+  }
+  if (p_previews.isEmpty()) {
+    invalidateInlinePreviews(p_source);
+  } else {
+    m_pendingInlinePreviews.insert(p_source, p_previews);
+  }
+  applyDeferredInlinePreviews();
+}
+
+void TablePreviewWidget::invalidateInlinePreviews(PreviewData::Source p_source) {
+  // No document mutation or callbacks: the host may be blocked in a layout or
+  // factory callback. Retire both managed and synthetic suspended bindings
+  // before they can be restored, and retain the clear independently of new data.
+  m_pendingInlinePreviews.remove(p_source);
+  m_pendingInlinePreviewClears |= 1 << p_source;
+  ++m_document->m_inlinePreviewGenerations[p_source];
+}
+
+void TablePreviewWidget::revalidateInlinePreviews() {
+  m_inlinePreviewRevalidationPending = true;
+  applyDeferredInlinePreviews();
+}
+
+void TablePreviewWidget::applyDeferredInlinePreviews() {
+  if (!m_sheet || m_sheet->inlinePreviewsDeferred() || m_applyingCellPreviews ||
+      (m_pendingInlinePreviews.isEmpty() && !m_pendingInlinePreviewClears &&
+       !m_inlinePreviewRevalidationPending)) {
+    return;
+  }
+  {
+    QScopedValueRollback<bool> applying(m_applyingCellPreviews, true);
+    QScopedValueRollback<bool> clamping(m_sheet->m_clampingCursor, true);
+    const auto selection = m_sheet->sourceSelection();
+    const QTextCursor cursor = m_sheet->textCursor();
+    const int horizontal = m_sheet->horizontalScrollBar()->value();
+    const int vertical = m_sheet->verticalScrollBar()->value();
+    do {
+      const auto structure = m_pendingInlinePreviewStructure;
+      auto pending = std::move(m_pendingInlinePreviews);
+      const int clears = m_pendingInlinePreviewClears;
+      m_pendingInlinePreviews.clear();
+      m_pendingInlinePreviewClears = 0;
+      m_inlinePreviewRevalidationPending = false;
+      for (auto source : {PreviewData::ImageLink, PreviewData::MathBlock}) {
+        if (clears & (1 << source)) {
+          m_document->clearInlinePreviews(source);
+        }
+      }
+      if (structure == m_document->structureGeneration()) {
+        for (auto it = pending.cbegin(); it != pending.cend(); ++it) {
+          m_document->setInlinePreviews(static_cast<PreviewData::Source>(it.key()), it.value());
+        }
+      }
+      m_document->revalidateInlinePreviews();
+    } while (!m_sheet->inlinePreviewsDeferred() &&
+             (!m_pendingInlinePreviews.isEmpty() || m_pendingInlinePreviewClears ||
+              m_inlinePreviewRevalidationPending));
+    if (selection.m_row >= 0) {
+      m_sheet->restoreSourceSelection(selection);
+    } else {
+      // A table rectangle is not an ordinary source selection. Its live Qt
+      // cursor follows inserted objects without losing the grid selection.
+      m_sheet->setTextCursor(cursor);
+    }
+    m_sheet->horizontalScrollBar()->setValue(horizontal);
+    m_sheet->verticalScrollBar()->setValue(vertical);
+    m_sheet->viewport()->update();
+    if (previewTableLog().isDebugEnabled()) {
+      int imageObjects = 0;
+      for (auto block = m_document->document()->begin(); block.isValid(); block = block.next()) {
+        for (auto it = block.begin(); !it.atEnd(); ++it) {
+          const auto fragment = it.fragment();
+          if (fragment.isValid() && fragment.charFormat().isImageFormat()) {
+            imageObjects += fragment.length();
+          }
+        }
+      }
+      qCDebug(previewTableLog) << "sheet inline previews applied" << "document"
+                               << m_document->document() << "imageObjects" << imageObjects;
+    }
+  }
+  m_sheet->handleDocumentSizeChanged();
+}
+
+qreal TablePreviewWidget::preferredWidthFraction() const { return c_widthFraction; }
+
+void TablePreviewWidget::clearSelection() {
+  if (m_sheet) {
+    m_sheet->clearSelection();
+  }
+}
+
+void TablePreviewWidget::handleTypeAction(TypeAction p_action, const QVariant &p_data) {
+  Q_UNUSED(p_data);
+  if (m_sheet) {
+    m_sheet->handleTypeAction(p_action);
+  }
+}
+
+bool TablePreviewWidget::setPreview(const QSharedPointer<const Preview> &p_preview) {
+  if (!p_preview || p_preview->type() != PreviewElementType::Table) {
+    qCDebug(previewTableLog) << "refused a snapshot which is not a table";
+    return false;
+  }
+
+  auto table = p_preview.staticCast<const TablePreview>();
+  if (table->rowCount() <= 0) {
+    qCDebug(previewTableLog) << "refused an empty table";
+    return false;
+  }
+
+  // A table too large to lay out interactively is left to the static source
+  // rendering. A refused table never becomes an active item, so the factory
+  // chain is re-walked on every parse generation: warning here would repeat
+  // forever for a static, by-design condition.
+  if (!TablePreviewDocument::isWithinLimits(*table)) {
+    qCDebug(previewTableLog) << "refused an oversized table -" << table->cells().size()
+                             << "row(s) x" << TablePreviewDocument::normalizedColumnCount(*table)
+                             << "column(s) =" << TablePreviewDocument::normalizedCellCount(*table)
+                             << "cells; limits are" << TablePreviewDocument::c_maxCells
+                             << "cells and" << TablePreviewDocument::c_maxColumns << "columns";
+    return false;
+  }
+
+  // Nothing authoritative changed: keep the live document, the caret and any
+  // selection. Three things count as unchanged, and the third one is what
+  // makes debounced editing safe:
+  //
+  //  - the same source as the snapshot currently bound,
+  //  - what the document would serialize to right now,
+  //  - the last Markdown this sheet successfully committed.
+  //
+  // Without the last one, committing A and then typing B before A's parse
+  // echo arrives would rebuild the document from A and destroy both B and the
+  // caret, because the incoming snapshot matches neither of the first two.
+  if (m_table && m_authoritative) {
+    const QString incoming = table->sourceMarkdown();
+    bool unchanged = m_table->sourceMarkdown() == incoming;
+    const char *reason = "identical source";
+
+    if (!unchanged) {
+      const QString current = m_document->toMarkdown(m_alignSource);
+      unchanged = !current.isEmpty() && current == incoming;
+      reason = "the sheet's own contents";
+    }
+
+    if (!unchanged && !m_committedMarkdown.isEmpty() && m_committedMarkdown == incoming) {
+      unchanged = true;
+      reason = "echo of this sheet's own commit";
+    }
+
+    if (unchanged) {
+      qCDebug(previewTableLog) << "bound an unchanged snapshot - kept the document and the caret"
+                               << "(" << reason << ")";
+      m_table = table;
+
+      // The document may already hold edits newer than the commit this
+      // snapshot echoes. They are still owed a write-back, so re-arm rather
+      // than let them be stranded by a debounce which has already fired.
+      if (m_editGeneration != m_committedGeneration) {
+        armCommit();
+      }
+
+      return true;
+    }
+  }
+
+  qCDebug(previewTableLog) << "rebuilding the sheet from" << table->rowCount() << "row(s) x"
+                           << table->columnCount() << "declared column(s), source characters"
+                           << table->sourceMarkdown().size();
+
+  m_table = table;
+  // The next snapshot is what a rejected sheet waits for.
+  m_authoritative = true;
+  resetFromSource();
+  return true;
+}
+
+void TablePreviewWidget::setReadOnly(bool p_readOnly) {
+  if (m_readOnly == p_readOnly) {
+    return;
+  }
+
+  m_readOnly = p_readOnly;
+  applyEditability();
+}
+
+void TablePreviewWidget::setInputMode(InputMode p_mode) {
+  if (m_inputModeApplied && m_inputMode == p_mode) {
+    return;
+  }
+
+  m_inputMode = p_mode;
+  m_inputModeApplied = true;
+
+  // Deliberately nothing else: an input mode is orthogonal to the four ANDed
+  // inputs applyEditability() folds together, and it neither changes what the
+  // sheet would serialize to nor how tall it is. The mode's own isReadOnly()
+  // is the sheet's, so a viewer refuses every mutation the mode drives without
+  // the mode having to be uninstalled.
+  //
+  // Recorded rather than created: decision D5 builds the mode on first focus,
+  // so a page of previewed tables does not allocate one KateVi manager and one
+  // command bar per table.
+  if (m_sheet) {
+    m_sheet->setDesiredInputMode(p_mode);
+  }
+}
+
+QSharedPointer<InputModeStatusWidget> TablePreviewWidget::inputModeStatusWidget() const {
+  return m_sheet ? m_sheet->inputModeStatusWidget() : QSharedPointer<InputModeStatusWidget>();
+}
+
+void TablePreviewWidget::focusSheet() {
+  if (m_sheet) {
+    m_sheet->setFocus();
+  }
+}
+
+void TablePreviewWidget::setSourceAlignEnabled(bool p_enabled) {
+  if (m_alignSource == p_enabled) {
+    return;
+  }
+
+  // Deliberately a pure setter: nothing about the live document, the caret,
+  // the geometry or the editability changes, and the committed baseline is
+  // left exactly as it is - it records what the document really holds, which
+  // is what the echo check needs.
+  //
+  // What keeps a mere flip from reformatting the document is not done here but
+  // in flushPendingCommit(), which reconciles the baseline at COMMIT time. That
+  // is the only point which sees every ordering: a flip on a clean sheet, a
+  // flip while an edit which cancels out is still pending, and a flip which
+  // lands from a callback while a replacement is on the wire.
+  m_alignSource = p_enabled;
+  if (m_sheet) {
+    m_sheet->setSourceAlignEnabled(p_enabled);
+  }
+}
+
+void TablePreviewWidget::applyEditability() {
+  if (!m_sheet) {
+    return;
+  }
+
+  // Present the sheet as a viewer instead of silently swallowing edits which
+  // the host would reject, or which could not be written back without changing
+  // what the table renders to. Read-only still allows the caret, selection and
+  // copy, which the retired NoEditTriggers did not.
+  const bool roundTrippable = m_document->isRoundTrippable();
+  const bool editable = !m_readOnly && roundTrippable && m_authoritative && !m_suppressed;
+  qCDebug(previewTableLog) << "sheet is" << (editable ? "editable" : "viewer only") << "- read-only"
+                           << m_readOnly << "round-trippable" << roundTrippable << "authoritative"
+                           << m_authoritative << "suppressed" << m_suppressed;
+
+  const bool wasReadOnly = m_sheet->isReadOnly();
+
+  if (!wasReadOnly && !editable) {
+    // While the sheet can still take the event: a viewer refuses every input
+    // method event outright, so a composition which is still open has to be
+    // cancelled here rather than left rendered over it.
+    m_sheet->cancelComposition();
+  }
+
+  m_sheet->setReadOnly(!editable);
+
+  if (wasReadOnly && editable) {
+    // Defence in depth on the way back to writable: nothing in a viewer can
+    // exploit a caret or a selection which left its cell, so re-establish both
+    // invariants before an edit can.
+    m_sheet->clampCursorIntoTable();
+    m_sheet->clampSelectionIntoOneCell();
+  }
+}
+
+void TablePreviewWidget::rebindFromContext() {
+  // The context is the authoritative binding: an accepted replacement rebases
+  // it onto the text which is now in the document, while a cached snapshot
+  // still describes the pre-commit source.
+  auto context = previewContext();
+  if (!context) {
+    return;
+  }
+
+  const auto bound = context->preview();
+  if (bound && bound->type() == PreviewElementType::Table) {
+    m_table = bound.staticCast<const TablePreview>();
+  }
+}
+
+void TablePreviewWidget::resetFromSource() {
+  // Restoring from a stale cache would undo a commit the host has already
+  // applied, and the sheet would then serialize the reverted matrix over the
+  // user's accepted change.
+  rebindFromContext();
+  m_pendingInlinePreviews.clear();
+  m_pendingInlinePreviewClears = 0;
+  m_inlinePreviewRevalidationPending = false;
+
+  {
+    QScopedValueRollback<bool> guard(m_applyingSource, true);
+    m_document->setTable(m_table);
+    if (m_sheet) {
+      // Every ring entry describes a cell of the grid which has just been
+      // thrown away, so none of them may survive the rebuild (decision D2).
+      m_sheet->clearUndoRing();
+      // Only the palette: build() has just written every per-cell format, and
+      // repeating that pass is O(cells) of pure duplicate work.
+      m_sheet->refreshPalette();
+    }
+  }
+
+  if (m_commitTimer) {
+    m_commitTimer->stop();
+  }
+
+  // The document is the bound source again, so nothing is owed and no
+  // self-commit is outstanding. The baseline is the source's *canonical* form
+  // rather than the source itself: that is what a flush compares against, so
+  // an edit which puts the cell back where it started - or a re-typed
+  // identical value - stops there instead of rewriting the document with a
+  // semantically identical table and pushing an undo step for it.
+  m_pendingHighlightStart = -1;
+  m_pendingHighlightEnd = -1;
+  m_pendingHighlightAll = false;
+  observeSourceChanges();
+  m_sourceChangePending = false;
+  m_editGeneration = 0;
+  m_committedGeneration = 0;
+  m_inFlightGeneration = 0;
+  m_commitInFlight = false;
+  m_inFlightMarkdown.clear();
+  m_committedMarkdown = m_document->toMarkdown(m_alignSource);
+  m_committedMarkdownAligned = m_alignSource;
+
+  applyEditability();
+  updateGeometry();
+
+  qCDebug(previewTableLog) << "sheet reset to" << m_document->rowCount() << "x"
+                           << m_document->columnCount();
+}
+
+void TablePreviewWidget::armCommit() {
+  if (m_suppressed || !m_commitTimer) {
+    return;
+  }
+
+  m_commitTimer->start();
+}
+
+bool TablePreviewWidget::observeSourceChanges(int p_start, int p_end) {
+  const bool structureChanged = m_observedStructure != m_document->structureGeneration();
+  bool changed = structureChanged;
+  if (structureChanged) {
+    m_observedCells.clear();
+    m_observedStructure = m_document->structureGeneration();
+  }
+  const int columns = m_document->columnCount();
+  if (m_observedAlignments.size() != columns) {
+    changed = true;
+    m_observedAlignments.resize(columns);
+  }
+  for (int column = 0; column < columns; ++column) {
+    const auto alignment = m_document->columnAlignment(column);
+    if (m_observedAlignments[column] != alignment) {
+      m_observedAlignments[column] = alignment;
+      changed = true;
+    }
+    for (int row = 0; row < m_document->rowCount(); ++row) {
+      if (!m_document->isOrigin(row, column)) {
+        continue;
+      }
+      const auto cell = m_document->table()->cellAt(row, column);
+      if (!structureChanged && p_start >= 0 && p_end >= 0 &&
+          (cell.lastPosition() < p_start || cell.firstPosition() > p_end)) {
+        continue;
+      }
+      const QString text = m_document->sourceText(cell.firstPosition(), cell.lastPosition());
+      auto &previous = m_observedCells[row * columns + column];
+      if (previous != text) {
+        previous = text;
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
+
+void TablePreviewWidget::handleContentsChanged() {
+  if (m_applyingSource || m_suppressed || m_document->isApplyingInlinePreviews()) {
+    return;
+  }
+
+  // Qt emits contentsChanged for an EMPTY edit block and for a rehighlight,
+  // neither of which changed a character. That is not academic here: in Vi
+  // insert mode ViInputMode::pre/postKeyPressDefaultHandle() open and close an
+  // edit block around every key the mode did not claim, including the ones the
+  // sheet answers by only moving the caret between cells. Counting those as
+  // edits would advance the generation and arm a commit for a table nobody
+  // touched, which then writes the source back to itself.
+  //
+  // Presentation changes may advance Qt revision, but never this source edge.
+  if (!m_sourceChangePending) {
+    return;
+  }
+  m_sourceChangePending = false;
+
+  if (!m_document->isIntact()) {
+    // Something took the table out of the document. Every guard which should
+    // have made that impossible is upstream of here; this is the last one, and
+    // rebuilding is the only safe answer - serializing a document which no
+    // longer has a table would write an empty replacement, and the sheet would
+    // be left holding a dangling QTextTable.
+    qCWarning(previewTableLog) << "the sheet's table was removed from its document -"
+                               << "rebuilding from the source";
+    resetFromSource();
+    return;
+  }
+
+  const int start = m_pendingHighlightAll ? -1 : m_pendingHighlightStart;
+  const int end = m_pendingHighlightAll ? -1 : m_pendingHighlightEnd;
+  m_pendingHighlightStart = -1;
+  m_pendingHighlightEnd = -1;
+  m_pendingHighlightAll = false;
+  const bool sourceChanged = observeSourceChanges(start, end);
+  {
+    QScopedValueRollback<bool> applying(m_applyingSource, true);
+    if (m_document->refreshCellSyntaxFormats(start, end)) {
+      updateGeometry();
+    }
+  }
+  revalidateInlinePreviews();
+
+  if (!sourceChanged) {
+    return;
+  }
+  ++m_editGeneration;
+  // Restarts, so a burst of keystrokes writes back once.
+  armCommit();
+}
+
+void TablePreviewWidget::handleCellLeft() {
+  // Leaving a cell commits it immediately: the debounce exists to coalesce
+  // keystrokes inside one cell, not to hold an edit the user has visibly
+  // finished.
+  flushPendingCommit();
+}
+
+void TablePreviewWidget::handleFocusLost() { flushPendingCommit(); }
+
+void TablePreviewWidget::handleCommitTimeout() { flushPendingCommit(); }
+
+TablePreviewWidget::FlushOutcome TablePreviewWidget::flushPendingCommit() {
+  if (m_suppressed || m_applyingSource || !m_table) {
+    if (m_commitTimer) {
+      m_commitTimer->stop();
+    }
+
+    return FlushOutcome::Settled;
+  }
+
+  if (m_commitInFlight) {
+    // Re-entered while a request is on the wire. Issuing a second one would
+    // target an anchor the outer edit has already collapsed, and would deliver
+    // two completions for one logical commit. The timer is deliberately left
+    // alone: the in-flight completion re-arms it when a newer generation is
+    // still owed.
+    qCDebug(previewTableLog) << "a commit is already in flight - not issuing a second one";
+    return FlushOutcome::Deferred;
+  }
+
+  if (m_sheet) {
+    // Before the generation check, never after it. A preedit is not in the
+    // document yet, so it has not advanced the generation either: testing
+    // first would report a composing sheet as clean, and the host's
+    // pre-removal flush would then revoke authority and lose the composition.
+    // Committing it is itself a document change, so the generation below is
+    // read afterwards.
+    m_sheet->commitPreedit();
+  }
+
+  // After the commit, which re-arms the debounce through contentsChanged.
+  if (m_commitTimer) {
+    m_commitTimer->stop();
+  }
+
+  if (m_editGeneration == m_committedGeneration) {
+    // Nothing new since the last accepted commit.
+    return FlushOutcome::Settled;
+  }
+
+  // The aligned option was flipped since the baseline was recorded. An edit
+  // which cancelled out is not a reason to reformat the document, so the
+  // question "did anything really change" has to be asked in the SHAPE the
+  // baseline was recorded in - a comparison against the new shape would report
+  // a divergence for every table.
+  //
+  // Deliberately here rather than in setSourceAlignEnabled(): this is the one
+  // point which sees every ordering. A flip on a clean sheet, a flip while an
+  // edit which cancels out is still pending, and a flip which lands from a
+  // callback while a replacement is on the wire all arrive at the same test.
+  if (m_committedMarkdownAligned != m_alignSource && !m_committedMarkdown.isEmpty()) {
+    const QString asRecorded = m_document->toMarkdown(m_committedMarkdownAligned);
+    if (!asRecorded.isEmpty() && asRecorded == m_committedMarkdown) {
+      // Semantically settled. Adopt the new shape as the baseline WITHOUT
+      // writing it: the document keeps the source it has, and the next real
+      // content change is what carries the new shape into it.
+      const QString reshaped = m_document->toMarkdown(m_alignSource);
+      if (!reshaped.isEmpty()) {
+        qCDebug(previewTableLog) << "the aligned option changed but the contents did not -"
+                                 << "re-derived the baseline instead of reformatting";
+        m_committedMarkdown = reshaped;
+        m_committedMarkdownAligned = m_alignSource;
+        m_committedGeneration = m_editGeneration;
+        return FlushOutcome::Settled;
+      }
+    }
+  }
+
+  // The same flag the baseline was recorded with, or every commit would look
+  // like a divergence from it.
+  const QString markdown = m_document->toMarkdown(m_alignSource);
+  if (markdown.isEmpty()) {
+    // Unsafe to rewrite: restore the source view.
+    qCWarning(previewTableLog) << "the sheet was edited but cannot be serialized safely -"
+                               << "restoring the source";
+    resetFromSource();
+    return FlushOutcome::Rejected;
+  }
+
+  auto context = previewContext();
+  if (!context) {
+    qCDebug(previewTableLog) << "the sheet was edited but has no context to write through";
+    return FlushOutcome::Settled;
+  }
+
+  const quint64 generation = m_editGeneration;
+  if (markdown == m_committedMarkdown) {
+    // The document already holds what was last written - the edits cancelled
+    // out, or a cell was re-typed with the value it had. Nothing to send, and
+    // the generation is settled.
+    m_committedGeneration = generation;
+    return FlushOutcome::Settled;
+  }
+
+  m_inFlightMarkdown = markdown;
+  m_inFlightGeneration = generation;
+  // The shape this request was serialized in. Captured rather than re-read on
+  // completion: a callback the replacement itself runs can flip the option
+  // while this is on the wire, and the accepted baseline must describe the
+  // text which actually landed.
+  m_inFlightAligned = m_alignSource;
+  m_commitInFlight = true;
+  // Overwritten synchronously by the completion below. Only a request which
+  // never reaches one - the host has no live identity for this sheet at all -
+  // leaves this value standing, and that is a rejection.
+  m_lastFlushOutcome = FlushOutcome::Rejected;
+
+  qCDebug(previewTableLog) << "committing generation" << generation << "->" << markdown.left(80);
+  context->requestSourceReplacement(markdown);
+
+  // The host answers synchronously, so by now handleReplacementFinished() has
+  // already run and recorded the outcome.
+  if (m_committedGeneration >= generation) {
+    return FlushOutcome::Settled;
+  }
+
+  return m_lastFlushOutcome;
+}
+
+void TablePreviewWidget::handleReplacementFinished(const vte::PreviewReplacementResult &p_result) {
+  const bool wasInFlight = m_commitInFlight;
+  m_commitInFlight = false;
+
+  if (p_result.isAccepted()) {
+    m_lastFlushOutcome = FlushOutcome::Settled;
+    qCDebug(previewTableLog) << "the commit was accepted";
+    m_authoritative = true;
+
+    // The host has just rebased the context onto the text which is now in the
+    // document. Leaving the cached snapshot describing the pre-commit source
+    // would make setPreview()'s first test - "the incoming source equals the
+    // bound one" - match an authoritative *revert* back to that very source,
+    // which is precisely what the undo relay produces: the sheet would keep
+    // rendering the committed table over a source which no longer holds it.
+    rebindFromContext();
+
+    if (m_sheet) {
+      // The source generation the ring's entries were taken against is gone:
+      // the editor's own undo stack is what reverts an accepted commit now, so
+      // a surviving cell snapshot could only revert half of one (decision D2).
+      m_sheet->clearUndoRing();
+    }
+
+    if (wasInFlight) {
+      m_committedMarkdown = m_inFlightMarkdown;
+      m_committedMarkdownAligned = m_inFlightAligned;
+      // Deliberately the in-flight generation, never the current one: the user
+      // may have typed again while this was on the wire, and that edit is
+      // still owed a write-back of its own.
+      m_committedGeneration = m_inFlightGeneration;
+    }
+
+    applyEditability();
+
+    if (m_editGeneration != m_committedGeneration) {
+      armCommit();
+    }
+
+    return;
+  }
+
+  switch (p_result.status()) {
+  case PreviewReplacementResult::Deferred:
+    // Nothing was touched, so nothing may be given up: this sheet is still
+    // authoritative, still holds the edit and still owes the write-back. Only
+    // the debounce is re-armed, which is what retries it.
+    m_lastFlushOutcome = FlushOutcome::Deferred;
+    qCDebug(previewTableLog) << "the commit was postponed - retrying after the debounce";
+    armCommit();
+    return;
+
+  case PreviewReplacementResult::StaleSnapshot:
+  case PreviewReplacementResult::SourceMismatch:
+  case PreviewReplacementResult::InvalidRange:
+  case PreviewReplacementResult::UnknownIdentity:
+    // External source always wins and this snapshot no longer describes the
+    // document. Stop presenting it as the truth and wait for the authoritative
+    // snapshot instead of restoring stale values.
+    // The host already warned about the rejection itself.
+    m_lastFlushOutcome = FlushOutcome::Rejected;
+    qCDebug(previewTableLog) << "this sheet is no longer authoritative - read-only until the"
+                             << "next snapshot";
+    m_authoritative = false;
+    applyEditability();
+    break;
+
+  default:
+    // The document was not touched, so the bound snapshot is still the source
+    // of truth: discard the edit.
+    m_lastFlushOutcome = FlushOutcome::Rejected;
+    qCDebug(previewTableLog) << "the document was not touched - discarding the edit";
+    resetFromSource();
+    break;
+  }
+}
+
+void TablePreviewWidget::handleEscapeRequested(vte::FocusEscapeDirection p_direction) {
+  flushPendingCommit();
+  emit focusEscapeRequested(p_direction);
+}
+
+void TablePreviewWidget::handleUndoRequested() {
+  // Forwarding straight through would undo an unrelated earlier operation
+  // whenever the debounce has not fired yet, and the pending table edit would
+  // then still be committed on top of whatever the undo restored.
+  if (m_editGeneration != m_committedGeneration) {
+    if (flushPendingCommit() != FlushOutcome::Settled) {
+      qCDebug(previewTableLog) << "the pending edit could not be committed - not undoing";
+      return;
+    }
+  }
+
+  emit undoRequested();
+}
+
+void TablePreviewWidget::handleRedoRequested() {
+  if (m_editGeneration != m_committedGeneration) {
+    // Committing a new edit necessarily clears the editor's redo stack, so
+    // there is nothing left to redo afterwards. Drop the redo rather than
+    // apply it to a stack the flush has just invalidated.
+    qCDebug(previewTableLog) << "flushing a pending edit - the redo is dropped";
+    flushPendingCommit();
+    return;
+  }
+
+  emit redoRequested();
+}
+
+TablePreviewWidget::FlushOutcome TablePreviewWidget::flushNow() {
+  if (m_suppressed) {
+    return FlushOutcome::Settled;
+  }
+
+  qCDebug(previewTableLog) << "flushing while this sheet is still authoritative";
+  return flushPendingCommit();
+}
+
+void TablePreviewWidget::revokeAuthority() {
+  if (m_suppressed) {
+    return;
+  }
+
+  m_suppressed = true;
+  if (m_commitTimer) {
+    m_commitTimer->stop();
+  }
+
+  qCDebug(previewTableLog) << "this sheet's authority has been revoked";
+  applyEditability();
+}
+
+QSize TablePreviewWidget::sizeHint() const {
+  // Width 0: see TablePreviewSheet::sizeHint().
+  return m_sheet ? m_sheet->sizeHint() : QSize(0, 0);
+}
+
+bool TablePreviewWidget::hasHeightForWidth() const { return true; }
+
+int TablePreviewWidget::heightForWidth(int p_width) const {
+  // The layout has no margins, so the sheet's outer width is this widget's.
+  return m_sheet ? m_sheet->heightForWidth(p_width) : 0;
+}
+
+bool TablePreviewWidget::event(QEvent *p_event) {
+  if (p_event->type() == QEvent::LayoutRequest) {
+    // Whatever queued this has been delivered; the next settlement may queue
+    // another one.
+    m_layoutRequestPending = false;
+  }
+
+  return PreviewWidget::event(p_event);
+}
+
+void TablePreviewWidget::handlePreferredGeometryChanged() {
+  if (m_layoutRequestPending) {
+    return;
+  }
+
+  // updateGeometry() posts a layout request to the *parent*, which the host
+  // does not watch. Posting one here is what makes the host drop its cached
+  // measurement and re-publish the reservation.
+  m_layoutRequestPending = true;
+  updateGeometry();
+  QCoreApplication::postEvent(this, new QEvent(QEvent::LayoutRequest));
+}
+
+void TablePreviewWidget::changeEvent(QEvent *p_event) {
+  switch (p_event->type()) {
+  case QEvent::FontChange:
+  case QEvent::PaletteChange:
+  case QEvent::StyleChange:
+    if (m_sheet) {
+      // Qt's style sheet machinery does not hand an application's editor font
+      // down to a widget nested inside a styled ancestor, so the sheet would
+      // keep measuring itself with the application default while being painted
+      // with the inherited font. Forward it explicitly.
+      if (p_event->type() == QEvent::FontChange && m_sheet->font() != font()) {
+        m_sheet->setFont(font());
+      }
+
+      {
+        // Formats only, never the cell text: rebuilding would destroy the
+        // caret, which for a theme switch during typing is a silent loss of
+        // the user's place. The guard keeps the format writes from being
+        // mistaken for user edits.
+        QScopedValueRollback<bool> guard(m_applyingSource, true);
+        m_sheet->refreshFormats();
+      }
+      revalidateInlinePreviews();
+
+      updateGeometry();
+    }
+    break;
+
+  default:
+    break;
+  }
+
+  PreviewWidget::changeEvent(p_event);
+}
+
+// ---------------------------------------------------------------------------
+// TablePreviewWidgetFactory
+// ---------------------------------------------------------------------------
+
+TablePreviewWidgetFactory::TablePreviewWidgetFactory(QObject *p_parent)
+    : PreviewWidgetFactory(p_parent) {}
+
+QVector<PreviewElementType> TablePreviewWidgetFactory::supportedTypes() const {
+  return QVector<PreviewElementType>() << PreviewElementType::Table;
+}
+
+QSizeF TablePreviewWidgetFactory::estimatedSize(const QSharedPointer<const Preview> &p_preview,
+                                                qreal p_widthBasis, const QFont &p_font) const {
+  // "Measure me properly" for anything whose shape cannot be read here.
+  if (!p_preview || p_preview->type() != PreviewElementType::Table || p_widthBasis <= 0) {
+    return QSizeF();
+  }
+
+  auto table = p_preview.dynamicCast<const TablePreview>();
+  if (!table) {
+    return QSizeF();
+  }
+
+  // The same gate TablePreviewWidget::setPreview() applies. Without it a table
+  // past the row/column/cell ceilings would be reserved a band from an
+  // estimate, and then be permanently unrealizable: setPreview() rejects it,
+  // the factory chain declines, and the element would be left claiming a band
+  // no widget will ever fill while the painted source fallback stays
+  // suppressed. Declining here keeps such a table on the eager path, where
+  // "nobody claims it" is decided once, at bind time, exactly as before.
+  if (!TablePreviewDocument::isWithinLimits(*table)) {
+    return QSizeF();
+  }
+
+  const int rows = table->gridRowCount();
+  const int cols = table->gridColumnCount();
+  if (rows <= 0 || cols <= 0) {
+    return QSizeF();
+  }
+
+  // The chrome a live sheet reports comes from its style and its frame, and
+  // there is no widget here to ask. TablePreviewSheet::horizontalChrome()
+  // falls back to frameWidth() * 2 for exactly the same reason, and the frame
+  // of a QTextEdit is 1 px per side in every style this ships with. The band
+  // is corrected against the real measurement the moment the widget is built.
+  const int frame = 2;
+
+  const QFontMetricsF metrics(p_font);
+  const qreal lineHeight = metrics.height();
+
+  // Mirrors the QTextTableFormat TablePreviewDocument::build() applies:
+  // cellPadding on all four sides, plus the border lines between rows. With
+  // collapsing on, neighbouring rows share one line; with it off - Qt < 5.14 -
+  // each row draws its own top and bottom, so a row costs two.
+  const qreal borderPerRow = c_bordersCollapsed ? c_cellBorder : 2 * c_cellBorder;
+  const qreal rowChrome = 2 * c_cellPadding + borderPerRow;
+
+  // Every column is a VariableLength constraint, so Qt shares the width out by
+  // content. Without laying the table out that share is unknowable, and an
+  // equal split is both the cheapest and the least biased approximation.
+  const qreal borderPerColumn = c_bordersCollapsed ? c_cellBorder : 2 * c_cellBorder;
+  const qreal columnWidth = (p_widthBasis - frame - cols * borderPerColumn) / cols;
+  if (columnWidth <= 0) {
+    return QSizeF();
+  }
+
+  // Average character advance, so the wrap estimate below costs one text
+  // measurement for the whole table rather than one per cell.
+  const qreal charWidth = metrics.averageCharWidth();
+  const int charsPerLine = charWidth > 0 ? qMax(1, static_cast<int>(columnWidth / charWidth)) : 1;
+
+  const auto &cells = table->cells();
+  // Frame plus the document margin the sheet keeps above and below the table,
+  // plus the one border line the last row does not share with a successor.
+  qreal height = frame + 2 * c_documentMargin + (c_bordersCollapsed ? c_cellBorder : 0);
+  for (int r = 0; r < rows; ++r) {
+    // The tallest cell of the row decides the row's height, and a cell is as
+    // tall as the number of wrapped lines its text needs.
+    if (r >= cells.size()) {
+      height += lineHeight + rowChrome;
+      continue;
+    }
+
+    // A reference, deliberately: binding this to the result of a conditional
+    // expression would copy the row into a temporary on every iteration, and
+    // this loop runs for every unrealized table on every publication.
+    const auto &row = cells.at(r);
+    int lines = 1;
+    for (int c = 0; c < row.size(); ++c) {
+      const int length = row.at(c).size();
+      if (length <= charsPerLine) {
+        continue;
+      }
+
+      // A cell long enough to wrap many times is where an equal-column-share
+      // approximation stops being an approximation: Qt would have widened
+      // that column at its neighbours' expense instead. Decline rather than
+      // publish a height the realization would visibly correct.
+      const int cellLines = (length + charsPerLine - 1) / charsPerLine;
+      if (cellLines > 4) {
+        return QSizeF();
+      }
+
+      lines = qMax(lines, cellLines);
+    }
+
+    // A cell spanning several grid rows contributes its height once, to the
+    // row it starts in; the covered rows keep the one-line minimum. That is
+    // already what taking the per-row maximum of ORIGIN text does, because a
+    // covered slot holds an empty string.
+    height += lines * lineHeight + rowChrome;
+  }
+
+  // Width: TablePreviewWidget::preferredWidthFraction() is 1.0, so the host
+  // resolves the band to the whole available content width regardless of what
+  // is returned here. Reported as the basis for consistency with what
+  // preferredSize() would compute.
+  return QSizeF(p_widthBasis, height);
+}
+
+PreviewWidget *
+TablePreviewWidgetFactory::createWidget(PreviewWidgetContext *p_context,
+                                        const QSharedPointer<const Preview> &p_preview,
+                                        QWidget *p_parent) {
+  if (!p_preview || p_preview->type() != PreviewElementType::Table) {
+    return nullptr;
+  }
+
+  auto widget = new TablePreviewWidget(p_context, p_parent);
+  widget->setReadOnly(m_readOnly);
+  widget->setSourceAlignEnabled(m_alignSource);
+  widget->setSyntaxStyles(m_syntaxStyles);
+  // Before any of the relays below, so a sheet created while the editor is
+  // already in Vi mode does not spend its first keystrokes without one.
+  widget->setInputMode(m_inputMode);
+
+  // Relay the sheet's requests upwards with the widget attached: only the host
+  // can resolve which identity - and therefore which live anchor - they belong
+  // to.
+  connect(widget, &TablePreviewWidget::focusEscapeRequested, this,
+          [this, widget](FocusEscapeDirection p_direction) {
+            emit focusEscapeRequested(widget, p_direction);
+          });
+  connect(widget, &TablePreviewWidget::undoRequested, this,
+          [this, widget]() { emit undoRequested(widget); });
+  connect(widget, &TablePreviewWidget::redoRequested, this,
+          [this, widget]() { emit redoRequested(widget); });
+  connect(widget, &TablePreviewWidget::inputModeStatusWidgetChanged, this,
+          [this, widget]() { emit inputModeStatusWidgetChanged(widget); });
+
+  // Every host rebuild destroys the previous sheets. setReadOnly() does
+  // compact the list, but it early-returns when the value is unchanged, which
+  // is the steady state - so without this the vector would grow for the whole
+  // lifetime of the editor.
+  pruneWidgets();
+  m_widgets.append(QPointer<TablePreviewWidget>(widget));
+  return widget;
+}
+
+void TablePreviewWidgetFactory::pruneWidgets() {
+  for (int i = m_widgets.size() - 1; i >= 0; --i) {
+    if (m_widgets[i].isNull()) {
+      m_widgets.removeAt(i);
+    }
+  }
+}
+
+void TablePreviewWidgetFactory::setReadOnly(bool p_readOnly) {
+  if (m_readOnly == p_readOnly) {
+    return;
+  }
+
+  m_readOnly = p_readOnly;
+
+  pruneWidgets();
+  for (auto &widget : m_widgets) {
+    widget->setReadOnly(p_readOnly);
+  }
+}
+
+void TablePreviewWidgetFactory::setInputMode(InputMode p_mode) {
+  if (m_inputModeApplied && m_inputMode == p_mode) {
+    return;
+  }
+
+  m_inputMode = p_mode;
+  m_inputModeApplied = true;
+
+  pruneWidgets();
+  for (auto &widget : m_widgets) {
+    widget->setInputMode(p_mode);
+  }
+}
+
+bool TablePreviewWidgetFactory::setSyntaxStyles(const QVector<QTextCharFormat> &p_styles) {
+  if (m_syntaxStyles == p_styles) {
+    return false;
+  }
+
+  m_syntaxStyles = p_styles;
+  pruneWidgets();
+  for (auto &widget : m_widgets) {
+    widget->setSyntaxStyles(p_styles);
+  }
+  return true;
+}
+
+void TablePreviewWidgetFactory::setSourceAlignEnabled(bool p_enabled) {
+  if (m_alignSource == p_enabled) {
+    return;
+  }
+
+  m_alignSource = p_enabled;
+
+  pruneWidgets();
+  for (auto &widget : m_widgets) {
+    widget->setSourceAlignEnabled(p_enabled);
+  }
+}

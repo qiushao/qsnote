@@ -1,0 +1,3242 @@
+#include "test_markdownfolding.h"
+
+#include <QDir>
+#include <QFontDatabase>
+#include <QImage>
+#include <QPainter>
+#include <QSignalSpy>
+#include <QTextBlock>
+#include <QTextCursor>
+#include <QTextDocument>
+
+#include <limits>
+
+#include <vtextedit/markdownhighlighterdata.h>
+#include <vtextedit/previewdata.h>
+
+#include <foldingregionutils.h>
+#include <markdownfoldingprovider.h>
+#include <textfolding.h>
+
+#include "documentresourcemgr.h"
+#include "textdocumentlayout.h"
+#include "textdocumentlayoutdata.h"
+
+using namespace tests;
+using namespace vte;
+
+static QString generateLines(int p_count) {
+  QString text;
+  for (int i = 0; i < p_count; ++i) {
+    if (i > 0) {
+      text += QLatin1Char('\n');
+    }
+    text += QStringLiteral("Line %1").arg(i);
+  }
+  return text;
+}
+
+static bool realNear(qreal p_actual, qreal p_expected) {
+  return qAbs(p_actual - p_expected) < 1e-6;
+}
+
+void TestMarkdownFolding::initTestCase() {
+  Q_ASSERT(!m_doc);
+  m_doc = new QTextDocument(generateLines(50));
+  m_textFolding = new TextFolding(m_doc);
+  m_provider = new MarkdownFoldingProvider(m_textFolding, m_doc);
+}
+
+void TestMarkdownFolding::cleanupTestCase() {
+  delete m_provider;
+  delete m_textFolding;
+  delete m_doc;
+  m_provider = nullptr;
+  m_textFolding = nullptr;
+  m_doc = nullptr;
+}
+
+void TestMarkdownFolding::cleanup() { m_provider->clear(); }
+
+// 1. Apply regions and verify fold ranges exist.
+void TestMarkdownFolding::testApplyFoldingRegions() {
+  QVector<md::FoldingRegion> regions;
+  // Heading section [0, 9].
+  regions.append({0, 9, md::Heading, 1});
+  // Code block [3, 7] nested inside heading.
+  regions.append({3, 7, md::FencedCode, 0});
+
+  m_provider->updateFoldingRegions(regions);
+
+  // Verify fold range starting on block 0 exists.
+  auto rangesAt0 = m_textFolding->foldingRangesStartingOnBlock(0);
+  QCOMPARE(rangesAt0.size(), 1);
+  QVERIFY(rangesAt0[0].second.testFlag(TextFolding::Persistent));
+
+  // Verify fold range starting on block 3 exists.
+  auto rangesAt3 = m_textFolding->foldingRangesStartingOnBlock(3);
+  QCOMPARE(rangesAt3.size(), 1);
+  QVERIFY(rangesAt3[0].second.testFlag(TextFolding::Persistent));
+}
+
+// 2. Re-apply same regions after folding one — fold state preserved.
+void TestMarkdownFolding::testDiffPreservesFoldState() {
+  QVector<md::FoldingRegion> regions;
+  regions.append({0, 9, md::Heading, 1});
+  regions.append({3, 7, md::FencedCode, 0});
+
+  m_provider->updateFoldingRegions(regions);
+
+  // Fold the heading range [0,9].
+  auto rangesAt0 = m_textFolding->foldingRangesStartingOnBlock(0);
+  QCOMPARE(rangesAt0.size(), 1);
+  qint64 headingId = rangesAt0[0].first;
+  m_textFolding->toggleRange(headingId);
+
+  // Blocks 1..9 should be invisible.
+  auto block1 = m_doc->findBlockByNumber(1);
+  QVERIFY(!block1.isVisible());
+
+  // Re-apply the same regions (simulating re-parse).
+  m_provider->updateFoldingRegions(regions);
+
+  // The heading range should still be folded — block 1 still invisible.
+  block1 = m_doc->findBlockByNumber(1);
+  QVERIFY(!block1.isVisible());
+
+  // The range at block 0 should still exist.
+  rangesAt0 = m_textFolding->foldingRangesStartingOnBlock(0);
+  QCOMPARE(rangesAt0.size(), 1);
+}
+
+// 3. Stale ranges removed when not in new set.
+void TestMarkdownFolding::testDiffRemovesStaleRanges() {
+  QVector<md::FoldingRegion> regions;
+  regions.append({0, 9, md::Heading, 1});
+  regions.append({12, 19, md::Heading, 2});
+  regions.append({22, 29, md::FencedCode, 0});
+
+  m_provider->updateFoldingRegions(regions);
+
+  // All three should exist.
+  QCOMPARE(m_textFolding->foldingRangesStartingOnBlock(0).size(), 1);
+  QCOMPARE(m_textFolding->foldingRangesStartingOnBlock(12).size(), 1);
+  QCOMPARE(m_textFolding->foldingRangesStartingOnBlock(22).size(), 1);
+
+  // Re-apply with only 2 regions — remove the middle one.
+  QVector<md::FoldingRegion> newRegions;
+  newRegions.append({0, 9, md::Heading, 1});
+  newRegions.append({22, 29, md::FencedCode, 0});
+
+  m_provider->updateFoldingRegions(newRegions);
+
+  QCOMPARE(m_textFolding->foldingRangesStartingOnBlock(0).size(), 1);
+  QCOMPARE(m_textFolding->foldingRangesStartingOnBlock(12).size(), 0);
+  QCOMPARE(m_textFolding->foldingRangesStartingOnBlock(22).size(), 1);
+}
+
+// 4. New ranges added when not in old set.
+void TestMarkdownFolding::testDiffAddsNewRanges() {
+  QVector<md::FoldingRegion> regions;
+  regions.append({0, 9, md::Heading, 1});
+  regions.append({12, 19, md::Heading, 2});
+
+  m_provider->updateFoldingRegions(regions);
+
+  QCOMPARE(m_textFolding->foldingRangesStartingOnBlock(0).size(), 1);
+  QCOMPARE(m_textFolding->foldingRangesStartingOnBlock(12).size(), 1);
+  QCOMPARE(m_textFolding->foldingRangesStartingOnBlock(22).size(), 0);
+
+  // Re-apply with an additional region.
+  QVector<md::FoldingRegion> newRegions;
+  newRegions.append({0, 9, md::Heading, 1});
+  newRegions.append({12, 19, md::Heading, 2});
+  newRegions.append({22, 29, md::FencedCode, 0});
+
+  m_provider->updateFoldingRegions(newRegions);
+
+  QCOMPARE(m_textFolding->foldingRangesStartingOnBlock(0).size(), 1);
+  QCOMPARE(m_textFolding->foldingRangesStartingOnBlock(12).size(), 1);
+  QCOMPARE(m_textFolding->foldingRangesStartingOnBlock(22).size(), 1);
+}
+
+// 5. Regions spanning a single block are skipped.
+void TestMarkdownFolding::testSkipsSmallRanges() {
+  QVector<md::FoldingRegion> regions;
+  // Single-block region: startBlock == endBlock.
+  regions.append({5, 5, md::Heading, 1});
+  // Also test endBlock < startBlock + 1 (adjacent).
+  regions.append({10, 10, md::FencedCode, 0});
+
+  m_provider->updateFoldingRegions(regions);
+
+  QCOMPARE(m_textFolding->foldingRangesStartingOnBlock(5).size(), 0);
+  QCOMPARE(m_textFolding->foldingRangesStartingOnBlock(10).size(), 0);
+}
+
+// 6. Nested regions both created correctly.
+void TestMarkdownFolding::testNesting() {
+  QVector<md::FoldingRegion> regions;
+  regions.append({0, 20, md::Heading, 1});
+  regions.append({5, 10, md::FencedCode, 0});
+
+  m_provider->updateFoldingRegions(regions);
+
+  // Outer range at block 0.
+  auto rangesAt0 = m_textFolding->foldingRangesStartingOnBlock(0);
+  QCOMPARE(rangesAt0.size(), 1);
+
+  // Inner range at block 5.
+  auto rangesAt5 = m_textFolding->foldingRangesStartingOnBlock(5);
+  QCOMPARE(rangesAt5.size(), 1);
+}
+
+// 7. Empty regions vector produces no folds.
+void TestMarkdownFolding::testEmptyRegions() {
+  QVector<md::FoldingRegion> regions;
+  m_provider->updateFoldingRegions(regions);
+
+  // Spot-check a few blocks.
+  QCOMPARE(m_textFolding->foldingRangesStartingOnBlock(0).size(), 0);
+  QCOMPARE(m_textFolding->foldingRangesStartingOnBlock(5).size(), 0);
+}
+
+// 8. clear() removes all markdown folds.
+void TestMarkdownFolding::testClearOnDisable() {
+  QVector<md::FoldingRegion> regions;
+  regions.append({0, 9, md::Heading, 1});
+  regions.append({12, 19, md::Heading, 2});
+
+  m_provider->updateFoldingRegions(regions);
+
+  QCOMPARE(m_textFolding->foldingRangesStartingOnBlock(0).size(), 1);
+  QCOMPARE(m_textFolding->foldingRangesStartingOnBlock(12).size(), 1);
+
+  m_provider->clear();
+
+  QCOMPARE(m_textFolding->foldingRangesStartingOnBlock(0).size(), 0);
+  QCOMPARE(m_textFolding->foldingRangesStartingOnBlock(12).size(), 0);
+}
+
+// --- Heading section tests ---
+
+// Helper to find a FoldingRegion by type and startBlock.
+static const md::FoldingRegion *findRegion(const QVector<md::FoldingRegion> &p_regions,
+                                           md::FoldingRegionType p_type, int p_startBlock) {
+  for (const auto &r : p_regions) {
+    if (r.m_type == p_type && r.m_startBlock == p_startBlock) {
+      return &r;
+    }
+  }
+  return nullptr;
+}
+
+// 9. Single heading extends to end of document.
+void TestMarkdownFolding::testHeadingSectionBasic() {
+  const int numBlocks = 20;
+  QVector<md::FoldingRegion> regions;
+  // AST walker produces heading with single-line range; endBlock is placeholder.
+  regions.append({0, 0, md::Heading, 2});
+
+  md::computeHeadingSections(regions, numBlocks);
+
+  QCOMPARE(regions.size(), 1);
+  auto *h = findRegion(regions, md::Heading, 0);
+  QVERIFY(h != nullptr);
+  QCOMPARE(h->m_endBlock, numBlocks - 1);
+}
+
+// 10. Two same-level headings: first section ends before second.
+void TestMarkdownFolding::testHeadingSectionMultiple() {
+  const int numBlocks = 20;
+  QVector<md::FoldingRegion> regions;
+  regions.append({0, 0, md::Heading, 2});
+  regions.append({5, 5, md::Heading, 2});
+
+  md::computeHeadingSections(regions, numBlocks);
+
+  QCOMPARE(regions.size(), 2);
+  auto *h0 = findRegion(regions, md::Heading, 0);
+  auto *h5 = findRegion(regions, md::Heading, 5);
+  QVERIFY(h0 != nullptr);
+  QVERIFY(h5 != nullptr);
+  QCOMPARE(h0->m_endBlock, 4);
+  QCOMPARE(h5->m_endBlock, numBlocks - 1);
+}
+
+// 11. Nested headings: H1 contains H2, next H1 terminates both.
+void TestMarkdownFolding::testHeadingSectionNested() {
+  const int numBlocks = 20;
+  QVector<md::FoldingRegion> regions;
+  regions.append({0, 0, md::Heading, 1});   // H1
+  regions.append({2, 2, md::Heading, 2});   // H2
+  regions.append({10, 10, md::Heading, 1}); // H1
+
+  md::computeHeadingSections(regions, numBlocks);
+
+  QCOMPARE(regions.size(), 3);
+  auto *h1a = findRegion(regions, md::Heading, 0);
+  auto *h2 = findRegion(regions, md::Heading, 2);
+  auto *h1b = findRegion(regions, md::Heading, 10);
+  QVERIFY(h1a != nullptr);
+  QVERIFY(h2 != nullptr);
+  QVERIFY(h1b != nullptr);
+  QCOMPARE(h1a->m_endBlock, 9);
+  QCOMPARE(h2->m_endBlock, 9);
+  QCOMPARE(h1b->m_endBlock, numBlocks - 1);
+}
+
+// 12. Heading section spanning only 1 block is filtered out.
+void TestMarkdownFolding::testHeadingSectionTooSmall() {
+  const int numBlocks = 20;
+  QVector<md::FoldingRegion> regions;
+  regions.append({5, 5, md::Heading, 2});
+  regions.append({6, 6, md::Heading, 2});
+
+  md::computeHeadingSections(regions, numBlocks);
+
+  // First heading [5,5] has endBlock = 5 (next same-level is block 6, so 6-1=5).
+  // Section size = 5-5 = 0 < 1, so filtered out.
+  // Second heading [6,19] remains.
+  QCOMPARE(regions.size(), 1);
+  auto *h6 = findRegion(regions, md::Heading, 6);
+  QVERIFY(h6 != nullptr);
+  QCOMPARE(h6->m_endBlock, numBlocks - 1);
+}
+
+// 13. Heading near end of document extends to last block.
+void TestMarkdownFolding::testHeadingSectionAtEnd() {
+  const int numBlocks = 20;
+  QVector<md::FoldingRegion> regions;
+  regions.append({15, 15, md::Heading, 3});
+
+  md::computeHeadingSections(regions, numBlocks);
+
+  QCOMPARE(regions.size(), 1);
+  auto *h = findRegion(regions, md::Heading, 15);
+  QVERIFY(h != nullptr);
+  QCOMPARE(h->m_endBlock, 19);
+}
+
+// 14. Heading inside a blockquote is NOT converted to a section fold.
+void TestMarkdownFolding::testHeadingSectionInsideBlockquote() {
+  const int numBlocks = 20;
+  QVector<md::FoldingRegion> regions;
+  // Blockquote spanning [2, 8].
+  regions.append({2, 8, md::Blockquote, 0});
+  // Heading at block 3 inside the blockquote.
+  regions.append({3, 3, md::Heading, 2});
+
+  md::computeHeadingSections(regions, numBlocks);
+
+  // The heading section [3, 19] is inside blockquote [2, 8]?
+  // No — heading section [3, 19] is NOT fully inside [2, 8].
+  // Need to adjust: heading fully inside blockquote means heading section is also inside.
+  // The algorithm checks h.m_startBlock >= bq.m_startBlock && h.m_endBlock <= bq.m_endBlock.
+  // Here h.m_endBlock = 19 > bq.m_endBlock = 8, so it's NOT filtered.
+  // To test blockquote filtering, the heading section must be fully inside.
+  // Use two headings so the first's section is bounded.
+
+  // Reset and redo with proper setup.
+  regions.clear();
+  regions.append({2, 12, md::Blockquote, 0});
+  // Heading at block 3, next same-level heading at block 8 -> section [3, 7].
+  regions.append({3, 3, md::Heading, 2});
+  regions.append({8, 8, md::Heading, 2});
+
+  md::computeHeadingSections(regions, numBlocks);
+
+  // Heading at block 3: section [3, 7], fully inside blockquote [2, 12] -> filtered.
+  // Heading at block 8: section [8, 19], NOT fully inside [2, 12] -> kept.
+  // Blockquote itself remains.
+  auto *hFiltered = findRegion(regions, md::Heading, 3);
+  QVERIFY(hFiltered == nullptr);
+
+  auto *hKept = findRegion(regions, md::Heading, 8);
+  QVERIFY(hKept != nullptr);
+  QCOMPARE(hKept->m_endBlock, numBlocks - 1);
+
+  // Blockquote is preserved.
+  auto *bq = findRegion(regions, md::Blockquote, 2);
+  QVERIFY(bq != nullptr);
+}
+
+// Integration: heading section computation feeds into provider.
+void TestMarkdownFolding::testEndToEndFolding() {
+  // Simulate full pipeline: raw heading regions -> computeHeadingSections -> provider.
+  const int numBlocks = 20;
+  QVector<md::FoldingRegion> regions;
+  // Raw heading lines (as produced by AST walker).
+  regions.append({0, 0, md::Heading, 1});   // H1
+  regions.append({3, 3, md::Heading, 2});   // H2
+  regions.append({10, 10, md::Heading, 1}); // H1
+  // A code block inside the first section.
+  regions.append({5, 7, md::FencedCode, 0});
+
+  // Run heading section computation.
+  md::computeHeadingSections(regions, numBlocks);
+
+  // Verify heading sections were computed correctly.
+  // H1 at 0 -> section [0, 9] (before next H1 at 10)
+  // H2 at 3 -> section [3, 9] (before next same-or-higher at 10)
+  // H1 at 10 -> section [10, 19] (end of doc)
+  // Code block [5, 7] unchanged.
+
+  // Apply to provider.
+  m_provider->updateFoldingRegions(regions);
+
+  // Verify all 4 ranges were created (3 headings + 1 code block).
+  // Check heading at block 0.
+  auto ranges0 = m_textFolding->foldingRangesStartingOnBlock(0);
+  QCOMPARE(ranges0.size(), 1);
+
+  // Check heading at block 3.
+  auto ranges3 = m_textFolding->foldingRangesStartingOnBlock(3);
+  QCOMPARE(ranges3.size(), 1);
+
+  // Check code block at block 5.
+  auto ranges5 = m_textFolding->foldingRangesStartingOnBlock(5);
+  QCOMPARE(ranges5.size(), 1);
+
+  // Check heading at block 10.
+  auto ranges10 = m_textFolding->foldingRangesStartingOnBlock(10);
+  QCOMPARE(ranges10.size(), 1);
+}
+
+// 16. Folding sets hidden blocks to zero-height rects; unfolding restores them.
+void TestMarkdownFolding::testFoldingBlockHeights() {
+  // Use a standalone document + layout for this test (not the shared m_doc).
+  QTextDocument doc(generateLines(25));
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+
+  TextFolding folding(&doc);
+
+  // Force initial layout by querying document size.
+  qreal preFoldHeight = layout->documentSize().height();
+  QVERIFY(preFoldHeight > 0);
+
+  // Verify all blocks have positive height before folding.
+  for (int i = 0; i < 25; ++i) {
+    auto block = doc.findBlockByNumber(i);
+    auto info = BlockLayoutData::get(block);
+    QVERIFY2(info->m_rect.height() > 0,
+             qPrintable(QStringLiteral("Block %1 has zero height before fold").arg(i)));
+  }
+
+  // Create a persistent fold range spanning blocks 2-10.
+  QTextBlock startBlock = doc.findBlockByNumber(2);
+  QTextBlock endBlock = doc.findBlockByNumber(10);
+  TextBlockRange range(startBlock, endBlock);
+  auto id = folding.newFoldingRange(range, TextFolding::Persistent);
+  QVERIFY(id != TextFolding::InvalidRangeId);
+
+  // Fold it.
+  folding.toggleRange(id);
+
+  // Hidden interior blocks (3-9) should have zero-height rects.
+  for (int i = 3; i <= 9; ++i) {
+    auto block = doc.findBlockByNumber(i);
+    auto info = BlockLayoutData::get(block);
+    QCOMPARE(info->m_rect.height(), 0.0);
+  }
+
+  // Both fold endpoints should still have positive height.
+  for (int i : {2, 10}) {
+    auto info = BlockLayoutData::get(doc.findBlockByNumber(i));
+    QVERIFY(info->m_rect.height() > 0);
+  }
+
+  // Document height should have decreased.
+  qreal foldedHeight = layout->documentSize().height();
+  QVERIFY(foldedHeight < preFoldHeight);
+
+  // Unfold.
+  folding.toggleRange(id);
+
+  // All blocks in the range should be restored to positive height.
+  for (int i = 2; i <= 10; ++i) {
+    auto block = doc.findBlockByNumber(i);
+    auto info = BlockLayoutData::get(block);
+    QVERIFY2(info->m_rect.height() > 0,
+             qPrintable(QStringLiteral("Block %1 has zero height after unfold").arg(i)));
+  }
+
+  // Document height should be restored.
+  qreal unfoldedHeight = layout->documentSize().height();
+  QVERIFY(unfoldedHeight > foldedHeight);
+  QVERIFY(qFuzzyCompare(unfoldedHeight, preFoldHeight));
+}
+
+void TestMarkdownFolding::testFractionalBlockCoordinates() {
+  QTextDocument doc(generateLines(10));
+  doc.setTextWidth(600);
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setLeadingSpaceOfLine(3.28);
+  layout->relayout();
+
+  for (int i = 0; i < doc.blockCount(); ++i) {
+    QTextBlock block = doc.findBlockByNumber(i);
+    const auto info = BlockLayoutData::get(block);
+    const QPointF point(doc.documentMargin(), info->top() + 0.25);
+    QCOMPARE(layout->findBlockByPosition(point), i);
+    QCOMPARE(layout->hitTest(point, Qt::FuzzyHit), block.position());
+  }
+}
+
+void TestMarkdownFolding::testFractionalClipDraw() {
+  QTextDocument doc(QStringLiteral("First block\nSecond block"));
+  doc.setTextWidth(200);
+
+  QTextCursor cursor(doc.findBlockByNumber(1));
+  QTextBlockFormat format;
+  format.setBackground(Qt::green);
+  cursor.setBlockFormat(format);
+
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setLeadingSpaceOfLine(3.28);
+  layout->relayout();
+
+  const qreal secondTop = BlockLayoutData::get(doc.findBlockByNumber(1))->top();
+  QVERIFY(!realNear(secondTop, qFloor(secondTop)));
+
+  QImage image(220, qCeil(layout->documentSize().height()) + 10, QImage::Format_ARGB32);
+  image.fill(Qt::white);
+  QPainter painter(&image);
+  const qreal clipBottom = (secondTop + qCeil(secondTop)) / 2;
+  QVERIFY(clipBottom > secondTop);
+  QVERIFY(qFloor(clipBottom) < secondTop);
+  const QRectF clip(0, 0, image.width(), clipBottom);
+  painter.setClipRect(clip);
+
+  QAbstractTextDocumentLayout::PaintContext context;
+  context.clip = clip;
+  layout->draw(&painter, context);
+  painter.end();
+
+  const int sampleX = qFloor(doc.documentMargin()) + 2;
+  const int sampleY = qFloor(secondTop);
+  QCOMPARE(image.pixelColor(sampleX, sampleY), QColor(Qt::green));
+}
+
+// draw() must position every block at the offset the rest of the layout
+// publishes for it - the same value blockBoundingRect() returns and therefore
+// the one the line number gutter, the hit testing and the preview widget bands
+// all use. Reconstructing the position by summing block heights instead makes
+// the painted text drift away from all of them as soon as one height disagrees
+// with the offset chain, which is what draws the source on top of a preview.
+void TestMarkdownFolding::testDrawUsesStoredBlockOffsets() {
+  QTextDocument doc(QStringLiteral("First block\nSecond block\nThird block"));
+  doc.setTextWidth(200);
+
+  QTextCursor cursor(doc.findBlockByNumber(2));
+  QTextBlockFormat format;
+  format.setBackground(Qt::green);
+  cursor.setBlockFormat(format);
+
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->relayout();
+
+  const QTextBlock third = doc.findBlockByNumber(2);
+  const qreal thirdTop = BlockLayoutData::get(third)->top();
+
+  // A block whose height no longer agrees with the offsets of the blocks after
+  // it. The state is constructed directly rather than driven through a public
+  // sequence: what is under test is which of the two the painting trusts, not
+  // how they came to disagree. The offsets stay authoritative, so
+  // blockBoundingRect() still reports the original position.
+  auto firstInfo = BlockLayoutData::get(doc.firstBlock());
+  firstInfo->m_rect.setHeight(firstInfo->m_rect.height() + 40);
+  QCOMPARE(BlockLayoutData::get(third)->top(), thirdTop);
+  QCOMPARE(layout->blockBoundingRect(third).top(), thirdTop);
+
+  QImage image(220, qCeil(thirdTop) + 120, QImage::Format_ARGB32);
+  image.fill(Qt::white);
+  QPainter painter(&image);
+
+  QAbstractTextDocumentLayout::PaintContext context;
+  context.clip = QRectF(0, 0, image.width(), image.height());
+  layout->draw(&painter, context);
+  painter.end();
+
+  // The third block is painted where the layout says it is, not 40px lower.
+  // A whole scan line is inspected instead of one pixel: which pixels of the
+  // green band are covered by glyph ink depends on the font the platform
+  // picks, so a fixed x can land on a letter on one platform and on the
+  // background on another.
+  const auto rowHasGreen = [&image](int p_y) {
+    for (int x = 0; x < image.width(); ++x) {
+      if (image.pixelColor(x, p_y) == QColor(Qt::green)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  QVERIFY(rowHasGreen(qCeil(thirdTop) + 2));
+  QVERIFY(!rowHasGreen(qCeil(thirdTop) + 42));
+}
+
+void TestMarkdownFolding::testDocumentSizeSignals() {
+  QTextDocument doc(generateLines(10));
+  doc.setTextWidth(600);
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setLeadingSpaceOfLine(3.28);
+  layout->relayout();
+
+  const QSizeF originalSize = layout->documentSize();
+  QSignalSpy sizeSpy(layout, SIGNAL(documentSizeChanged(QSizeF)));
+  layout->relayout();
+  QCOMPARE(layout->documentSize(), originalSize);
+  QCOMPARE(sizeSpy.count(), 0);
+
+  layout->setLeadingSpaceOfLine(4.28);
+  layout->relayout();
+  QVERIFY(layout->documentSize() != originalSize);
+  QCOMPARE(sizeSpy.count(), 1);
+}
+
+void TestMarkdownFolding::testWrappedInlinePreviewCoordinates() {
+  QTextDocument doc(QString(160, QLatin1Char('x')));
+  doc.setTextWidth(120);
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->relayout();
+
+  QTextBlock block = doc.firstBlock();
+  QTextLayout *textLayout = block.layout();
+  QVERIFY(textLayout->lineCount() >= 3);
+  const int start = textLayout->lineAt(0).textStart() + 1;
+  const int end = textLayout->lineAt(2).textStart() + 2;
+  auto previewData = BlockPreviewData::get(block);
+  previewData->insert(new PreviewData(PreviewData::ImageLink, 1, start, end, 0, true,
+                                      QStringLiteral("wrapped-image"), QSize(100, 40), 0));
+
+  layout->setPreviewEnabled(true);
+  textLayout = block.layout();
+  QVERIFY(textLayout->lineCount() >= 3);
+
+  const auto info = BlockLayoutData::get(block);
+  QCOMPARE(info->m_markers.size(), 4);
+  const QTextLine continuationLine = textLayout->lineAt(1);
+  const QTextLine endingLine = textLayout->lineAt(2);
+  QVERIFY(
+      realNear(info->m_markers.at(1).m_end.x(), continuationLine.x() + continuationLine.width()));
+  QVERIFY(realNear(info->m_markers.at(2).m_end.x(), endingLine.cursorToX(end)));
+}
+
+void TestMarkdownFolding::testMalformedPreviewData() {
+  QTextDocument doc(QStringLiteral("Preview data"));
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+
+  auto previewData = BlockPreviewData::get(doc.firstBlock());
+  QVERIFY(!previewData->insert(nullptr));
+  QCOMPARE(previewData->getPreviewData().size(), 0);
+  QVERIFY(!previewData->insert(new PreviewData()));
+  QCOMPARE(previewData->getPreviewData().size(), 0);
+
+  layout->setPreviewEnabled(true);
+  QVERIFY(layout->documentSize().height() > 0);
+}
+
+void TestMarkdownFolding::testCursorWidthPaintOnly() {
+  QTextDocument doc(QString(120, QLatin1Char('x')) + QStringLiteral("\nfolded\nlast"));
+  doc.setTextWidth(120);
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  doc.findBlockByNumber(1).setVisible(false);
+  layout->relayout();
+
+  QVector<QPair<int, int>> lineBreaks;
+  QTextBlock block = doc.firstBlock();
+  for (int i = 0; i < block.layout()->lineCount(); ++i) {
+    const QTextLine line = block.layout()->lineAt(i);
+    lineBreaks.append(qMakePair(line.textStart(), line.textLength()));
+  }
+
+  QVector<QRectF> blockRects;
+  for (block = doc.firstBlock(); block.isValid(); block = block.next()) {
+    blockRects.append(BlockLayoutData::get(block)->m_rect);
+  }
+  const QSizeF documentSize = layout->documentSize();
+
+  QSignalSpy updateSpy(layout, SIGNAL(update(QRectF)));
+  QSignalSpy sizeSpy(layout, SIGNAL(documentSizeChanged(QSizeF)));
+  const int newWidth = layout->cursorWidth() + 10;
+  layout->setCursorWidth(newWidth);
+  QCOMPARE(updateSpy.count(), 1);
+  QCOMPARE(sizeSpy.count(), 0);
+
+  updateSpy.clear();
+  layout->setCursorWidth(newWidth);
+  QCOMPARE(updateSpy.count(), 0);
+  QCOMPARE(sizeSpy.count(), 0);
+
+  layout->relayout();
+  QCOMPARE(sizeSpy.count(), 0);
+  QCOMPARE(layout->documentSize(), documentSize);
+
+  QVector<QPair<int, int>> newLineBreaks;
+  block = doc.firstBlock();
+  for (int i = 0; i < block.layout()->lineCount(); ++i) {
+    const QTextLine line = block.layout()->lineAt(i);
+    newLineBreaks.append(qMakePair(line.textStart(), line.textLength()));
+  }
+  QCOMPARE(newLineBreaks, lineBreaks);
+
+  int blockNumber = 0;
+  for (block = doc.firstBlock(); block.isValid(); block = block.next(), ++blockNumber) {
+    QCOMPARE(BlockLayoutData::get(block)->m_rect, blockRects.at(blockNumber));
+  }
+}
+
+void TestMarkdownFolding::testExactHitTesting() {
+  QTextDocument doc(QStringLiteral("Exact hit text"));
+  doc.setTextWidth(300);
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setLeadingSpaceOfLine(8.5);
+  layout->relayout();
+
+  const QTextBlock block = doc.firstBlock();
+  const QTextLine line = block.layout()->lineAt(0);
+  const QRectF textRect = line.naturalTextRect();
+  const qreal blockTop = BlockLayoutData::get(block)->top();
+  const QPointF interior(textRect.center().x(), blockTop + textRect.center().y());
+  QVERIFY(layout->hitTest(interior, Qt::ExactHit) >= block.position());
+
+  const QVector<QPointF> outsidePoints = {
+      QPointF(textRect.left() - 2, blockTop + textRect.center().y()),
+      QPointF(textRect.right() + 2, blockTop + textRect.center().y()),
+      QPointF(textRect.center().x(), blockTop + line.naturalTextRect().top() / 2)};
+  for (const auto &point : outsidePoints) {
+    QCOMPARE(layout->hitTest(point, Qt::ExactHit), -1);
+    QVERIFY(layout->hitTest(point, Qt::FuzzyHit) >= 0);
+  }
+}
+
+// A click in the leading space above a line must still honor the x coordinate
+// instead of collapsing to the start of the block.
+void TestMarkdownFolding::testFuzzyHitInLeadingSpace() {
+  QTextDocument doc(QStringLiteral("Leading space hit testing"));
+  doc.setTextWidth(400);
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setLeadingSpaceOfLine(6);
+  layout->relayout();
+
+  const QTextBlock block = doc.firstBlock();
+  const QTextLine line = block.layout()->lineAt(0);
+  const QRectF lr = line.naturalTextRect();
+  QVERIFY(lr.top() > 0);
+
+  const qreal blockTop = BlockLayoutData::get(block)->top();
+  const qreal localX = lr.center().x();
+  // Vertically inside the leading space, above the line's natural text rect.
+  const QPointF point(localX, blockTop + lr.top() / 2);
+
+  const int expected =
+      block.position() + line.xToCursor(localX, QTextLine::CursorBetweenCharacters);
+  QVERIFY(expected > block.position());
+  QCOMPARE(layout->hitTest(point, Qt::FuzzyHit), expected);
+}
+
+// A click in the gap between two wrapped lines must resolve horizontally within
+// the nearest line instead of returning the line boundary.
+void TestMarkdownFolding::testFuzzyHitInWrappedLineGap() {
+  QTextDocument doc(QString(160, QLatin1Char('x')));
+  doc.setTextWidth(120);
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setLeadingSpaceOfLine(6);
+  layout->relayout();
+
+  const QTextBlock block = doc.firstBlock();
+  QTextLayout *textLayout = block.layout();
+  QVERIFY(textLayout->lineCount() >= 2);
+
+  const QTextLine firstLine = textLayout->lineAt(0);
+  const QTextLine secondLine = textLayout->lineAt(1);
+  const QRectF secondRect = secondLine.naturalTextRect();
+  // The leading space opens a real gap between consecutive wrapped lines.
+  QVERIFY(secondRect.top() > firstLine.naturalTextRect().bottom());
+
+  const qreal blockTop = BlockLayoutData::get(block)->top();
+  const qreal localX = secondRect.center().x();
+  // Just above the second line, inside the inter-line gap.
+  const QPointF point(localX, blockTop + secondRect.top() - 0.25);
+
+  const int expected =
+      block.position() + secondLine.xToCursor(localX, QTextLine::CursorBetweenCharacters);
+  QVERIFY(expected > block.position() + secondLine.textStart());
+  QCOMPARE(layout->hitTest(point, Qt::FuzzyHit), expected);
+}
+
+// A click below every line of a block, such as the block preview image area,
+// keeps the historical end-of-block behavior.
+void TestMarkdownFolding::testFuzzyHitBelowLastLine() {
+  QTextDocument doc(QStringLiteral("Below the last line"));
+  doc.setTextWidth(400);
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setLeadingSpaceOfLine(6);
+  layout->relayout();
+
+  const QTextBlock block = doc.firstBlock();
+  QTextLayout *textLayout = block.layout();
+  const QTextLine lastLine = textLayout->lineAt(textLayout->lineCount() - 1);
+  const QRectF lr = lastLine.naturalTextRect();
+
+  const qreal blockTop = BlockLayoutData::get(block)->top();
+  const QPointF point(lr.center().x(), blockTop + lr.bottom() + 5);
+
+  const int expected = block.position() + lastLine.textStart() + lastLine.textLength();
+  QCOMPARE(layout->hitTest(point, Qt::FuzzyHit), expected);
+}
+
+// Without leading space consecutive lines are tightly packed. This is a
+// non-regression guard: a point exactly on a line's top edge belongs to that
+// line, not to the preceding one.
+void TestMarkdownFolding::testFuzzyHitAtLineBoundary() {
+  QTextDocument doc(QString(160, QLatin1Char('x')));
+  doc.setTextWidth(120);
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setLeadingSpaceOfLine(0);
+  layout->relayout();
+
+  const QTextBlock block = doc.firstBlock();
+  QTextLayout *textLayout = block.layout();
+  QVERIFY(textLayout->lineCount() >= 2);
+
+  const QTextLine secondLine = textLayout->lineAt(1);
+  const QRectF secondRect = secondLine.naturalTextRect();
+  QVERIFY(secondRect.top() >= textLayout->lineAt(0).naturalTextRect().bottom());
+
+  const qreal blockTop = BlockLayoutData::get(block)->top();
+  const qreal localX = secondRect.center().x();
+  const QPointF point(localX, blockTop + secondRect.top());
+
+  const int expected =
+      block.position() + secondLine.xToCursor(localX, QTextLine::CursorBetweenCharacters);
+  QVERIFY(expected > block.position() + secondLine.textStart());
+  QCOMPARE(layout->hitTest(point, Qt::FuzzyHit), expected);
+}
+
+// Inside plain leading space the nearest line wins, including the line above.
+void TestMarkdownFolding::testFuzzyHitNearerPreviousLine() {
+  QTextDocument doc(QString(160, QLatin1Char('x')));
+  doc.setTextWidth(120);
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setLeadingSpaceOfLine(6);
+  layout->relayout();
+
+  const QTextBlock block = doc.firstBlock();
+  QTextLayout *textLayout = block.layout();
+  QVERIFY(textLayout->lineCount() >= 2);
+
+  const QTextLine firstLine = textLayout->lineAt(0);
+  const QRectF firstRect = firstLine.naturalTextRect();
+  const QRectF secondRect = textLayout->lineAt(1).naturalTextRect();
+  QVERIFY(secondRect.top() > firstRect.bottom());
+
+  const qreal blockTop = BlockLayoutData::get(block)->top();
+  const qreal localX = firstRect.center().x();
+  // Just below the first line, i.e. nearer to it than to the second one.
+  const QPointF point(localX, blockTop + firstRect.bottom() + 0.25);
+
+  const int expected =
+      block.position() + firstLine.xToCursor(localX, QTextLine::CursorBetweenCharacters);
+  QVERIFY(expected < block.position() + firstLine.textStart() + firstLine.textLength());
+  QCOMPARE(layout->hitTest(point, Qt::FuzzyHit), expected);
+}
+
+// A point above the whole document keeps resolving to the document start so
+// that dragging a selection past the top still selects to the beginning.
+void TestMarkdownFolding::testFuzzyHitAboveDocument() {
+  QTextDocument doc(generateLines(5));
+  doc.setTextWidth(400);
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setLeadingSpaceOfLine(6);
+  layout->relayout();
+
+  const QTextBlock block = doc.firstBlock();
+  const QRectF lr = block.layout()->lineAt(0).naturalTextRect();
+  const QPointF point(lr.center().x(), -20);
+
+  QCOMPARE(layout->hitTest(point, Qt::FuzzyHit), block.position());
+}
+
+// The space an inline preview image occupies belongs to the line owning the
+// image, not to the preceding line, however close the point is to the latter.
+void TestMarkdownFolding::testFuzzyHitInInlinePreviewGap() {
+  QTextDocument doc(QString(220, QLatin1Char('x')));
+  doc.setTextWidth(120);
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setLeadingSpaceOfLine(6);
+  layout->relayout();
+
+  QTextBlock block = doc.firstBlock();
+  QTextLayout *textLayout = block.layout();
+  QVERIFY(textLayout->lineCount() >= 3);
+
+  // Anchor the preview on the second visual line so that the image space is
+  // laid out above a line that has a predecessor.
+  const int start = textLayout->lineAt(1).textStart() + 1;
+  const int end = textLayout->lineAt(2).textStart() + 2;
+  BlockPreviewData::get(block)->insert(new PreviewData(PreviewData::ImageLink, 1, start, end, 0,
+                                                       true, QStringLiteral("inline-gap-image"),
+                                                       QSize(100, 60), 0));
+  layout->setPreviewEnabled(true);
+
+  block = doc.firstBlock();
+  textLayout = block.layout();
+  QVERIFY(textLayout->lineCount() >= 3);
+
+  const QTextLine firstLine = textLayout->lineAt(0);
+  const QTextLine imageLine = textLayout->lineAt(1);
+  const QRectF firstRect = firstLine.naturalTextRect();
+  const QRectF imageRect = imageLine.naturalTextRect();
+  // The gap holds the image and is therefore wider than plain leading space.
+  QVERIFY(imageRect.top() - firstRect.bottom() > layout->getLeadingSpaceOfLine() + 1);
+
+  const qreal blockTop = BlockLayoutData::get(block)->top();
+  const qreal localX = imageRect.center().x();
+  // Deep inside the image area but much nearer to the preceding line.
+  const QPointF point(localX, blockTop + firstRect.bottom() + 1);
+
+  const int expected =
+      block.position() + imageLine.xToCursor(localX, QTextLine::CursorBetweenCharacters);
+  const int previousLineResult =
+      block.position() + firstLine.xToCursor(localX, QTextLine::CursorBetweenCharacters);
+  QVERIFY(expected != previousLineResult);
+  QCOMPARE(layout->hitTest(point, Qt::FuzzyHit), expected);
+}
+
+// ---------------------------------------------------------------------------
+// Interactive preview widget reservations.
+// ---------------------------------------------------------------------------
+
+static TextDocumentLayout::WidgetPreviewSpec makeSpec(quint64 p_id, int p_start, int p_end,
+                                                      qreal p_width, qreal p_height,
+                                                      PreviewPlacement p_placement) {
+  TextDocumentLayout::WidgetPreviewSpec spec;
+  spec.m_id = p_id;
+  spec.m_startPos = p_start;
+  spec.m_endPos = p_end;
+  spec.m_width = p_width;
+  spec.m_height = p_height;
+  spec.m_placement = p_placement;
+  return spec;
+}
+
+void TestMarkdownFolding::testWidgetPreviewBlockReservation() {
+  QTextDocument doc(generateLines(5));
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setPreviewEnabled(true);
+
+  const QTextBlock block = doc.findBlockByNumber(1);
+  const qreal plainHeight = BlockLayoutData::get(block)->m_rect.height();
+  const qreal plainDocHeight = layout->documentSize().height();
+
+  QSignalSpy geometrySpy(layout, &TextDocumentLayout::widgetPreviewGeometryChanged);
+
+  QVector<TextDocumentLayout::WidgetPreviewSpec> specs;
+  specs.append(makeSpec(7, block.position(), block.position() + block.length() - 1, 120, 40,
+                        PreviewPlacement::BlockAfterSource));
+  layout->setWidgetPreviews(specs);
+
+  auto info = BlockLayoutData::get(block);
+  QCOMPARE(info->m_widgets.size(), 1);
+  QCOMPARE(info->m_widgets.first().m_id, quint64(7));
+  QCOMPARE(info->m_widgets.first().m_rect.height(), 40.0);
+  QCOMPARE(info->m_widgets.first().m_rect.width(), 120.0);
+  QVERIFY(info->m_rect.height() > plainHeight + 39);
+  QVERIFY(layout->documentSize().height() > plainDocHeight + 39);
+  QVERIFY(geometrySpy.count() >= 1);
+
+  // The published rect is in document coordinates.
+  const QRectF docRect = layout->widgetPreviewRect(7);
+  QVERIFY(!docRect.isNull());
+  QCOMPARE(docRect.top(), info->top() + info->m_widgets.first().m_rect.top());
+  QCOMPARE(docRect.left(), doc.documentMargin());
+
+  // Removing the reservation restores the original geometry.
+  layout->setWidgetPreviews(QVector<TextDocumentLayout::WidgetPreviewSpec>());
+  QVERIFY(BlockLayoutData::get(block)->m_widgets.isEmpty());
+  QCOMPARE(BlockLayoutData::get(block)->m_rect.height(), plainHeight);
+  QVERIFY(layout->widgetPreviewRect(7).isNull());
+}
+
+void TestMarkdownFolding::testWidgetPreviewStacking() {
+  QTextDocument doc(QStringLiteral("alpha beta gamma\nnext"));
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setPreviewEnabled(true);
+
+  const QTextBlock block = doc.firstBlock();
+  QVector<TextDocumentLayout::WidgetPreviewSpec> specs;
+  // Submitted out of order on purpose: stacking must follow the source start.
+  specs.append(makeSpec(2, block.position() + 6, block.position() + 10, 60, 30,
+                        PreviewPlacement::BlockAfterSource));
+  specs.append(makeSpec(1, block.position(), block.position() + 5, 60, 20,
+                        PreviewPlacement::BlockAfterSource));
+  layout->setWidgetPreviews(specs);
+
+  auto info = BlockLayoutData::get(block);
+  QCOMPARE(info->m_widgets.size(), 2);
+  QCOMPARE(info->m_widgets.at(0).m_id, quint64(1));
+  QCOMPARE(info->m_widgets.at(1).m_id, quint64(2));
+  QVERIFY(info->m_widgets.at(0).m_rect.bottom() <= info->m_widgets.at(1).m_rect.top());
+}
+
+void TestMarkdownFolding::testWidgetPreviewGeometryWithEqualDocumentSize() {
+  QTextDocument doc(generateLines(6));
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setPreviewEnabled(true);
+
+  const QTextBlock first = doc.findBlockByNumber(1);
+  const QTextBlock second = doc.findBlockByNumber(3);
+
+  QVector<TextDocumentLayout::WidgetPreviewSpec> specs;
+  specs.append(makeSpec(1, first.position(), first.position() + first.length() - 1, 50, 20,
+                        PreviewPlacement::BlockAfterSource));
+  specs.append(makeSpec(2, second.position(), second.position() + second.length() - 1, 50, 40,
+                        PreviewPlacement::BlockAfterSource));
+  layout->setWidgetPreviews(specs);
+
+  const QSizeF sizeBefore = layout->documentSize();
+  const QRectF firstBefore = layout->widgetPreviewRect(1);
+
+  QSignalSpy sizeSpy(layout, SIGNAL(documentSizeChanged(QSizeF)));
+  QSignalSpy geometrySpy(layout, &TextDocumentLayout::widgetPreviewGeometryChanged);
+
+  // Swap the heights: the total document size is unchanged but the geometry of
+  // both widgets moved.
+  specs[0].m_height = 40;
+  specs[1].m_height = 20;
+  layout->setWidgetPreviews(specs);
+
+  QCOMPARE(layout->documentSize(), sizeBefore);
+  QCOMPARE(sizeSpy.count(), 0);
+  QCOMPARE(geometrySpy.count(), 1);
+  QVERIFY(layout->widgetPreviewRect(1) != firstBefore);
+}
+
+// A block can lose its layout offset when a relayout walk missed it - which is
+// what a document mutation performed from inside a layout pass produces. The
+// document size pass must repair the whole offset chain instead of aborting on
+// it.
+void TestMarkdownFolding::testDocumentSizeRepairsAMissingBlockOffset() {
+  QTextDocument doc(generateLines(8));
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setPreviewEnabled(true);
+
+  const QTextBlock anchorBlock = doc.findBlockByNumber(5);
+  QVector<TextDocumentLayout::WidgetPreviewSpec> specs;
+  specs.append(makeSpec(1, anchorBlock.position(),
+                        anchorBlock.position() + anchorBlock.length() - 1, 50, 30,
+                        PreviewPlacement::BlockAfterSource));
+  layout->setWidgetPreviews(specs);
+  layout->relayout();
+
+  const qreal heightBefore = layout->documentSize().height();
+  QVERIFY(!layout->widgetPreviewRect(1).isNull());
+
+  // Knock a middle block off the offset chain, exactly as a merged nested edit
+  // does, and force a document size recomputation through a discontinuous
+  // relayout of an unrelated block.
+  QTextBlock damaged = doc.findBlockByNumber(3);
+  BlockLayoutData::get(damaged)->reset();
+
+  OrderedIntSet blocks;
+  blocks.insert(1, QMapDummyValue());
+  layout->relayout(blocks);
+
+  // Every block has an offset again, and the offsets are monotonic.
+  qreal previousBottom = -1;
+  for (QTextBlock blk = doc.firstBlock(); blk.isValid(); blk = blk.next()) {
+    const auto info = BlockLayoutData::get(blk);
+    QVERIFY2(
+        info->hasOffset(),
+        qPrintable(QStringLiteral("block %1 was left without an offset").arg(blk.blockNumber())));
+    QVERIFY(info->m_offset >= previousBottom - 1e-6);
+    previousBottom = info->bottom();
+  }
+
+  // The height was sampled from the repaired last block, not from the stale
+  // one the pass started with.
+  QCOMPARE(layout->documentSize().height(), BlockLayoutData::get(doc.lastBlock())->bottom());
+  QCOMPARE(layout->documentSize().height(), heightBefore);
+
+  // And the widget geometry map is complete again.
+  QVERIFY(!layout->widgetPreviewRect(1).isNull());
+}
+
+// Every widgetPreviewGeometryChanged emission has to be observable as "the
+// layout is mid-pass", including the setWidgetPreviews() path whose spec delta
+// is empty and which therefore calls the emitter directly.
+void TestMarkdownFolding::testLayoutIsBusyDuringWidgetGeometryEmission() {
+  QTextDocument doc(generateLines(6));
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setPreviewEnabled(true);
+
+  int emissions = 0;
+  int busyEmissions = 0;
+  QObject::connect(layout, &TextDocumentLayout::widgetPreviewGeometryChanged, layout, [&]() {
+    ++emissions;
+    if (layout->isBusy()) {
+      ++busyEmissions;
+    }
+  });
+
+  QVERIFY(!layout->isBusy());
+
+  const QTextBlock block = doc.findBlockByNumber(2);
+  QVector<TextDocumentLayout::WidgetPreviewSpec> specs;
+  specs.append(makeSpec(1, block.position(), block.position() + block.length() - 1, 50, 20,
+                        PreviewPlacement::BlockAfterSource));
+  layout->setWidgetPreviews(specs);
+  QVERIFY(emissions > 0);
+
+  // The empty-delta path: the added spec resolves to no block at all, so
+  // setWidgetPreviews() never relayouts anything and calls the emitter
+  // directly, outside every other pass scope. Guarding the emitter itself is
+  // what keeps the invariant below true regardless of the caller.
+  specs.append(makeSpec(2, doc.characterCount() + 100, doc.characterCount() + 140, 50, 20,
+                        PreviewPlacement::BlockAfterSource));
+  layout->setWidgetPreviews(specs);
+
+  // A relayout emits from a third scope again.
+  layout->relayout();
+
+  QVERIFY(emissions > 0);
+  QCOMPARE(busyEmissions, emissions);
+  QVERIFY(!layout->isBusy());
+}
+
+void TestMarkdownFolding::testWidgetPreviewFolding() {
+  QTextDocument doc(generateLines(10));
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setPreviewEnabled(true);
+
+  TextFolding folding(&doc);
+
+  const QTextBlock block = doc.findBlockByNumber(5);
+  QVector<TextDocumentLayout::WidgetPreviewSpec> specs;
+  specs.append(makeSpec(3, block.position(), block.position() + block.length() - 1, 50, 30,
+                        PreviewPlacement::BlockAfterSource));
+  layout->setWidgetPreviews(specs);
+  QVERIFY(!layout->widgetPreviewRect(3).isNull());
+
+  TextBlockRange range(doc.findBlockByNumber(4), doc.findBlockByNumber(7));
+  auto id = folding.newFoldingRange(range, TextFolding::Persistent);
+  QVERIFY(id != TextFolding::InvalidRangeId);
+  folding.toggleRange(id);
+
+  // The anchoring block became invisible: the widget must disappear without
+  // being forgotten.
+  QVERIFY(layout->widgetPreviewRect(3).isNull());
+  QCOMPARE(layout->widgetPreviews().size(), 1);
+
+  folding.toggleRange(id);
+  QVERIFY(!layout->widgetPreviewRect(3).isNull());
+}
+
+void TestMarkdownFolding::testWidgetPreviewWidthClamped() {
+  QTextDocument doc(QStringLiteral("short"));
+  doc.setTextWidth(200);
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setPreviewEnabled(true);
+
+  const qreal available = layout->availableContentWidth();
+  QVERIFY(available > 0);
+  QVERIFY(available < 200);
+
+  const QTextBlock block = doc.firstBlock();
+  QVector<TextDocumentLayout::WidgetPreviewSpec> specs;
+  specs.append(makeSpec(9, block.position(), block.position() + block.length() - 1, 10000, 25,
+                        PreviewPlacement::BlockAfterSource));
+  layout->setWidgetPreviews(specs);
+
+  auto info = BlockLayoutData::get(block);
+  QCOMPARE(info->m_widgets.size(), 1);
+  QCOMPARE(info->m_widgets.first().m_rect.width(), available);
+}
+
+void TestMarkdownFolding::testWidgetPreviewInlineBand() {
+  QTextDocument doc(QStringLiteral("alpha beta gamma delta"));
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setPreviewEnabled(true);
+
+  const QTextBlock block = doc.firstBlock();
+  const qreal plainHeight = BlockLayoutData::get(block)->m_rect.height();
+
+  QVector<TextDocumentLayout::WidgetPreviewSpec> specs;
+  specs.append(makeSpec(4, block.position() + 6, block.position() + 10, 40, 35,
+                        PreviewPlacement::InlineAboveLine));
+  layout->setWidgetPreviews(specs);
+
+  auto info = BlockLayoutData::get(block);
+  QCOMPARE(info->m_widgets.size(), 1);
+  QCOMPARE(info->m_widgets.first().m_rect.height(), 35.0);
+  // The band sits above the visual line and matches the source span.
+  // Widget rects are stored in block coordinates, i.e. the document margin is
+  // already baked in, exactly like the line positions.
+  const QTextLine line = block.layout()->lineAt(0);
+  QVERIFY(info->m_widgets.first().m_rect.bottom() <= line.y() + 1e-6);
+  QVERIFY(realNear(info->m_widgets.first().m_rect.left(), line.cursorToX(6)));
+  QVERIFY(realNear(info->m_widgets.first().m_rect.width(), line.cursorToX(10) - line.cursorToX(6)));
+  QVERIFY(info->m_rect.height() > plainHeight + 34);
+  QCOMPARE(layout->widgetPreviewRect(4).left(), line.cursorToX(6));
+}
+
+void TestMarkdownFolding::testWidgetPreviewBlockMarker() {
+  QTextDocument doc(generateLines(4));
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setPreviewEnabled(true);
+
+  const QTextBlock block = doc.findBlockByNumber(1);
+  QVERIFY(BlockLayoutData::get(block)->m_markers.isEmpty());
+
+  QVector<TextDocumentLayout::WidgetPreviewSpec> specs;
+  specs.append(makeSpec(11, block.position(), block.position() + block.length() - 1, 120, 40,
+                        PreviewPlacement::BlockAfterSource));
+  layout->setWidgetPreviews(specs);
+
+  // A block-placed widget only gets the vertical left-edge marker, exactly like
+  // a block-placed painted image.
+  auto info = BlockLayoutData::get(block);
+  QCOMPARE(info->m_markers.size(), 1);
+  const auto &mk = info->m_markers.first();
+  QCOMPARE(mk.m_start.x(), doc.documentMargin() - 1);
+  QCOMPARE(mk.m_end.x(), doc.documentMargin() - 1);
+  QCOMPARE(mk.m_start.y(), 0.0);
+  QCOMPARE(mk.m_end.y(), info->m_rect.height());
+
+  layout->setWidgetPreviews(QVector<TextDocumentLayout::WidgetPreviewSpec>());
+  QVERIFY(BlockLayoutData::get(block)->m_markers.isEmpty());
+}
+
+void TestMarkdownFolding::testWidgetPreviewInlineMarker() {
+  QTextDocument doc(QStringLiteral("alpha beta gamma delta\ntail"));
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setPreviewEnabled(true);
+
+  const QTextBlock block = doc.firstBlock();
+  const QTextBlock nextBlock = doc.findBlockByNumber(1);
+
+  // Baseline: geometry of the block before any band is reserved.
+  const qreal plainHeight = BlockLayoutData::get(block)->m_rect.height();
+  const qreal plainLineY = block.layout()->lineAt(0).y();
+
+  // A widget in a later block gives the downstream document geometry a witness.
+  QVector<TextDocumentLayout::WidgetPreviewSpec> specs;
+  specs.append(makeSpec(6, nextBlock.position(), nextBlock.position() + nextBlock.length() - 1, 50,
+                        20, PreviewPlacement::BlockAfterSource));
+  layout->setWidgetPreviews(specs);
+  const qreal downstreamTopBefore = layout->widgetPreviewRect(6).top();
+
+  specs.append(makeSpec(4, block.position() + 6, block.position() + 10, 40, 35,
+                        PreviewPlacement::InlineAboveLine));
+  layout->setWidgetPreviews(specs);
+
+  auto info = BlockLayoutData::get(block);
+  QCOMPARE(info->m_widgets.size(), 1);
+  const QRectF widgetRect = info->m_widgets.first().m_rect;
+
+  // c_widgetPreviewPadding == 2, c_markerThickness == 2. The band itself and
+  // its two paddings are the pre-change reservation; the markers add exactly
+  // c_markerThickness * 2 on top of it.
+  const qreal padding = 2;
+  const qreal markerThickness = 2;
+  const qreal bandReservation = padding + 35 + padding;
+  const qreal markerReservation = markerThickness * 2;
+
+  // The widget rect itself is untouched by the marker: it still sits directly
+  // under the padding that opens the band.
+  QVERIFY(realNear(widgetRect.top(), plainLineY + padding));
+  QCOMPARE(widgetRect.height(), 35.0);
+  QCOMPARE(info->m_rect.height(), plainHeight + bandReservation + markerReservation);
+
+  // One horizontal marker under the band plus the vertical left-edge one.
+  QCOMPARE(info->m_markers.size(), 2);
+  const auto &horizontal = info->m_markers.at(0);
+  const auto &vertical = info->m_markers.at(1);
+
+  QVERIFY(realNear(horizontal.m_start.x(), widgetRect.left()));
+  QVERIFY(realNear(horizontal.m_end.x(), widgetRect.right()));
+  QVERIFY(realNear(horizontal.m_start.y(), horizontal.m_end.y()));
+  QVERIFY(realNear(horizontal.m_start.y(), widgetRect.bottom() + padding + markerThickness));
+
+  QCOMPARE(vertical.m_start.x(), doc.documentMargin() - 1);
+  QCOMPARE(vertical.m_end.y(), info->m_rect.height());
+
+  // The text line moved down by the whole reservation, so the dashes never
+  // overlap the text.
+  const QTextLine line = block.layout()->lineAt(0);
+  QVERIFY(realNear(line.y(), plainLineY + bandReservation + markerReservation));
+  QVERIFY(realNear(line.y(), horizontal.m_start.y() + markerThickness));
+
+  // The measured inline width still matches the reserved band.
+  QVERIFY(realNear(layout->inlinePlacementWidth(block.position() + 6, block.position() + 10),
+                   widgetRect.width()));
+  QVERIFY(realNear(layout->widgetPreviewRect(4).width(), widgetRect.width()));
+
+  // And everything below the block shifted by exactly the same amount.
+  QVERIFY(realNear(layout->widgetPreviewRect(6).top(),
+                   downstreamTopBefore + bandReservation + markerReservation));
+}
+
+// A block-level painted image and an inline widget band can coexist: the widget
+// markers must not travel through the p_markers vector, which
+// finishBlockLayout() asserts to be empty in that case.
+void TestMarkdownFolding::testWidgetMarkerCoexistsWithBlockImage() {
+  QTextDocument doc(QStringLiteral("![img](a.png)\ntail"));
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+
+  const QTextBlock block = doc.firstBlock();
+  auto previewData = BlockPreviewData::get(block);
+  previewData->insert(new PreviewData(PreviewData::ImageLink, 1, 0, block.length() - 1, 0, false,
+                                      QStringLiteral("coexist-image"), QSize(80, 60), 0));
+  layout->setPreviewEnabled(true);
+  QCOMPARE(BlockLayoutData::get(block)->m_images.size(), 1);
+
+  QVector<TextDocumentLayout::WidgetPreviewSpec> specs;
+  specs.append(makeSpec(21, block.position() + 2, block.position() + 5, 30, 20,
+                        PreviewPlacement::InlineAboveLine));
+  layout->setWidgetPreviews(specs);
+
+  auto info = BlockLayoutData::get(block);
+  QCOMPARE(info->m_images.size(), 1);
+  QCOMPARE(info->m_widgets.size(), 1);
+  // The inline widget marker plus the vertical one.
+  QCOMPARE(info->m_markers.size(), 2);
+  QVERIFY(realNear(info->m_markers.at(0).m_start.y(), info->m_markers.at(0).m_end.y()));
+  QCOMPARE(info->m_markers.at(1).m_start.x(), doc.documentMargin() - 1);
+}
+
+void TestMarkdownFolding::testWidgetMarkerRemovedWhenPreviewDisabled() {
+  QTextDocument doc(QStringLiteral("alpha beta gamma delta"));
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setPreviewEnabled(true);
+
+  const QTextBlock block = doc.firstBlock();
+  const qreal plainHeight = BlockLayoutData::get(block)->m_rect.height();
+
+  QVector<TextDocumentLayout::WidgetPreviewSpec> specs;
+  specs.append(makeSpec(5, block.position() + 6, block.position() + 10, 40, 35,
+                        PreviewPlacement::InlineAboveLine));
+  layout->setWidgetPreviews(specs);
+  QCOMPARE(BlockLayoutData::get(block)->m_markers.size(), 2);
+
+  layout->setPreviewEnabled(false);
+  auto info = BlockLayoutData::get(block);
+  QVERIFY(info->m_markers.isEmpty());
+  QVERIFY(info->m_widgets.isEmpty());
+  QCOMPARE(info->m_rect.height(), plainHeight);
+}
+
+// Painting and hit testing reach the layout through blockBoundingRect(), which
+// repairs a block that lost its layout and shifts every following offset. The
+// widget geometry has to be republished from there too, otherwise the previews
+// keep being drawn at their pre-repair position, on top of the source text.
+void TestMarkdownFolding::testWidgetGeometryFollowsOffsetRepairFromPainting() {
+  QTextDocument doc(generateLines(8));
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setPreviewEnabled(true);
+
+  const QTextBlock anchor = doc.findBlockByNumber(6);
+  QVector<TextDocumentLayout::WidgetPreviewSpec> specs;
+  specs.append(makeSpec(1, anchor.position(), anchor.position() + anchor.length() - 1, 80, 30,
+                        PreviewPlacement::BlockAfterSource));
+  layout->setWidgetPreviews(specs);
+
+  const QRectF before = layout->widgetPreviewRect(1);
+  QVERIFY(!before.isNull());
+
+  // Fold an earlier block and drop its layout, which is the state a fold
+  // followed by a repaint leaves behind. Nothing here goes through
+  // documentChanged(), so no document size pass runs.
+  QTextBlock hidden = doc.findBlockByNumber(2);
+  hidden.setVisible(false);
+  BlockLayoutData::get(hidden)->reset();
+
+  // The repaint asks for the bounding rect of that very block.
+  layout->blockBoundingRect(hidden);
+
+  auto info = BlockLayoutData::get(anchor);
+  QVERIFY(info->hasOffset());
+  QCOMPARE(info->m_widgets.size(), 1);
+
+  // The anchor really moved up, so this is not a vacuous comparison.
+  const QRectF expected = info->m_widgets.first().m_rect.translated(0, info->m_offset);
+  QVERIFY(expected.top() < before.top());
+  QCOMPARE(layout->widgetPreviewRect(1), expected);
+}
+
+void TestMarkdownFolding::testClaimSuppressesStaticPreview() {
+  QTextDocument doc(QStringLiteral("![img](a.png)\ntail"));
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+
+  const QTextBlock block = doc.firstBlock();
+  const qreal plainHeight = BlockLayoutData::get(block)->m_rect.height();
+
+  auto previewData = BlockPreviewData::get(block);
+  previewData->insert(new PreviewData(PreviewData::ImageLink, 1, 0, block.length() - 1, 0, false,
+                                      QStringLiteral("claim-image"), QSize(80, 60), 0));
+  layout->setPreviewEnabled(true);
+
+  const qreal paintedHeight = BlockLayoutData::get(block)->m_rect.height();
+  QVERIFY(paintedHeight > plainHeight + 59);
+  QCOMPARE(BlockLayoutData::get(block)->m_images.size(), 1);
+
+  // A claim of a different type must not suppress this painted image.
+  QVector<TextDocumentLayout::PreviewClaim> claims;
+  TextDocumentLayout::PreviewClaim claim;
+  claim.m_startPos = block.position();
+  claim.m_endPos = block.position() + block.length() - 1;
+  claim.m_type = PreviewElementType::Table;
+  claims.append(claim);
+  layout->setPreviewClaims(claims);
+
+  QCOMPARE(BlockLayoutData::get(block)->m_rect.height(), paintedHeight);
+  QCOMPARE(BlockLayoutData::get(block)->m_images.size(), 1);
+
+  // Claiming the element with a matching type suppresses exactly that painted
+  // preview.
+  claims[0].m_type = PreviewElementType::Image;
+  layout->setPreviewClaims(claims);
+
+  QCOMPARE(BlockLayoutData::get(block)->m_rect.height(), plainHeight);
+  QVERIFY(BlockLayoutData::get(block)->m_images.isEmpty());
+
+  // Removing the claim restores the painted fallback immediately.
+  layout->setPreviewClaims(QVector<TextDocumentLayout::PreviewClaim>());
+  QCOMPARE(BlockLayoutData::get(block)->m_rect.height(), paintedHeight);
+  QCOMPARE(BlockLayoutData::get(block)->m_images.size(), 1);
+}
+
+void TestMarkdownFolding::testClaimIsTypeScoped() {
+  // An image nested in a claimed table range keeps its painted preview: the
+  // table widget renders the source, not the image.
+  QTextDocument doc(QStringLiteral("| ![img](a.png) |\n| --- |\ntail"));
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+
+  const QTextBlock block = doc.firstBlock();
+  const qreal plainHeight = BlockLayoutData::get(block)->m_rect.height();
+
+  auto previewData = BlockPreviewData::get(block);
+  previewData->insert(new PreviewData(PreviewData::ImageLink, 1, 2, 15, 0, true,
+                                      QStringLiteral("nested-image"), QSize(40, 30), 0));
+  layout->setPreviewEnabled(true);
+  const qreal paintedHeight = BlockLayoutData::get(block)->m_rect.height();
+  QVERIFY(paintedHeight > plainHeight);
+
+  const QTextBlock lastRow = doc.findBlockByNumber(1);
+  QVector<TextDocumentLayout::PreviewClaim> claims;
+  TextDocumentLayout::PreviewClaim claim;
+  claim.m_startPos = block.position();
+  claim.m_endPos = lastRow.position() + lastRow.length() - 1;
+  claim.m_type = PreviewElementType::Table;
+  claims.append(claim);
+  layout->setPreviewClaims(claims);
+
+  QCOMPARE(BlockLayoutData::get(block)->m_rect.height(), paintedHeight);
+  QVERIFY(!BlockLayoutData::get(block)->m_images.isEmpty());
+}
+
+void TestMarkdownFolding::testSourceTextRectSharesWidgetCoordinates() {
+  QTextDocument doc(QStringLiteral("alpha beta gamma delta"));
+  DocumentResourceMgr resourceMgr;
+  auto *layout = new TextDocumentLayout(&doc, &resourceMgr);
+  doc.setDocumentLayout(layout);
+  layout->setPreviewEnabled(true);
+
+  const QTextBlock block = doc.firstBlock();
+  QVector<TextDocumentLayout::WidgetPreviewSpec> specs;
+  specs.append(makeSpec(11, block.position() + 6, block.position() + 10, 40, 20,
+                        PreviewPlacement::InlineAboveLine));
+  layout->setWidgetPreviews(specs);
+
+  // Both rectangles are documented as document coordinates and are handed to
+  // the same widget, so they must share the same origin.
+  const QRectF sourceRect = layout->sourceTextRect(block.position() + 6, block.position() + 10);
+  const QRectF widgetRect = layout->widgetPreviewRect(11);
+  QVERIFY(!sourceRect.isNull());
+  QVERIFY(!widgetRect.isNull());
+  QVERIFY(realNear(sourceRect.left(), widgetRect.left()));
+  QVERIFY(realNear(sourceRect.width(), widgetRect.width()));
+
+  // The width the widget is measured at is the width it is assigned.
+  QVERIFY(realNear(layout->inlinePlacementWidth(block.position() + 6, block.position() + 10),
+                   widgetRect.width()));
+}
+
+static TextDocumentLayout *makeConcealLayout(QTextDocument &p_doc,
+                                             DocumentResourceMgr &p_resourceMgr, QImage &p_device) {
+  QFont font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+  font.setPixelSize(24);
+  font.setKerning(false);
+  // Exact foreground/background pixel assertions must not depend on rasterizer coverage.
+  font.setStyleStrategy(QFont::NoAntialias);
+  p_doc.setDefaultFont(font);
+  p_doc.setTextWidth(1000);
+  auto *layout = new TextDocumentLayout(&p_doc, &p_resourceMgr);
+  p_doc.setDocumentLayout(layout);
+  layout->setPaintDevice(&p_device);
+  layout->relayout();
+  return layout;
+}
+
+static QImage renderConcealLayout(TextDocumentLayout *p_layout, const QImage &p_device,
+                                  QAbstractTextDocumentLayout::PaintContext p_context = {}) {
+  QImage image = p_device.copy();
+  image.fill(Qt::white);
+  p_context.clip = image.rect();
+  p_context.palette.setColor(QPalette::Text, Qt::black);
+  QPainter painter(&image);
+  p_layout->draw(&painter, p_context);
+  painter.end();
+  return image;
+}
+
+static bool saveConcealImage(const QImage &p_image, const QString &p_name) {
+  const QString directory = QString::fromLocal8Bit(qgetenv("VTE_CONCEAL_TEST_IMAGE_DIR"));
+  return directory.isEmpty() || p_image.save(QDir(directory).filePath(p_name));
+}
+
+static int countConcealColor(const QImage &p_image, const QRectF &p_rect, const QColor &p_color) {
+  const QRect rect = p_rect.toAlignedRect().intersected(p_image.rect());
+  int count = 0;
+  for (int y = rect.top(); y <= rect.bottom(); ++y) {
+    for (int x = rect.left(); x <= rect.right(); ++x) {
+      count += p_image.pixelColor(x, y) == p_color;
+    }
+  }
+  return count;
+}
+
+static QPointF concealCursorPoint(TextDocumentLayout *p_layout, const QTextBlock &p_block,
+                                  int p_position) {
+  const QTextLine line = p_block.layout()->lineForTextPosition(p_position);
+  return QPointF(line.cursorToX(p_position),
+                 p_layout->blockBoundingRect(p_block).top() + line.y() + line.height() / 2);
+}
+
+static QVector<int> concealCursorStops(QTextDocument &p_doc, QTextCursor::MoveOperation p_move,
+                                       bool p_backwards = false) {
+  QTextCursor cursor(&p_doc);
+  cursor.setPosition(p_backwards ? p_doc.characterCount() - 1 : 0);
+  QVector<int> positions{cursor.position()};
+  while (cursor.movePosition(p_move)) {
+    positions.append(cursor.position());
+  }
+  return positions;
+}
+
+void TestMarkdownFolding::testConcealLayout() {
+  const QString alphabet = QStringLiteral("abcdefghijklmnopqrstuvwxyz");
+  const QString source = QStringLiteral("before ") + alphabet + QStringLiteral(" after");
+  const QString compact = QStringLiteral("before abc\u00b7\u00b7\u00b7xyz after");
+  const int start = source.indexOf(alphabet);
+  const int end = start + alphabet.size();
+  const int hiddenStart = start + 3;
+  const int hiddenEnd = end - 3;
+  QImage device(1200, 900, QImage::Format_ARGB32_Premultiplied);
+  device.fill(Qt::white);
+  DocumentResourceMgr resources;
+  QTextDocument doc(source);
+  QTextDocument reference(compact);
+  auto *layout = makeConcealLayout(doc, resources, device);
+  auto *referenceLayout = makeConcealLayout(reference, resources, device);
+  QTextCharFormat syntax;
+  syntax.setForeground(QColor(20, 110, 30));
+  doc.firstBlock().layout()->setFormats({{start, end - start, syntax}});
+  layout->relayout();
+  const QRectF sourceTail = layout->sourceTextRect(end + 1, end + 6);
+  const QImage sourceImage = renderConcealLayout(layout, device);
+  const int revision = doc.revision();
+  const int blockRevision = doc.firstBlock().revision();
+  const int characterCount = doc.characterCount();
+  const bool undoAvailable = doc.isUndoAvailable();
+  const bool redoAvailable = doc.isRedoAvailable();
+
+  QTextCharFormat format;
+  const QColor foreground(25, 45, 220);
+  const QColor background(225, 235, 250);
+  format.setForeground(foreground);
+  format.setBackground(background);
+  layout->setConcealFormat(format);
+  layout->setConcealCursorPosition(-1);
+  reference.firstBlock().layout()->setFormats({{start, 9, format}});
+  referenceLayout->relayout();
+  const QRectF expectedTail = referenceLayout->sourceTextRect(start + 10, start + 15);
+  QSignalSpy changed(layout, &TextDocumentLayout::concealmentChanged);
+  bool emittedWhileBusy = false;
+  QRectF notifiedTail;
+  connect(layout, &TextDocumentLayout::concealmentChanged, this, [&]() {
+    emittedWhileBusy |= layout->isBusy();
+    notifiedTail = layout->sourceTextRect(end + 1, end + 6);
+  });
+
+  QVERIFY(layout->conceal(doc.firstBlock(), start, end));
+  QCOMPARE(changed.count(), 1);
+  QVERIFY(!emittedWhileBusy);
+  QCOMPARE(notifiedTail, expectedTail);
+  QCOMPARE(layout->sourceTextRect(end + 1, end + 6), expectedTail);
+  QVERIFY(expectedTail.left() < sourceTail.left());
+  QCOMPARE(concealCursorPoint(layout, doc.firstBlock(), end + 1),
+           concealCursorPoint(referenceLayout, reference.firstBlock(), start + 10));
+  QCOMPARE(doc.toPlainText(), source);
+  QCOMPARE(doc.characterCount(), characterCount);
+  QCOMPARE(doc.revision(), revision);
+  QCOMPARE(doc.firstBlock().revision(), blockRevision);
+  QCOMPARE(doc.isUndoAvailable(), undoAvailable);
+  QCOMPARE(doc.isRedoAvailable(), redoAvailable);
+
+  const QImage compactImage = renderConcealLayout(layout, device);
+  QCOMPARE(compactImage, renderConcealLayout(referenceLayout, device));
+  for (const QRectF &rect :
+       {layout->sourceTextRect(start, hiddenStart), layout->sourceTextRect(hiddenStart, hiddenEnd),
+        layout->sourceTextRect(hiddenEnd, end)}) {
+    QVERIFY(countConcealColor(compactImage, rect, foreground) > 0);
+    QVERIFY(countConcealColor(compactImage, rect, background) > 0);
+  }
+  QVERIFY(saveConcealImage(compactImage, QStringLiteral("conceal-compact.png")));
+
+  // Changing the conceal style invalidates marker and retained-end geometry,
+  // without baking the replacement font or brushes into the source formats.
+  QTextCharFormat replacement = format;
+  QFont replacementFont = doc.defaultFont();
+  replacementFont.setPixelSize(30);
+  replacement.setFont(replacementFont);
+  replacement.setForeground(QColor(180, 45, 20));
+  replacement.setBackground(QColor(225, 250, 225));
+  layout->setConcealFormat(replacement);
+  reference.firstBlock().layout()->setFormats({{start, 9, replacement}});
+  referenceLayout->relayout();
+  QCOMPARE(layout->sourceTextRect(end + 1, end + 6),
+           referenceLayout->sourceTextRect(start + 10, start + 15));
+  QVERIFY(layout->sourceTextRect(end + 1, end + 6) != expectedTail);
+  QCOMPARE(renderConcealLayout(layout, device), renderConcealLayout(referenceLayout, device));
+  layout->setConcealFormat(format);
+  reference.firstBlock().layout()->setFormats({{start, 9, format}});
+  referenceLayout->relayout();
+  QCOMPARE(renderConcealLayout(layout, device), compactImage);
+
+  // The retained ends reveal too; the half-open end is deliberately outside.
+  for (int position : {start, hiddenStart + 4, end - 1}) {
+    layout->setConcealCursorPosition(position);
+    QCOMPARE(layout->sourceTextRect(end + 1, end + 6), sourceTail);
+    QCOMPARE(renderConcealLayout(layout, device), sourceImage);
+    layout->setConcealCursorPosition(end);
+    QCOMPARE(layout->sourceTextRect(end + 1, end + 6), expectedTail);
+  }
+  layout->setConcealCursorPosition(start);
+  QVERIFY(saveConcealImage(renderConcealLayout(layout, device),
+                           QStringLiteral("conceal-revealed.png")));
+  layout->setConcealCursorPosition(-1);
+  const QRectF marker = layout->sourceTextRect(hiddenStart, hiddenEnd);
+  for (Qt::HitTestAccuracy accuracy : {Qt::ExactHit, Qt::FuzzyHit}) {
+    QCOMPARE(layout->hitTest(marker.center(), accuracy), hiddenStart);
+    QPointF tailPoint = concealCursorPoint(layout, doc.firstBlock(), end + 2);
+    const QPointF nextTailPoint = concealCursorPoint(layout, doc.firstBlock(), end + 3);
+    // ExactHit chooses a glyph, FuzzyHit a cursor edge; use the leading
+    // quarter of the glyph rather than their ambiguous shared boundary.
+    tailPoint.rx() += (nextTailPoint.x() - tailPoint.x()) / 4;
+    QCOMPARE(layout->hitTest(tailPoint, accuracy), end + 2);
+  }
+  layout->setConcealCursorPosition(layout->hitTest(marker.center(), Qt::ExactHit));
+  QCOMPARE(layout->sourceTextRect(end + 1, end + 6), sourceTail);
+  QVERIFY(layout->setConcealedRanges({}));
+  layout->setConcealCursorPosition(-1);
+  QCOMPARE(layout->sourceTextRect(end + 1, end + 6), sourceTail);
+  QCOMPARE(renderConcealLayout(layout, device), sourceImage);
+  QCOMPARE(doc.toPlainText(), source);
+  QCOMPARE(doc.revision(), revision);
+  QCOMPARE(doc.characterCount(), characterCount);
+  QCOMPARE(doc.isUndoAvailable(), undoAvailable);
+  QCOMPARE(doc.isRedoAvailable(), redoAvailable);
+}
+
+void TestMarkdownFolding::testConcealBoundaries() {
+  const QString alphabet = QStringLiteral("abcdefghijklmnopqrstuvwxyz");
+  const QString source =
+      alphabet + QStringLiteral(" | ") + alphabet.toUpper() + QStringLiteral(" tail");
+  const QString dots = QStringLiteral("\u00b7\u00b7\u00b7");
+  const QString firstCompact = QStringLiteral("abc") + dots + QStringLiteral("xyz");
+  const QString secondCompact = firstCompact.toUpper();
+  const int secondStart = 29;
+  const int tailStart = source.indexOf(QStringLiteral("tail"));
+  QImage device(1200, 900, QImage::Format_ARGB32_Premultiplied);
+  device.fill(Qt::white);
+  DocumentResourceMgr resources;
+  QTextDocument doc(source);
+  QTextDocument reference(firstCompact + QStringLiteral(" | ") + secondCompact +
+                          QStringLiteral(" tail"));
+  QTextDocument foreign(alphabet);
+  auto *layout = makeConcealLayout(doc, resources, device);
+  auto *referenceLayout = makeConcealLayout(reference, resources, device);
+  const QTextBlock block = doc.firstBlock();
+  const TextDocumentLayout::ConcealSpec first{block, 0, 26};
+  const TextDocumentLayout::ConcealSpec second{block, secondStart, secondStart + 26};
+  const auto expectedTail = [&]() {
+    const int pos = reference.toPlainText().indexOf(QStringLiteral("tail"));
+    return referenceLayout->sourceTextRect(pos, pos + 4);
+  };
+  const auto actualTail = [&]() { return layout->sourceTextRect(tailStart, tailStart + 4); };
+  const auto expectedSeparator = [&]() {
+    const int pos = reference.toPlainText().indexOf(QLatin1Char('|'));
+    return referenceLayout->sourceTextRect(pos, pos + 1);
+  };
+  layout->setConcealCursorPosition(-1);
+  QVERIFY(layout->setConcealedRanges({second, first, second}));
+  QCOMPARE(actualTail(), expectedTail());
+  const QRectF bothCompactTail = actualTail();
+  QSignalSpy changed(layout, &TextDocumentLayout::concealmentChanged);
+  QSignalSpy updated(layout, &TextDocumentLayout::update);
+
+  // Reordering or duplicating a snapshot must not cause a paint/geometry pass.
+  QVERIFY(layout->setConcealedRanges({first, second, first}));
+  QVERIFY(layout->conceal(block, 0, 26));
+  QCOMPARE(changed.count(), 0);
+  QCOMPARE(updated.count(), 0);
+  QCOMPARE(actualTail(), bothCompactTail);
+  const QVector<TextDocumentLayout::ConcealSpec> invalidRanges{
+      {QTextBlock(), 0, 26}, {foreign.firstBlock(), 0, 26},
+      {block, -1, 26},       {block, 0, std::numeric_limits<int>::max()},
+      {block, 26, 0},        {block, 0, 0},
+      {block, 0, 9},         {block, 1, 20}};
+  const int revision = doc.revision();
+  for (const auto &invalid : invalidRanges) {
+    QVERIFY(!layout->conceal(invalid.m_block, invalid.m_start, invalid.m_end));
+    // A valid prefix of the batch is not permission to publish half a snapshot.
+    QVERIFY(!layout->setConcealedRanges({first, invalid}));
+    QCOMPARE(actualTail(), bothCompactTail);
+    QCOMPARE(changed.count(), 0);
+    QCOMPARE(updated.count(), 0);
+    QCOMPARE(doc.revision(), revision);
+  }
+
+  layout->setConcealCursorPosition(0);
+  reference.setPlainText(alphabet + QStringLiteral(" | ") + secondCompact +
+                         QStringLiteral(" tail"));
+  QCOMPARE(actualTail(), expectedTail());
+  QCOMPARE(layout->sourceTextRect(27, 28), expectedSeparator());
+  const QRectF firstRevealedTail = actualTail();
+  changed.clear();
+  updated.clear();
+  layout->setConcealCursorPosition(15);
+  QCOMPARE(actualTail(), firstRevealedTail);
+  QCOMPARE(changed.count(), 0);
+  QCOMPARE(updated.count(), 0);
+  layout->setConcealCursorPosition(secondStart + 25);
+  reference.setPlainText(firstCompact + QStringLiteral(" | ") + alphabet.toUpper() +
+                         QStringLiteral(" tail"));
+  QCOMPARE(actualTail(), expectedTail());
+  QCOMPARE(layout->sourceTextRect(27, 28), expectedSeparator());
+  layout->setConcealCursorPosition(secondStart + 26);
+  QCOMPARE(actualTail(), bothCompactTail);
+  QVERIFY(layout->setConcealedRanges({first}));
+  QCOMPARE(actualTail(), expectedTail());
+  QVERIFY(layout->setConcealedRanges({}));
+  reference.setPlainText(source);
+  QCOMPARE(actualTail(), expectedTail());
+
+  // The primitive's only length threshold is nine graphemes, not Markdown's 20.
+  QVERIFY(layout->setConcealedRanges({{block, 0, 10}}));
+  reference.setPlainText(QStringLiteral("abc") + dots + source.mid(7));
+  QCOMPARE(actualTail(), expectedTail());
+  QVERIFY(layout->setConcealedRanges({{block, 0, 13}, {block, 13, 26}}));
+  reference.setPlainText(QStringLiteral("abc") + dots + QStringLiteral("klmnop") + dots +
+                         QStringLiteral("xyz") + source.mid(26));
+  QCOMPARE(actualTail(), expectedTail());
+
+  // Endpoints inside either a combining sequence or a surrogate pair are invalid.
+  const QString unicode = QStringLiteral("a\u0301\U0001f642bcdefghijklmnopqrstuvwxyz");
+  QTextDocument unicodeDoc(unicode);
+  auto *unicodeLayout = makeConcealLayout(unicodeDoc, resources, device);
+  const QTextBlock unicodeBlock = unicodeDoc.firstBlock();
+  const int unicodeEnd = unicode.size();
+  const qreal unicodeWidth = unicodeBlock.layout()->lineAt(0).naturalTextWidth();
+  QVERIFY(!unicodeLayout->conceal(unicodeBlock, 1, unicodeEnd));
+  QVERIFY(!unicodeLayout->conceal(unicodeBlock, 3, unicodeEnd));
+  QCOMPARE(unicodeBlock.layout()->lineAt(0).naturalTextWidth(), unicodeWidth);
+  QVERIFY(unicodeLayout->conceal(unicodeBlock, 0, unicodeEnd));
+  QVERIFY(!unicodeLayout->setConcealedRanges({{unicodeBlock, 1, unicodeEnd}}));
+  reference.setPlainText(QStringLiteral("a\u0301\U0001f642b") + dots + QStringLiteral("xyz"));
+  QCOMPARE(unicodeBlock.layout()->lineAt(0).naturalTextWidth(),
+           reference.firstBlock().layout()->lineAt(0).naturalTextWidth());
+
+  // Live block handles retain local ranges after an earlier block is inserted,
+  // but a changed block must immediately stop using its old source coordinates.
+  QTextDocument shifted(QStringLiteral("heading\n") + alphabet + QLatin1Char('\n') + alphabet);
+  auto *shiftedLayout = makeConcealLayout(shifted, resources, device);
+  const QTextBlock edited = shifted.findBlockByNumber(1);
+  const QTextBlock untouched = shifted.findBlockByNumber(2);
+  QVERIFY(shiftedLayout->setConcealedRanges({{edited, 0, 26}, {untouched, 0, 26}}));
+  const qreal compactWidth = edited.layout()->lineAt(0).naturalTextWidth();
+  const int untouchedRevision = untouched.revision();
+  QTextCursor cursor(&shifted);
+  cursor.insertText(QStringLiteral("inserted\n"));
+  QCOMPARE(untouched.revision(), untouchedRevision);
+  QCOMPARE(edited.layout()->lineAt(0).naturalTextWidth(), compactWidth);
+  QCOMPARE(untouched.layout()->lineAt(0).naturalTextWidth(), compactWidth);
+  cursor.setPosition(edited.position() + 10);
+  cursor.insertText(QStringLiteral("inserted"));
+  reference.setPlainText(edited.text());
+  QCOMPARE(edited.layout()->lineAt(0).naturalTextWidth(),
+           reference.firstBlock().layout()->lineAt(0).naturalTextWidth());
+  QCOMPARE(untouched.layout()->lineAt(0).naturalTextWidth(), compactWidth);
+  QVERIFY(
+      shiftedLayout->setConcealedRanges({{edited, 0, edited.length() - 1}, {untouched, 0, 26}}));
+  QCOMPARE(edited.layout()->lineAt(0).naturalTextWidth(), compactWidth);
+  cursor.setPosition(edited.position());
+  cursor.setPosition(untouched.position(), QTextCursor::KeepAnchor);
+  cursor.removeSelectedText();
+  QVERIFY(shiftedLayout->setConcealedRanges({}));
+  reference.setPlainText(shifted.toPlainText());
+  QCOMPARE(renderConcealLayout(shiftedLayout, device),
+           renderConcealLayout(referenceLayout, device));
+}
+
+void TestMarkdownFolding::testConcealWrappingAndSelection() {
+  const QString dots = QStringLiteral("\u00b7\u00b7\u00b7");
+  QImage device(1200, 900, QImage::Format_ARGB32_Premultiplied);
+  device.fill(Qt::white);
+  DocumentResourceMgr resources;
+  QTextCharFormat concealedFormat;
+  concealedFormat.setForeground(QColor(25, 45, 220));
+  concealedFormat.setBackground(QColor(225, 235, 250));
+  {
+    const QString prefix = QStringLiteral("a\u0301\U0001f642b");
+    const QString suffix = QStringLiteral("x\U0001f642z\u0301");
+    const QString middle = QStringLiteral(" hidden\twords soft\u00adhyphen and more ");
+    const QString range = prefix + middle + suffix;
+    const QString source = QStringLiteral("pre ") + range + QStringLiteral(" tail\nfollowing");
+    const QString compact =
+        QStringLiteral("pre ") + prefix + dots + suffix + QStringLiteral(" tail\nfollowing");
+    const int start = 4;
+    const int end = start + range.size();
+    const int hiddenStart = start + prefix.size();
+    const int hiddenEnd = end - suffix.size();
+    const int compactEnd = hiddenStart + 3 + suffix.size();
+    const int removed = hiddenEnd - hiddenStart - 3;
+    QTextDocument doc(source);
+    QTextDocument reference(compact);
+    auto *layout = makeConcealLayout(doc, resources, device);
+    auto *referenceLayout = makeConcealLayout(reference, resources, device);
+    QTextOption option = doc.defaultTextOption();
+    option.setWrapMode(QTextOption::WrapAnywhere);
+    doc.setDefaultTextOption(option);
+    reference.setDefaultTextOption(option);
+    QTextCharFormat firstSyntax;
+    firstSyntax.setForeground(QColor(200, 35, 10));
+    QTextCharFormat secondSyntax;
+    secondSyntax.setForeground(QColor(20, 120, 40));
+    QVector<QTextLayout::FormatRange> syntax{{hiddenStart, 7, firstSyntax},
+                                             {hiddenStart + 7, 9, secondSyntax}};
+    const QTextBlock block = doc.firstBlock();
+    block.layout()->setFormats(syntax);
+    layout->relayout();
+    reference.firstBlock().layout()->setFormats({{start, compactEnd - start, concealedFormat}});
+    referenceLayout->relayout();
+    const QVector<int> nextCharacters = concealCursorStops(doc, QTextCursor::NextCharacter);
+    const QVector<int> previousCharacters =
+        concealCursorStops(doc, QTextCursor::PreviousCharacter, true);
+    const QVector<int> nextWords = concealCursorStops(doc, QTextCursor::NextWord);
+    const QVector<int> previousWords = concealCursorStops(doc, QTextCursor::PreviousWord, true);
+    QVERIFY(!nextCharacters.contains(start + 1));
+    QVERIFY(!nextCharacters.contains(start + 3));
+    QVERIFY(!layout->conceal(block, start, end - 1));
+    QVERIFY(!layout->conceal(block, start, end - 3));
+    layout->setConcealFormat(concealedFormat);
+    QVERIFY(layout->conceal(block, start, end));
+
+    // Enough room for all three dots; suffix/following text still wraps. The
+    // source contains tabs, spaces, soft hyphen and independent syntax runs.
+    QTextLine referenceLine = reference.firstBlock().layout()->lineAt(0);
+    const qreal outsideWidth = reference.textWidth() - referenceLine.width();
+    const qreal narrowWidth =
+        outsideWidth + referenceLine.cursorToX(compactEnd + 3) - referenceLine.x();
+    doc.setTextWidth(narrowWidth);
+    reference.setTextWidth(narrowWidth);
+    QVERIFY(block.layout()->lineCount() >= 2);
+    QCOMPARE(block.layout()->lineCount(), reference.firstBlock().layout()->lineCount());
+    const QTextLine markerLine = block.layout()->lineForTextPosition(hiddenStart);
+    QCOMPARE(markerLine.lineNumber(),
+             block.layout()->lineForTextPosition(hiddenEnd - 1).lineNumber());
+    for (int position = hiddenEnd; position <= block.length() - 1; ++position) {
+      if (block.layout()->isValidCursorPosition(position)) {
+        QCOMPARE(concealCursorPoint(layout, block, position),
+                 concealCursorPoint(referenceLayout, reference.firstBlock(), position - removed));
+      }
+    }
+    QCOMPARE(layout->blockBoundingRect(doc.lastBlock()),
+             referenceLayout->blockBoundingRect(reference.lastBlock()));
+    QCOMPARE(layout->documentSize(), referenceLayout->documentSize());
+    QCOMPARE(renderConcealLayout(layout, device), renderConcealLayout(referenceLayout, device));
+    QVERIFY(saveConcealImage(renderConcealLayout(layout, device),
+                             QStringLiteral("conceal-wrapped.png")));
+
+    // Restored source attributes remain available to character and word motions.
+    QCOMPARE(concealCursorStops(doc, QTextCursor::NextCharacter), nextCharacters);
+    QCOMPARE(concealCursorStops(doc, QTextCursor::PreviousCharacter, true), previousCharacters);
+    QCOMPARE(concealCursorStops(doc, QTextCursor::NextWord), nextWords);
+    QCOMPARE(concealCursorStops(doc, QTextCursor::PreviousWord, true), previousWords);
+    for (int pass = 0; pass < 3; ++pass) {
+      block.layout()->clearLayout();
+      layout->relayout();
+      QCOMPARE(layout->sourceTextRect(end + 1, end + 5),
+               referenceLayout->sourceTextRect(compactEnd + 1, compactEnd + 5));
+      QCOMPARE(renderConcealLayout(layout, device), renderConcealLayout(referenceLayout, device));
+    }
+    doc.setTextWidth(1000);
+    reference.setTextWidth(1000);
+    QFont enlarged = doc.defaultFont();
+    enlarged.setPixelSize(30);
+    doc.setDefaultFont(enlarged);
+    reference.setDefaultFont(enlarged);
+    layout->relayout();
+    referenceLayout->relayout();
+    referenceLine = reference.firstBlock().layout()->lineAt(0);
+    const qreal enlargedWidth =
+        outsideWidth + referenceLine.cursorToX(compactEnd + 3) - referenceLine.x();
+    doc.setTextWidth(enlargedWidth);
+    reference.setTextWidth(enlargedWidth);
+    QCOMPARE(layout->sourceTextRect(end + 1, end + 5),
+             referenceLayout->sourceTextRect(compactEnd + 1, compactEnd + 5));
+    QCOMPARE(layout->blockBoundingRect(doc.lastBlock()),
+             referenceLayout->blockBoundingRect(reference.lastBlock()));
+    QCOMPARE(renderConcealLayout(layout, device), renderConcealLayout(referenceLayout, device));
+
+    // With room for only part of the dots, move the entire marker to the next
+    // visual line even under WrapAnywhere; never split it at an internal run.
+    doc.setTextWidth(1000);
+    reference.setTextWidth(1000);
+    referenceLine = reference.firstBlock().layout()->lineAt(0);
+    const QRectF expectedMarker = referenceLayout->sourceTextRect(hiddenStart, hiddenStart + 3);
+    const qreal forcedWidth = outsideWidth + referenceLine.cursorToX(hiddenStart) -
+                              referenceLine.x() + expectedMarker.width() / 2;
+    doc.setTextWidth(forcedWidth);
+    const QTextLine forcedLine = block.layout()->lineForTextPosition(hiddenStart);
+    QVERIFY(forcedLine.lineNumber() > 0);
+    QCOMPARE(forcedLine.lineNumber(),
+             block.layout()->lineForTextPosition(hiddenEnd - 1).lineNumber());
+    const QRectF forcedMarker = layout->sourceTextRect(hiddenStart, hiddenEnd);
+    QCOMPARE(forcedMarker.width(), expectedMarker.width());
+    QCOMPARE(layout->hitTest(forcedMarker.center(), Qt::ExactHit), hiddenStart);
+    QCOMPARE(layout->blockBoundingRect(doc.lastBlock()).top(),
+             layout->blockBoundingRect(block).bottom());
+
+    // A rehighlight replaces the additional formats while compact, then all
+    // newly supplied syntax formats must be visible again after revealing.
+    doc.setTextWidth(1000);
+    syntax[0].format.setForeground(QColor(170, 20, 150));
+    block.layout()->setFormats(syntax);
+    layout->relayout();
+    QCOMPARE(renderConcealLayout(layout, device), renderConcealLayout(referenceLayout, device));
+    layout->setConcealCursorPosition(start);
+    reference.setPlainText(source);
+    reference.firstBlock().layout()->setFormats(syntax);
+    referenceLayout->relayout();
+    QCOMPARE(renderConcealLayout(layout, device), renderConcealLayout(referenceLayout, device));
+    QVERIFY(countConcealColor(renderConcealLayout(layout, device),
+                              layout->sourceTextRect(hiddenStart, hiddenStart + 7),
+                              syntax[0].format.foreground().color()) > 0);
+
+    // Preedit offsets are not document offsets; suppress concealment for the
+    // entire composing block without throwing away its submitted ranges.
+    layout->setConcealCursorPosition(-1);
+    block.layout()->setPreeditArea(end, QStringLiteral("IME"));
+    reference.firstBlock().layout()->setPreeditArea(end, QStringLiteral("IME"));
+    layout->relayout();
+    referenceLayout->relayout();
+    QCOMPARE(block.layout()->lineAt(0).naturalTextWidth(),
+             reference.firstBlock().layout()->lineAt(0).naturalTextWidth());
+    QCOMPARE(renderConcealLayout(layout, device), renderConcealLayout(referenceLayout, device));
+    QCOMPARE(doc.toPlainText(), source);
+    block.layout()->setPreeditArea(-1, QString());
+    layout->relayout();
+    reference.setPlainText(compact);
+    reference.firstBlock().layout()->setFormats({{start, compactEnd - start, concealedFormat}});
+    referenceLayout->relayout();
+    QCOMPARE(renderConcealLayout(layout, device), renderConcealLayout(referenceLayout, device));
+    QVERIFY(layout->setConcealedRanges({}));
+    reference.setPlainText(source);
+    reference.firstBlock().layout()->setFormats(syntax);
+    referenceLayout->relayout();
+    layout->relayout();
+    QCOMPARE(renderConcealLayout(layout, device), renderConcealLayout(referenceLayout, device));
+    QCOMPARE(concealCursorStops(doc, QTextCursor::NextWord), nextWords);
+  }
+
+  // Qt has a separate literal-soft-hyphen path. Exercise each edge of the
+  // synthetic source span, not just an interior character-attribute boundary.
+  for (const QString &middle :
+       {QStringLiteral("\u00adone two three"), QStringLiteral("one\u00adtwo three"),
+        QStringLiteral("one two three\u00ad")}) {
+    const QString source =
+        QStringLiteral("pre abc") + middle + QStringLiteral("xyz tail\nfollowing");
+    const QString compact =
+        QStringLiteral("pre abc") + dots + QStringLiteral("xyz tail\nfollowing");
+    const int start = 4;
+    const int hiddenStart = start + 3;
+    const int hiddenEnd = hiddenStart + middle.size();
+    const int end = hiddenEnd + 3;
+    QTextDocument doc(source);
+    QTextDocument reference(compact);
+    auto *layout = makeConcealLayout(doc, resources, device);
+    auto *referenceLayout = makeConcealLayout(reference, resources, device);
+    QTextOption option = doc.defaultTextOption();
+    option.setWrapMode(QTextOption::WrapAnywhere);
+    doc.setDefaultTextOption(option);
+    reference.setDefaultTextOption(option);
+    referenceLayout->relayout();
+    const QTextLine referenceLine = reference.firstBlock().layout()->lineAt(0);
+    const qreal outsideWidth = reference.textWidth() - referenceLine.width();
+    const QRectF expectedMarker = referenceLayout->sourceTextRect(hiddenStart, hiddenStart + 3);
+    const qreal halfSuffixCharacter =
+        (referenceLine.cursorToX(hiddenStart + 4) - referenceLine.cursorToX(hiddenStart + 3)) / 2;
+    const qreal narrowWidth =
+        outsideWidth + expectedMarker.right() - referenceLine.x() + halfSuffixCharacter;
+    const qreal forcedWidth =
+        outsideWidth + expectedMarker.left() - referenceLine.x() + expectedMarker.width() / 2;
+    QVERIFY(layout->conceal(doc.firstBlock(), start, end));
+    doc.setTextWidth(narrowWidth);
+    reference.setTextWidth(narrowWidth);
+    const QTextBlock block = doc.firstBlock();
+    QCOMPARE(block.layout()->lineCount(), reference.firstBlock().layout()->lineCount());
+    for (int i = 0; i < block.layout()->lineCount(); ++i) {
+      QCOMPARE(block.layout()->lineAt(i).naturalTextWidth(),
+               reference.firstBlock().layout()->lineAt(i).naturalTextWidth());
+    }
+    QCOMPARE(layout->sourceTextRect(hiddenStart, hiddenEnd),
+             referenceLayout->sourceTextRect(hiddenStart, hiddenStart + 3));
+    QCOMPARE(layout->sourceTextRect(hiddenEnd, end),
+             referenceLayout->sourceTextRect(hiddenStart + 3, hiddenStart + 6));
+    QCOMPARE(layout->blockBoundingRect(doc.lastBlock()),
+             referenceLayout->blockBoundingRect(reference.lastBlock()));
+    QCOMPARE(renderConcealLayout(layout, device), renderConcealLayout(referenceLayout, device));
+
+    doc.setTextWidth(forcedWidth);
+    const QTextLine markerLine = block.layout()->lineForTextPosition(hiddenStart);
+    QVERIFY(markerLine.lineNumber() > 0);
+    QCOMPARE(markerLine.lineNumber(),
+             block.layout()->lineForTextPosition(hiddenEnd - 1).lineNumber());
+    QCOMPARE(layout->sourceTextRect(hiddenStart, hiddenEnd).width(), expectedMarker.width());
+    QCOMPARE(doc.toPlainText(), source);
+  }
+
+  {
+    const QString alphabet = QStringLiteral("abcdefghijklmnopqrstuvwxyz");
+    const QString source = QStringLiteral("before ") + alphabet + QStringLiteral(" after");
+    const QString compact = QStringLiteral("before abc") + dots + QStringLiteral("xyz after");
+    const int start = 7;
+    const int end = start + 26;
+    const int hiddenStart = start + 3;
+    const int hiddenEnd = end - 3;
+    const int removed = hiddenEnd - hiddenStart - 3;
+    QTextDocument doc(source);
+    QTextDocument reference(compact);
+    auto *layout = makeConcealLayout(doc, resources, device);
+    auto *referenceLayout = makeConcealLayout(reference, resources, device);
+    layout->setConcealFormat(concealedFormat);
+    QVERIFY(layout->conceal(doc.firstBlock(), start, end));
+    reference.firstBlock().layout()->setFormats({{start, 9, concealedFormat}});
+    referenceLayout->relayout();
+    const QRectF marker = layout->sourceTextRect(hiddenStart, hiddenEnd);
+    const QRectF compactTail = layout->sourceTextRect(end + 1, end + 6);
+    const QImage unselected = renderConcealLayout(layout, device);
+    const QVector<QPair<int, int>> selections{{hiddenStart + 2, hiddenStart + 6},
+                                              {hiddenStart + 6, hiddenStart + 2},
+                                              {start + 1, hiddenStart + 2},
+                                              {end - 1, hiddenEnd - 2}};
+    for (const auto &ends : selections) {
+      QAbstractTextDocumentLayout::Selection selection;
+      selection.cursor = QTextCursor(&doc);
+      selection.cursor.setPosition(ends.first);
+      selection.cursor.setPosition(ends.second, QTextCursor::KeepAnchor);
+      selection.format.setBackground(QColor(160, 25, 95));
+      selection.format.setForeground(Qt::white);
+      const int selectionStart = selection.cursor.selectionStart();
+      const int selectionEnd = selection.cursor.selectionEnd();
+      QCOMPARE(selection.cursor.selectedText(),
+               source.mid(selectionStart, selectionEnd - selectionStart));
+      QAbstractTextDocumentLayout::Selection expectedSelection = selection;
+      expectedSelection.cursor = QTextCursor(&reference);
+      const int mappedStart = selectionStart < hiddenStart ? selectionStart : hiddenStart;
+      const int mappedEnd = selectionEnd > hiddenEnd ? selectionEnd - removed : hiddenStart + 3;
+      expectedSelection.cursor.setPosition(mappedStart);
+      expectedSelection.cursor.setPosition(mappedEnd, QTextCursor::KeepAnchor);
+      QAbstractTextDocumentLayout::PaintContext context;
+      context.selections.append(selection);
+      QAbstractTextDocumentLayout::PaintContext expectedContext;
+      expectedContext.selections.append(expectedSelection);
+      const QImage selectedImage = renderConcealLayout(layout, device, context);
+      QCOMPARE(selectedImage, renderConcealLayout(referenceLayout, device, expectedContext));
+      QVERIFY(countConcealColor(selectedImage, marker, selection.format.background().color()) > 0);
+      QVERIFY(countConcealColor(selectedImage, marker, Qt::white) > 0);
+      QCOMPARE(countConcealColor(selectedImage, marker.adjusted(1, 1, -1, -1),
+                                 concealedFormat.background().color()),
+               0);
+      QCOMPARE(layout->sourceTextRect(end + 1, end + 6), compactTail);
+      QVERIFY(saveConcealImage(selectedImage, QStringLiteral("conceal-selected.png")));
+    }
+
+    // A selection confined to a retained end does not select the dots.
+    QAbstractTextDocumentLayout::Selection retainedSelection;
+    retainedSelection.cursor = QTextCursor(&doc);
+    retainedSelection.cursor.setPosition(start);
+    retainedSelection.cursor.setPosition(start + 2, QTextCursor::KeepAnchor);
+    retainedSelection.format.setBackground(Qt::yellow);
+    QAbstractTextDocumentLayout::PaintContext context;
+    context.selections.append(retainedSelection);
+    QCOMPARE(renderConcealLayout(layout, device, context).copy(marker.toAlignedRect()),
+             unselected.copy(marker.toAlignedRect()));
+
+    // Search and selection are the same ordered PaintContext overlay contract.
+    // The later, partly intersecting overlay wins on the entire marker.
+    QAbstractTextDocumentLayout::Selection search = retainedSelection;
+    search.cursor.setPosition(hiddenStart);
+    search.cursor.setPosition(hiddenEnd, QTextCursor::KeepAnchor);
+    search.format.setForeground(Qt::black);
+    QAbstractTextDocumentLayout::Selection selection = search;
+    selection.cursor.setPosition(hiddenStart + 2);
+    selection.cursor.setPosition(hiddenStart + 4, QTextCursor::KeepAnchor);
+    selection.format.setForeground(Qt::white);
+    selection.format.setBackground(QColor(20, 95, 55));
+    context.selections = {search, selection};
+    const QImage orderedImage = renderConcealLayout(layout, device, context);
+    QVERIFY(countConcealColor(orderedImage, marker, selection.format.background().color()) > 0);
+    QCOMPARE(countConcealColor(orderedImage, marker.adjusted(1, 1, -1, -1), Qt::yellow), 0);
+    context.selections = {selection, search};
+    const QImage reversedImage = renderConcealLayout(layout, device, context);
+    QVERIFY(countConcealColor(reversedImage, marker, Qt::yellow) > 0);
+    QCOMPARE(countConcealColor(reversedImage, marker.adjusted(1, 1, -1, -1),
+                               selection.format.background().color()),
+             0);
+    QCOMPARE(doc.toPlainText(), source);
+  }
+
+  {
+    const QString range = QStringLiteral("\u05d0\u05d1\u05d2\u05d3\u05d4\u05d5\u05d6\u05d7"
+                                         "\u05d8\u05d9\u05db\u05dc\u05de\u05e0\u05e1\u05e2"
+                                         "\u05e4\u05e6\u05e7\u05e8\u05e9\u05ea");
+    const QString before = QStringLiteral("\u05e8\u05d0\u05e9 ");
+    const QString after = QStringLiteral(" \u05e1\u05d5\u05e3");
+    const int start = before.size();
+    const int end = start + range.size();
+    const QString compact = before + range.left(3) + dots + range.right(3) + after;
+    QTextDocument doc(before + range + after);
+    QTextDocument reference(compact);
+    auto *layout = makeConcealLayout(doc, resources, device);
+    auto *referenceLayout = makeConcealLayout(reference, resources, device);
+    QCOMPARE(doc.firstBlock().textDirection(), Qt::RightToLeft);
+    layout->setConcealFormat(concealedFormat);
+    QVERIFY(layout->conceal(doc.firstBlock(), start, end));
+    reference.firstBlock().layout()->setFormats({{start, 9, concealedFormat}});
+    referenceLayout->relayout();
+    const QRectF marker = layout->sourceTextRect(start + 3, end - 3);
+    QCOMPARE(marker, referenceLayout->sourceTextRect(start + 3, start + 6));
+    QCOMPARE(layout->sourceTextRect(end + 1, end + 4),
+             referenceLayout->sourceTextRect(start + 10, start + 13));
+    const QImage rtlImage = renderConcealLayout(layout, device);
+    QCOMPARE(rtlImage, renderConcealLayout(referenceLayout, device));
+    QVERIFY(saveConcealImage(rtlImage, QStringLiteral("conceal-rtl.png")));
+    for (Qt::HitTestAccuracy accuracy : {Qt::ExactHit, Qt::FuzzyHit}) {
+      QCOMPARE(layout->hitTest(marker.center(), accuracy), start + 3);
+      for (int position : {start + 1, end - 1, end + 2}) {
+        const QPointF point = concealCursorPoint(layout, doc.firstBlock(), position);
+        QCOMPARE(layout->hitTest(point, accuracy), position);
+      }
+    }
+    layout->setConcealCursorPosition(end - 1);
+    reference.setPlainText(doc.toPlainText());
+    QCOMPARE(layout->sourceTextRect(end + 1, end + 4),
+             referenceLayout->sourceTextRect(end + 1, end + 4));
+    QCOMPARE(doc.toPlainText(), before + range + after);
+  }
+
+  {
+    const QString alphabet = QStringLiteral("abcdefghijklmnopqrstuvwxyz");
+    const QString source =
+        QStringLiteral("heading\nbefore ") + alphabet + QStringLiteral(" after\nfollowing\ntail");
+    const QString compact =
+        QStringLiteral("heading\nbefore abc") + dots + QStringLiteral("xyz after\nfollowing\ntail");
+    QTextDocument doc(source);
+    QTextDocument reference(compact);
+    auto *layout = makeConcealLayout(doc, resources, device);
+    auto *referenceLayout = makeConcealLayout(reference, resources, device);
+    doc.setTextWidth(250);
+    reference.setTextWidth(250);
+    const QTextBlock block = doc.findBlockByNumber(1);
+    const int start = 7;
+    const int end = start + 26;
+    const int absoluteStart = block.position() + start;
+    const int bandStart = block.position() + end + 1;
+    const int compactBandStart = reference.findBlockByNumber(1).position() + start + 10;
+    layout->setPreviewEnabled(true);
+    referenceLayout->setPreviewEnabled(true);
+    QVERIFY(layout->conceal(block, start, end));
+    auto spec = makeSpec(71, bandStart, bandStart + 5, 80, 24, PreviewPlacement::InlineAboveLine);
+    auto referenceSpec = makeSpec(71, compactBandStart, compactBandStart + 5, 80, 24,
+                                  PreviewPlacement::InlineAboveLine);
+    layout->setWidgetPreviews({spec});
+    referenceLayout->setWidgetPreviews({referenceSpec});
+    const QRectF compactBand = layout->widgetPreviewRect(71);
+    QVERIFY(!compactBand.isNull());
+    QCOMPARE(compactBand, referenceLayout->widgetPreviewRect(71));
+    QCOMPARE(layout->inlinePlacementWidth(bandStart, bandStart + 5), compactBand.width());
+    QCOMPARE(layout->sourceTextRect(bandStart, bandStart + 5),
+             referenceLayout->sourceTextRect(compactBandStart, compactBandStart + 5));
+    QCOMPARE(layout->blockBoundingRect(doc.findBlockByNumber(2)),
+             referenceLayout->blockBoundingRect(reference.findBlockByNumber(2)));
+
+    // Widget geometry is emitted inside a layout pass. A caret transition from
+    // that callback must defer and notify only after complete, idle geometry.
+    QSignalSpy changed(layout, &TextDocumentLayout::concealmentChanged);
+    bool requested = false;
+    bool requestWasBusy = false;
+    bool notifiedInsideRequest = false;
+    bool notifiedWhileBusy = false;
+    QRectF notifiedBand;
+    connect(layout, &TextDocumentLayout::concealmentChanged, this, [&]() {
+      notifiedWhileBusy |= layout->isBusy();
+      notifiedBand = layout->widgetPreviewRect(71);
+    });
+    const auto connection =
+        connect(layout, &TextDocumentLayout::widgetPreviewGeometryChanged, this, [&]() {
+          if (!requested) {
+            requested = true;
+            requestWasBusy = layout->isBusy();
+            layout->setConcealCursorPosition(absoluteStart);
+            // Repeated requests during the same pass coalesce to the final state.
+            layout->setConcealCursorPosition(absoluteStart + 5);
+            notifiedInsideRequest = changed.count() != 0;
+          }
+        });
+    spec.m_height += 11;
+    layout->setWidgetPreviews({spec});
+    QTRY_COMPARE(changed.count(), 1);
+    disconnect(connection);
+    QVERIFY(requested);
+    QVERIFY(requestWasBusy);
+    QVERIFY(!notifiedInsideRequest);
+    QVERIFY(!notifiedWhileBusy);
+    reference.setPlainText(source);
+    referenceSpec = spec;
+    referenceLayout->setWidgetPreviews({referenceSpec});
+    QCOMPARE(layout->widgetPreviewRect(71), referenceLayout->widgetPreviewRect(71));
+    QCOMPARE(notifiedBand, referenceLayout->widgetPreviewRect(71));
+    QCOMPARE(layout->sourceTextRect(bandStart, bandStart + 5),
+             referenceLayout->sourceTextRect(bandStart, bandStart + 5));
+    QCOMPARE(layout->blockBoundingRect(doc.findBlockByNumber(2)),
+             referenceLayout->blockBoundingRect(reference.findBlockByNumber(2)));
+
+    layout->setConcealCursorPosition(-1);
+    reference.setPlainText(compact);
+    referenceSpec.m_startPos = compactBandStart;
+    referenceSpec.m_endPos = compactBandStart + 5;
+    referenceLayout->setWidgetPreviews({referenceSpec});
+    QCOMPARE(layout->widgetPreviewRect(71), referenceLayout->widgetPreviewRect(71));
+    QCOMPARE(renderConcealLayout(layout, device), renderConcealLayout(referenceLayout, device));
+    TextFolding folding(&doc);
+    TextFolding referenceFolding(&reference);
+    const auto foldId = folding.newFoldingRange(
+        TextBlockRange(doc.firstBlock(), doc.findBlockByNumber(2)), TextFolding::Persistent);
+    const auto referenceFoldId = referenceFolding.newFoldingRange(
+        TextBlockRange(reference.firstBlock(), reference.findBlockByNumber(2)),
+        TextFolding::Persistent);
+    QVERIFY(foldId != TextFolding::InvalidRangeId);
+    QVERIFY(referenceFoldId != TextFolding::InvalidRangeId);
+    QVERIFY(folding.toggleRange(foldId));
+    QVERIFY(referenceFolding.toggleRange(referenceFoldId));
+    QVERIFY(!block.isVisible());
+    QCOMPARE(layout->blockBoundingRect(block).height(), 0.0);
+    QVERIFY(layout->sourceTextRect(absoluteStart, block.position() + end).isNull());
+    QVERIFY(layout->widgetPreviewRect(71).isNull());
+    layout->setConcealCursorPosition(absoluteStart);
+    layout->relayout();
+    QCOMPARE(layout->blockBoundingRect(block).height(), 0.0);
+    QCOMPARE(renderConcealLayout(layout, device), renderConcealLayout(referenceLayout, device));
+    QVERIFY(folding.toggleRange(foldId));
+    QVERIFY(referenceFolding.toggleRange(referenceFoldId));
+    layout->setConcealCursorPosition(-1);
+    QCOMPARE(layout->widgetPreviewRect(71), referenceLayout->widgetPreviewRect(71));
+    QCOMPARE(layout->documentSize(), referenceLayout->documentSize());
+    QCOMPARE(doc.toPlainText(), source);
+  }
+}
+
+// An element whose source is rewritten in one go - what the preview write-back
+// path does when a table cell is edited - loses its fold range inside
+// TextFolding, because the blocks it spans are replaced. The next parse reports
+// the very same (startBlock, endBlock) pair, so the range has to be recreated
+// even though the diff sees no change.
+void TestMarkdownFolding::testInPlaceRewriteKeepsFoldRange() {
+  const QString table = QStringLiteral("| Left | Center | Right |\n"
+                                       "| :--- | :----: | ----: |\n"
+                                       "| a    | b      | c     |\n"
+                                       "| d    | e      | f     |");
+  QTextDocument doc(QStringLiteral("# Title\n\nintro\n") + table +
+                    QStringLiteral("\n\ntail 1\ntail 2"));
+
+  TextFolding folding(&doc);
+  MarkdownFoldingProvider provider(&folding, &doc);
+
+  QVector<md::FoldingRegion> regions;
+  // A second range which survives the rewrite, so TextFolding never becomes
+  // empty and the editor's reset-on-empty safety net does not kick in.
+  regions.append({0, doc.blockCount() - 1, md::Heading, 1});
+  regions.append({3, 6, md::Table, 0});
+
+  provider.updateFoldingRegions(regions);
+  QCOMPARE(folding.foldingRangesStartingOnBlock(0).size(), 1);
+  QCOMPARE(folding.foldingRangesStartingOnBlock(3).size(), 1);
+
+  const QTextBlock firstRow = doc.findBlockByNumber(3);
+  const QTextBlock lastRow = doc.findBlockByNumber(6);
+  QTextCursor cursor(&doc);
+  cursor.beginEditBlock();
+  cursor.setPosition(firstRow.position());
+  cursor.setPosition(lastRow.position() + lastRow.length() - 1, QTextCursor::KeepAnchor);
+  cursor.insertText(QString(table).replace(QStringLiteral("| b "), QStringLiteral("| B ")));
+  cursor.endEditBlock();
+
+  // Replacing the endpoint source discards the old range immediately.
+  QCOMPARE(doc.blockCount(), 10);
+  QCOMPARE(folding.foldingRangesStartingOnBlock(3).size(), 0);
+  QCOMPARE(folding.foldingRangesStartingOnBlock(0).size(), 1);
+
+  // The re-parse yields identical regions and must restore the lost range.
+  provider.updateFoldingRegions(regions);
+  QCOMPARE(folding.foldingRangesStartingOnBlock(3).size(), 1);
+  QCOMPARE(folding.foldingRangesStartingOnBlock(0).size(), 1);
+
+  // The restored range is usable.
+  auto ranges = folding.foldingRangesStartingOnBlock(3);
+  QVERIFY(ranges[0].second.testFlag(TextFolding::Persistent));
+  QVERIFY(folding.toggleRange(ranges[0].first));
+  QVERIFY(!doc.findBlockByNumber(4).isVisible());
+}
+
+// Re-applying the same regions preserves the live logical range's id and
+// fold state, without introducing duplicates.
+void TestMarkdownFolding::testLiveRangeIsNotRecreated() {
+  QVector<md::FoldingRegion> regions;
+  regions.append({0, 9, md::Heading, 1});
+  regions.append({3, 7, md::FencedCode, 0});
+
+  m_provider->updateFoldingRegions(regions);
+  const qint64 headingId = m_textFolding->foldingRangesStartingOnBlock(0).first().first;
+  const qint64 codeId = m_textFolding->foldingRangesStartingOnBlock(3).first().first;
+
+  m_provider->updateFoldingRegions(regions);
+  m_provider->updateFoldingRegions(regions);
+
+  auto rangesAt0 = m_textFolding->foldingRangesStartingOnBlock(0);
+  auto rangesAt3 = m_textFolding->foldingRangesStartingOnBlock(3);
+  QCOMPARE(rangesAt0.size(), 1);
+  QCOMPARE(rangesAt3.size(), 1);
+  QCOMPARE(rangesAt0.first().first, headingId);
+  QCOMPARE(rangesAt3.first().first, codeId);
+
+  // The ids alone do not prove the range was left alone: recreating a live
+  // range is rejected by TextFolding anyway, which would leave the tree
+  // untouched but drop the cached pair -> id entry. Retiring the region is
+  // what makes that loss observable, because the removal goes through that
+  // very entry.
+  QVector<md::FoldingRegion> shrunk;
+  shrunk.append({0, 9, md::Heading, 1});
+  m_provider->updateFoldingRegions(shrunk);
+
+  QCOMPARE(m_textFolding->foldingRangesStartingOnBlock(3).size(), 0);
+  auto remaining = m_textFolding->foldingRangesStartingOnBlock(0);
+  QCOMPARE(remaining.size(), 1);
+  QCOMPARE(remaining.first().first, headingId);
+}
+
+// ---------------------------------------------------------------------------
+// Reconciliation from the ranges' live positions
+// ---------------------------------------------------------------------------
+
+static PreviewedRange makeWidgetRange(quint64 p_identity, int p_startBlock, int p_endBlock,
+                                      PreviewElementType p_type,
+                                      PreviewFoldState p_state = PreviewFoldState::Undecided) {
+  PreviewedRange range;
+  range.m_identity = p_identity;
+  range.m_startBlock = p_startBlock;
+  range.m_endBlock = p_endBlock;
+  range.m_type = p_type;
+  range.m_foldState = p_state;
+  return range;
+}
+
+// The fold state of a range must survive an edit which only shifts the blocks
+// below it. Matching the parsed regions against the *keys* of the last
+// reconciliation drops and recreates every range under the edit, and loses its
+// fold state with it.
+void TestMarkdownFolding::testReconcileSurvivesBlockShift() {
+  QTextDocument doc(generateLines(40));
+  TextFolding folding(&doc);
+  MarkdownFoldingProvider provider(&folding, &doc);
+
+  QVector<md::FoldingRegion> regions;
+  regions.append({0, 9, md::Heading, 1});
+  regions.append({12, 19, md::FencedCode, 0});
+  provider.updateFoldingRegions(regions);
+
+  const qint64 headingId = folding.foldingRangesStartingOnBlock(0).first().first;
+  const qint64 codeId = folding.foldingRangesStartingOnBlock(12).first().first;
+  QVERIFY(folding.foldRange(codeId));
+  QVERIFY(!doc.findBlockByNumber(13).isVisible());
+
+  // Insert a line between the two regions: the code range moves down by one,
+  // the heading range does not move at all.
+  QTextCursor cursor(&doc);
+  cursor.setPosition(doc.findBlockByNumber(10).position());
+  cursor.insertText(QStringLiteral("inserted\n"));
+
+  int first = -1;
+  int last = -1;
+  QVERIFY(folding.foldingRangeBlocks(codeId, &first, &last));
+  QCOMPARE(first, 13);
+  QCOMPARE(last, 20);
+
+  // The re-parse reports the shifted extents.
+  QVector<md::FoldingRegion> shifted;
+  shifted.append({0, 9, md::Heading, 1});
+  shifted.append({13, 20, md::FencedCode, 0});
+  provider.updateFoldingRegions(shifted);
+
+  QCOMPARE(folding.foldingRangesStartingOnBlock(13).size(), 1);
+  QCOMPARE(folding.foldingRangesStartingOnBlock(13).first().first, codeId);
+  QCOMPARE(folding.foldingRangesStartingOnBlock(0).first().first, headingId);
+  QVERIFY(folding.isRangeFolded(codeId));
+  QVERIFY(!doc.findBlockByNumber(14).isVisible());
+}
+
+void TestMarkdownFolding::testBulkDeletionReconcilesAtomically() {
+  QTextDocument doc(generateLines(100));
+  TextFolding folding(&doc);
+  MarkdownFoldingProvider provider(&folding, &doc);
+  QVector<md::FoldingRegion> regions;
+  regions.append({0, 89, md::Heading, 1});
+  regions.append({2, 7, md::FencedCode, 0});
+  for (int first = 10; first < 60; first += 10) {
+    regions.append({first, first + 9, md::Blockquote, 0});
+    regions.append({first + 2, first + 7, md::Table, 0});
+  }
+  regions.append({60, 68, md::Table, 0});
+  regions.append({72, 78, md::FencedCode, 0});
+  regions.append({92, 98, md::FencedCode, 0});
+  provider.updateFoldingRegions(regions);
+  for (const auto &region : regions) {
+    const auto starting = folding.foldingRangesStartingOnBlock(region.m_startBlock);
+    QCOMPARE(starting.size(), 1);
+    QVERIFY(folding.foldRange(starting.first().first));
+  }
+  auto idAt = [&](int p_block) {
+    return folding.foldingRangesStartingOnBlock(p_block).first().first;
+  };
+  QVector<qint64> removedIds;
+  for (int first = 10; first < 60; first += 10) {
+    removedIds.append(idAt(first));
+    removedIds.append(idAt(first + 2));
+  }
+  const auto orphanId =
+      folding.newFoldingRange(TextBlockRange(doc.findBlockByNumber(85), doc.findBlockByNumber(88)),
+                              TextFolding::Persistent | TextFolding::Folded);
+  QVERIFY(orphanId != TextFolding::InvalidRangeId);
+  struct ExpectedRange {
+    md::FoldingRegion m_region;
+    qint64 m_id;
+    bool m_folded;
+    bool m_providerOwned;
+  };
+  QVector<ExpectedRange> expected;
+  expected.append({{0, 39, md::Heading, 1}, idAt(0), true, true});
+  expected.append({{2, 7, md::FencedCode, 0}, idAt(2), true, true});
+  expected.append({{10, 18, md::Table, 0}, idAt(60), true, true});
+  expected.append({{22, 28, md::FencedCode, 0}, idAt(72), true, true});
+  expected.append({{35, 38, md::Table, 0}, orphanId, true, false});
+  expected.append({{42, 48, md::FencedCode, 0}, idAt(92), true, true});
+  auto checkSnapshot = [&]() {
+    QCOMPARE(doc.blockCount(), 50);
+    for (auto id : removedIds) {
+      QVERIFY(!folding.foldingRangeBlocks(id, nullptr, nullptr));
+      QVERIFY(!folding.isRangeFolded(id));
+    }
+    for (int block = 0; block < doc.blockCount(); ++block) {
+      const ExpectedRange *rangeAtBlock = nullptr;
+      bool visible = true;
+      for (const auto &range : expected) {
+        if (range.m_region.m_startBlock == block) {
+          rangeAtBlock = &range;
+        }
+        if (range.m_folded && block > range.m_region.m_startBlock &&
+            block < range.m_region.m_endBlock) {
+          visible = false;
+        }
+      }
+      QCOMPARE(doc.findBlockByNumber(block).isVisible(), visible);
+      const auto starting = folding.foldingRangesStartingOnBlock(block);
+      QCOMPARE(starting.size(), rangeAtBlock ? 1 : 0);
+      if (!rangeAtBlock) {
+        continue;
+      }
+      const auto &range = *rangeAtBlock;
+      const auto id = starting.first().first;
+      if (range.m_id != TextFolding::InvalidRangeId) {
+        QCOMPARE(id, range.m_id);
+      }
+      int first = -1;
+      int last = -1;
+      QVERIFY(folding.foldingRangeBlocks(id, &first, &last));
+      QCOMPARE(first, range.m_region.m_startBlock);
+      QCOMPARE(last, range.m_region.m_endBlock);
+      QCOMPARE(folding.isRangeFolded(id), range.m_folded);
+      if (range.m_region.m_type != md::Heading) {
+        bool folded = (range.m_folded == false);
+        const auto type = range.m_region.m_type == md::FencedCode ? PreviewElementType::Code
+                                                                  : PreviewElementType::Table;
+        QCOMPARE(provider.tryRegionFolded(type, first, last, &folded), range.m_providerOwned);
+        if (range.m_providerOwned) {
+          QCOMPARE(folded, range.m_folded);
+        }
+      }
+    }
+  };
+  int notifications = 0;
+  QObject observer;
+  connect(&folding, &TextFolding::foldingRangesChanged, &observer, [&]() {
+    ++notifications;
+    checkSnapshot();
+  });
+  QTextCursor cursor(&doc);
+  cursor.setPosition(doc.findBlockByNumber(10).position());
+  cursor.setPosition(doc.findBlockByNumber(60).position(), QTextCursor::KeepAnchor);
+  cursor.removeSelectedText();
+  QVERIFY(notifications > 0);
+  checkSnapshot();
+
+  // The parser replaces a surviving region and retires non-provider ranges too.
+  removedIds.append(expected[3].m_id);
+  removedIds.append(orphanId);
+  expected[3] = {{22, 30, md::FencedCode, 0}, TextFolding::InvalidRangeId, false, true};
+  expected.removeAt(4);
+  QVector<md::FoldingRegion> updated;
+  for (const auto &range : expected) {
+    updated.append(range.m_region);
+  }
+  // A duplicate wrapper must not create a second range or steal the table entry.
+  updated.append({10, 18, md::Blockquote, 0});
+  int before = notifications;
+  provider.updateFoldingRegions(updated);
+  QCOMPARE(notifications - before, 1);
+  checkSnapshot();
+  expected[3].m_id = idAt(22);
+  before = notifications;
+  provider.updateFoldingRegions(updated);
+  QCOMPARE(notifications - before, 1);
+  checkSnapshot();
+
+  expected[0].m_folded = false;
+  QVERIFY(folding.toggleRange(expected[0].m_id));
+  checkSnapshot();
+}
+
+void TestMarkdownFolding::testEndpointReplacementDoesNotInheritFoldState() {
+  QTextDocument doc(generateLines(30));
+  TextFolding folding(&doc);
+  MarkdownFoldingProvider provider(&folding, &doc);
+  QVector<md::FoldingRegion> regions;
+  regions.append({0, 29, md::Heading, 1});
+  regions.append({3, 7, md::Table, 0});
+  regions.append({10, 15, md::FencedCode, 0});
+  provider.updateFoldingRegions(regions);
+  const auto headingId = folding.foldingRangesStartingOnBlock(0).first().first;
+  const auto replacedId = folding.foldingRangesStartingOnBlock(3).first().first;
+  const auto survivingId = folding.foldingRangesStartingOnBlock(10).first().first;
+  QVector<PreviewedRange> widgets;
+  widgets.append(makeWidgetRange(1, 3, 7, PreviewElementType::Table));
+  widgets.append(makeWidgetRange(2, 10, 15, PreviewElementType::Code));
+  // Settle the old table open because of the caret, then fold it manually.
+  provider.applyPreviewAutoFold(widgets, 4);
+  QVERIFY(!folding.isRangeFolded(replacedId));
+  QVERIFY(folding.foldRange(replacedId));
+  QVERIFY(folding.isRangeFolded(survivingId));
+
+  int phase = 0;
+  int notifications = 0;
+  QObject observer;
+  connect(&folding, &TextFolding::foldingRangesChanged, &observer, [&]() {
+    ++notifications;
+    QVERIFY(!folding.foldingRangeBlocks(replacedId, nullptr, nullptr));
+    QVERIFY(!folding.isRangeFolded(replacedId));
+    for (int block = 0; block < doc.blockCount(); ++block) {
+      const auto starting = folding.foldingRangesStartingOnBlock(block);
+      QCOMPARE(starting.size(), block == 0 || block == 10 || (phase > 0 && block == 3) ? 1 : 0);
+      if (block == 0) {
+        QCOMPARE(starting.first().first, headingId);
+      } else if (block == 10) {
+        QCOMPARE(starting.first().first, survivingId);
+      } else if (block == 3 && phase > 0) {
+        QVERIFY(starting.first().first != replacedId);
+        QCOMPARE(folding.isRangeFolded(starting.first().first), phase == 2);
+      }
+      const bool hidden = (block > 10 && block < 15) || (phase == 2 && block > 3 && block < 7);
+      QCOMPARE(doc.findBlockByNumber(block).isVisible(), !hidden);
+    }
+    bool folded = false;
+    QVERIFY(provider.tryRegionFolded(PreviewElementType::Code, 10, 15, &folded));
+    QVERIFY(folded);
+    QCOMPARE(provider.tryRegionFolded(PreviewElementType::Table, 3, 7, &folded), phase > 0);
+    if (phase > 0) {
+      QCOMPARE(folded, phase == 2);
+    }
+  });
+
+  // Replacing just the first endpoint's text retains the same QTextBlock and
+  // numeric extent, but not the source whose fold state belonged to the old ID.
+  QTextCursor cursor(&doc);
+  const int firstPosition = doc.findBlockByNumber(3).position();
+  cursor.setPosition(firstPosition);
+  cursor.setPosition(firstPosition + doc.findBlockByNumber(3).length() - 1,
+                     QTextCursor::KeepAnchor);
+  cursor.insertText(QStringLiteral("replacement table header"));
+  QCOMPARE(doc.blockCount(), 30);
+  QVERIFY(notifications > 0);
+  QVERIFY(!folding.toggleRange(replacedId));
+  QVERIFY(!folding.removeFoldingRange(replacedId));
+  phase = 1;
+  const int before = notifications;
+  provider.updateFoldingRegions(regions);
+  QCOMPARE(notifications - before, 1);
+  const auto freshId = folding.foldingRangesStartingOnBlock(3).first().first;
+  QVERIFY(freshId > survivingId);
+  QVERIFY(!folding.isRangeFolded(freshId));
+
+  // The replacement must not inherit the old table's settled-open decision.
+  phase = 2;
+  provider.applyPreviewAutoFold(widgets, -1);
+  QVERIFY(folding.isRangeFolded(freshId));
+  QVERIFY(folding.isRangeFolded(survivingId));
+}
+
+void TestMarkdownFolding::testReconcileHeadingLevelChange() {
+  QTextDocument doc(generateLines(30));
+  TextFolding folding(&doc);
+  MarkdownFoldingProvider provider(&folding, &doc);
+  QVector<md::FoldingRegion> regions;
+  regions.append({5, 10, md::Heading, 2});
+  regions.append({15, 20, md::Table, 0});
+  provider.updateFoldingRegions(regions);
+  const auto oldId = folding.foldingRangesStartingOnBlock(5).first().first;
+  const auto survivingId = folding.foldingRangesStartingOnBlock(15).first().first;
+  QVERIFY(folding.foldRange(oldId));
+  QVERIFY(folding.foldRange(survivingId));
+  regions[0] = {5, 10, md::Heading, 1};
+  provider.updateFoldingRegions(regions);
+  const auto starting = folding.foldingRangesStartingOnBlock(5);
+  QCOMPARE(starting.size(), 1);
+  QVERIFY(starting.first().first != oldId);
+  QVERIFY(!folding.foldingRangeBlocks(oldId, nullptr, nullptr));
+  QVERIFY(!folding.isRangeFolded(starting.first().first));
+  QVERIFY(doc.findBlockByNumber(6).isVisible());
+  QCOMPARE(folding.foldingRangesStartingOnBlock(15).first().first, survivingId);
+  QVERIFY(folding.isRangeFolded(survivingId));
+  provider.updateFoldingRegions(regions);
+  QCOMPARE(folding.foldingRangesStartingOnBlock(5).first().first, starting.first().first);
+}
+
+void TestMarkdownFolding::testReconcileNotificationCanDisableFolding() {
+  QTextDocument doc(generateLines(35));
+  TextFolding folding(&doc);
+  MarkdownFoldingProvider provider(&folding, &doc);
+  QVector<md::FoldingRegion> regions;
+  regions.append({5, 10, md::Table, 0});
+  regions.append({15, 20, md::FencedCode, 0});
+  provider.updateFoldingRegions(regions);
+  const auto removedId = folding.foldingRangesStartingOnBlock(5).first().first;
+  const auto survivingId = folding.foldingRangesStartingOnBlock(15).first().first;
+  QVERIFY(folding.foldRange(removedId));
+  QVERIFY(folding.foldRange(survivingId));
+  bool disabling = false;
+  int notifications = 0;
+  QObject observer;
+  connect(&folding, &TextFolding::foldingRangesChanged, &observer, [&]() {
+    ++notifications;
+    QVERIFY(!folding.foldingRangeBlocks(removedId, nullptr, nullptr));
+    bool folded = false;
+    QVERIFY(!provider.tryRegionFolded(PreviewElementType::Table, 5, 10, &folded));
+    if (disabling) {
+      QVERIFY(!folding.isEnabled());
+      QVERIFY(folding.isEmpty());
+      QVERIFY(!folding.foldingRangeBlocks(survivingId, nullptr, nullptr));
+      QVERIFY(!provider.tryRegionFolded(PreviewElementType::Code, 15, 20, &folded));
+      QVERIFY(!provider.tryRegionFolded(PreviewElementType::Table, 23, 28, &folded));
+      for (int block = 0; block < doc.blockCount(); ++block) {
+        QVERIFY(doc.findBlockByNumber(block).isVisible());
+        QVERIFY(folding.foldingRangesStartingOnBlock(block).isEmpty());
+      }
+      return;
+    }
+    for (int block = 0; block < doc.blockCount(); ++block) {
+      QCOMPARE(folding.foldingRangesStartingOnBlock(block).size(),
+               block == 15 || block == 23 ? 1 : 0);
+    }
+    QCOMPARE(folding.foldingRangesStartingOnBlock(15).first().first, survivingId);
+    QVERIFY(provider.tryRegionFolded(PreviewElementType::Code, 15, 20, &folded));
+    QVERIFY(folded);
+    QVERIFY(provider.tryRegionFolded(PreviewElementType::Table, 23, 28, &folded));
+    QVERIFY(!folded);
+    disabling = true;
+    folding.setEnabled(false);
+  });
+  QVector<md::FoldingRegion> updated;
+  updated.append({15, 20, md::FencedCode, 0});
+  updated.append({23, 28, md::Table, 0});
+  provider.updateFoldingRegions(updated);
+  QCOMPARE(notifications, 2);
+  QVERIFY(disabling);
+  QVERIFY(!folding.isEnabled());
+  QVERIFY(folding.isEmpty());
+  // A later parse while disabled must not resurrect the just-committed ranges.
+  provider.updateFoldingRegions(updated);
+  QVERIFY(folding.isEmpty());
+}
+
+// A changed end block gets a live range back in one snapshot replacement;
+// the old range cannot block insertion by sharing its start block.
+void TestMarkdownFolding::testReconcileEndBlockChange() {
+  QTextDocument doc(generateLines(30));
+  TextFolding folding(&doc);
+  MarkdownFoldingProvider provider(&folding, &doc);
+
+  QVector<md::FoldingRegion> regions;
+  regions.append({5, 10, md::FencedCode, 0});
+  provider.updateFoldingRegions(regions);
+  QCOMPARE(folding.foldingRangesStartingOnBlock(5).size(), 1);
+
+  QVector<md::FoldingRegion> grown;
+  grown.append({5, 14, md::FencedCode, 0});
+  provider.updateFoldingRegions(grown);
+
+  auto ranges = folding.foldingRangesStartingOnBlock(5);
+  QCOMPARE(ranges.size(), 1);
+  int first = -1;
+  int last = -1;
+  QVERIFY(folding.foldingRangeBlocks(ranges.first().first, &first, &last));
+  QCOMPARE(first, 5);
+  QCOMPARE(last, 14);
+}
+
+// A region whose type changes at the same extent is a different element, so it
+// must not inherit the old range or its settled decision.
+void TestMarkdownFolding::testReconcileTypeChange() {
+  QTextDocument doc(generateLines(30));
+  TextFolding folding(&doc);
+  MarkdownFoldingProvider provider(&folding, &doc);
+
+  QVector<md::FoldingRegion> code;
+  code.append({5, 10, md::FencedCode, 0});
+  provider.updateFoldingRegions(code);
+
+  const qint64 codeId = folding.foldingRangesStartingOnBlock(5).first().first;
+  QVERIFY(folding.foldRange(codeId));
+
+  QVector<md::FoldingRegion> table;
+  table.append({5, 10, md::Table, 0});
+  provider.updateFoldingRegions(table);
+
+  auto ranges = folding.foldingRangesStartingOnBlock(5);
+  QCOMPARE(ranges.size(), 1);
+  QVERIFY(ranges.first().first != codeId);
+  QVERIFY(!folding.isRangeFolded(ranges.first().first));
+  QVERIFY(!folding.foldingRangeBlocks(codeId, nullptr, nullptr));
+
+  // The type is what the query keys on, too.
+  bool folded = true;
+  QVERIFY(!provider.tryRegionFolded(PreviewElementType::Code, 5, 10, &folded));
+  QVERIFY(provider.tryRegionFolded(PreviewElementType::Table, 5, 10, &folded));
+  QVERIFY(!folded);
+}
+
+// A blockquote wrapping nothing but a table emits two regions covering exactly
+// the same blocks, and TextFolding can only hold one. The preview-bearing one
+// has to win, deterministically and over repeated passes.
+void TestMarkdownFolding::testExactExtentDeduplication() {
+  QTextDocument doc(generateLines(30));
+  TextFolding folding(&doc);
+  MarkdownFoldingProvider provider(&folding, &doc);
+
+  QVector<md::FoldingRegion> wrapperFirst;
+  wrapperFirst.append({5, 10, md::Blockquote, 0});
+  wrapperFirst.append({5, 10, md::Table, 0});
+
+  QVector<md::FoldingRegion> tableFirst;
+  tableFirst.append({5, 10, md::Table, 0});
+  tableFirst.append({5, 10, md::Blockquote, 0});
+
+  bool folded = true;
+  for (int i = 0; i < 3; ++i) {
+    provider.updateFoldingRegions(i % 2 == 0 ? wrapperFirst : tableFirst);
+    QCOMPARE(folding.foldingRangesStartingOnBlock(5).size(), 1);
+    QVERIFY(provider.tryRegionFolded(PreviewElementType::Table, 5, 10, &folded));
+    QVERIFY(!folded);
+  }
+
+  // A live wrapper entry at that extent is replaced once the preview-bearing
+  // region appears there: nothing matches the wrapper, so it is removed and
+  // the table is created in its place.
+  MarkdownFoldingProvider second(&folding, &doc);
+  provider.clear();
+
+  QVector<md::FoldingRegion> wrapperOnly;
+  wrapperOnly.append({5, 10, md::Blockquote, 0});
+  second.updateFoldingRegions(wrapperOnly);
+  QCOMPARE(folding.foldingRangesStartingOnBlock(5).size(), 1);
+  QVERIFY(!second.tryRegionFolded(PreviewElementType::Table, 5, 10, &folded));
+
+  second.updateFoldingRegions(wrapperFirst);
+  QCOMPARE(folding.foldingRangesStartingOnBlock(5).size(), 1);
+  QVERIFY(second.tryRegionFolded(PreviewElementType::Table, 5, 10, &folded));
+}
+
+// Live/folded, live/unfolded and "no live range" are three distinct outcomes.
+void TestMarkdownFolding::testTryRegionFolded() {
+  QTextDocument doc(generateLines(30));
+  TextFolding folding(&doc);
+  MarkdownFoldingProvider provider(&folding, &doc);
+
+  QVector<md::FoldingRegion> regions;
+  regions.append({5, 10, md::FencedCode, 0});
+  provider.updateFoldingRegions(regions);
+
+  bool folded = true;
+  QVERIFY(provider.tryRegionFolded(PreviewElementType::Code, 5, 10, &folded));
+  QVERIFY(!folded);
+
+  const qint64 id = folding.foldingRangesStartingOnBlock(5).first().first;
+  QVERIFY(folding.foldRange(id));
+  QVERIFY(provider.tryRegionFolded(PreviewElementType::Code, 5, 10, &folded));
+  QVERIFY(folded);
+
+  // A different extent, a different type and a type which never produces a
+  // folding region are all "no live range".
+  QVERIFY(!provider.tryRegionFolded(PreviewElementType::Code, 5, 11, &folded));
+  QVERIFY(!provider.tryRegionFolded(PreviewElementType::Table, 5, 10, &folded));
+  QVERIFY(!provider.tryRegionFolded(PreviewElementType::Image, 5, 10, &folded));
+
+  provider.clear();
+  QVERIFY(!provider.tryRegionFolded(PreviewElementType::Code, 5, 10, &folded));
+}
+
+// The restored range is created folded and already settled, and it carries the
+// type the parser is going to report, so the next reconciliation keeps it
+// instead of dropping and recreating it.
+void TestMarkdownFolding::testRestoreFoldedRange() {
+  QTextDocument doc(generateLines(30));
+  TextFolding folding(&doc);
+  MarkdownFoldingProvider provider(&folding, &doc);
+
+  provider.restoreFoldedRange(PreviewElementType::Table, 5, 10);
+
+  auto ranges = folding.foldingRangesStartingOnBlock(5);
+  QCOMPARE(ranges.size(), 1);
+  const qint64 id = ranges.first().first;
+  QVERIFY(folding.isRangeFolded(id));
+  QVERIFY(!doc.findBlockByNumber(6).isVisible());
+
+  QVector<md::FoldingRegion> regions;
+  regions.append({5, 10, md::Table, 0});
+  provider.updateFoldingRegions(regions);
+
+  ranges = folding.foldingRangesStartingOnBlock(5);
+  QCOMPARE(ranges.size(), 1);
+  QCOMPARE(ranges.first().first, id);
+  QVERIFY(folding.isRangeFolded(id));
+
+  // A region type which never carries a preview is refused.
+  provider.restoreFoldedRange(PreviewElementType::Image, 15, 20);
+  QCOMPARE(folding.foldingRangesStartingOnBlock(15).size(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// Preview driven auto-folding
+// ---------------------------------------------------------------------------
+
+void TestMarkdownFolding::testAutoFoldWidgetPreview() {
+  QTextDocument doc(generateLines(30));
+  TextFolding folding(&doc);
+  MarkdownFoldingProvider provider(&folding, &doc);
+  provider.setAutoFoldPreviewsEnabled(true);
+
+  QVector<md::FoldingRegion> regions;
+  regions.append({5, 10, md::Table, 0});
+  provider.updateFoldingRegions(regions);
+  const qint64 id = folding.foldingRangesStartingOnBlock(5).first().first;
+
+  QVector<PreviewedRange> ranges;
+  ranges.append(makeWidgetRange(1, 5, 10, PreviewElementType::Table));
+
+  auto states = provider.applyPreviewAutoFold(ranges, -1);
+  QVERIFY(folding.isRangeFolded(id));
+  QVERIFY(!doc.findBlockByNumber(6).isVisible());
+  QCOMPARE(states.size(), 1);
+  QCOMPARE(states.first().first, quint64(1));
+  QVERIFY(states.first().second == PreviewFoldState::Folded);
+
+  // The user unfolds it by hand: the region is settled, so no later pass may
+  // fold it again, and the new state is reported back.
+  QVERIFY(folding.toggleRange(id));
+  QVERIFY(doc.findBlockByNumber(6).isVisible());
+
+  ranges[0].m_foldState = PreviewFoldState::Folded;
+  states = provider.applyPreviewAutoFold(ranges, -1);
+  QVERIFY(!folding.isRangeFolded(id));
+  QCOMPARE(states.size(), 1);
+  QVERIFY(states.first().second == PreviewFoldState::Unfolded);
+
+  // Nothing changed, so nothing is reported.
+  ranges[0].m_foldState = PreviewFoldState::Unfolded;
+  states = provider.applyPreviewAutoFold(ranges, -1);
+  QVERIFY(states.isEmpty());
+  QVERIFY(!folding.isRangeFolded(id));
+
+  // A widget range which does not describe the region exactly is not its
+  // preview.
+  MarkdownFoldingProvider other(&folding, &doc);
+  provider.clear();
+  other.updateFoldingRegions(regions);
+  const qint64 otherId = folding.foldingRangesStartingOnBlock(5).first().first;
+  QVector<PreviewedRange> mismatched;
+  mismatched.append(makeWidgetRange(2, 5, 11, PreviewElementType::Table));
+  mismatched.append(makeWidgetRange(3, 5, 10, PreviewElementType::Code));
+  QVERIFY(other.applyPreviewAutoFold(mismatched, -1).isEmpty());
+  QVERIFY(!folding.isRangeFolded(otherId));
+}
+
+// Folding keeps the first and last block visible, so only a caret in the
+// interior would be hidden by the fold - and a region which was left open for
+// the caret is left open for good.
+void TestMarkdownFolding::testAutoFoldCaretRule() {
+  QTextDocument doc(generateLines(30));
+  TextFolding folding(&doc);
+  MarkdownFoldingProvider provider(&folding, &doc);
+  provider.setAutoFoldPreviewsEnabled(true);
+
+  QVector<md::FoldingRegion> regions;
+  regions.append({5, 10, md::FencedCode, 0});
+  regions.append({15, 20, md::FencedCode, 0});
+  provider.updateFoldingRegions(regions);
+  const qint64 caretId = folding.foldingRangesStartingOnBlock(5).first().first;
+  const qint64 boundaryId = folding.foldingRangesStartingOnBlock(15).first().first;
+
+  QVector<PreviewedRange> ranges;
+  ranges.append(makeWidgetRange(1, 5, 10, PreviewElementType::Code));
+  ranges.append(makeWidgetRange(2, 15, 20, PreviewElementType::Code));
+
+  // The caret sits inside the first region, and on the first block of the
+  // second one - which stays visible when it folds.
+  auto states = provider.applyPreviewAutoFold(ranges, 7);
+  QVERIFY(!folding.isRangeFolded(caretId));
+  QVERIFY(folding.isRangeFolded(boundaryId));
+
+  QHash<quint64, PreviewFoldState> reported;
+  for (const auto &state : states) {
+    reported.insert(state.first, state.second);
+  }
+  QVERIFY(reported.value(1) == PreviewFoldState::Unfolded);
+  QVERIFY(reported.value(2) == PreviewFoldState::Folded);
+
+  // Moving the caret away does not re-decide the region it kept open.
+  ranges[0].m_foldState = PreviewFoldState::Unfolded;
+  ranges[1].m_foldState = PreviewFoldState::Folded;
+  QVERIFY(provider.applyPreviewAutoFold(ranges, 0).isEmpty());
+  QVERIFY(!folding.isRangeFolded(caretId));
+}
+
+void TestMarkdownFolding::testAutoFoldPaintedPreview() {
+  QTextDocument doc(generateLines(40));
+  TextFolding folding(&doc);
+  MarkdownFoldingProvider provider(&folding, &doc);
+  provider.setAutoFoldPreviewsEnabled(true);
+
+  // A painted code preview drawn on the region's last block, which folding
+  // keeps visible.
+  auto lastBlock = doc.findBlockByNumber(10);
+  BlockPreviewData::get(lastBlock)->insert(
+      new PreviewData(PreviewData::CodeBlock, 1, 0, lastBlock.length() - 1, 0, false,
+                      QStringLiteral("code-preview"), QSize(80, 40), 0));
+
+  // One drawn on an interior block only, which folding hides.
+  auto interiorBlock = doc.findBlockByNumber(23);
+  BlockPreviewData::get(interiorBlock)
+      ->insert(new PreviewData(PreviewData::CodeBlock, 1, 0, interiorBlock.length() - 1, 0, false,
+                               QStringLiteral("interior-preview"), QSize(80, 40), 0));
+
+  QVector<md::FoldingRegion> regions;
+  regions.append({5, 10, md::FencedCode, 0});
+  regions.append({20, 26, md::FencedCode, 0});
+  // No preview at all.
+  regions.append({30, 36, md::FencedCode, 0});
+  provider.updateFoldingRegions(regions);
+
+  const qint64 previewedId = folding.foldingRangesStartingOnBlock(5).first().first;
+  const qint64 interiorId = folding.foldingRangesStartingOnBlock(20).first().first;
+  const qint64 bareId = folding.foldingRangesStartingOnBlock(30).first().first;
+
+  // A painted preview has no identity, so nothing is ever reported for it.
+  QVERIFY(provider.applyPreviewAutoFold(QVector<PreviewedRange>(), -1).isEmpty());
+  QVERIFY(folding.isRangeFolded(previewedId));
+  QVERIFY(!folding.isRangeFolded(interiorId));
+  QVERIFY(!folding.isRangeFolded(bareId));
+
+  // Probing must not install block user data on a block which had none.
+  QVERIFY(doc.findBlockByNumber(30).userData() == nullptr);
+  QVERIFY(doc.findBlockByNumber(36).userData() == nullptr);
+  QVERIFY(doc.findBlockByNumber(20).userData() == nullptr);
+}
+
+// A wrapper region which merely *contains* a previewed element never folds:
+// the region type is what decides which previews count.
+void TestMarkdownFolding::testAutoFoldSkipsWrapperRegion() {
+  QTextDocument doc(generateLines(30));
+  TextFolding folding(&doc);
+  MarkdownFoldingProvider provider(&folding, &doc);
+  provider.setAutoFoldPreviewsEnabled(true);
+
+  QVector<md::FoldingRegion> regions;
+  regions.append({5, 20, md::Heading, 1});
+  regions.append({8, 12, md::FencedCode, 0});
+  provider.updateFoldingRegions(regions);
+
+  const qint64 headingId = folding.foldingRangesStartingOnBlock(5).first().first;
+  const qint64 codeId = folding.foldingRangesStartingOnBlock(8).first().first;
+
+  QVector<PreviewedRange> ranges;
+  ranges.append(makeWidgetRange(1, 8, 12, PreviewElementType::Code));
+  provider.applyPreviewAutoFold(ranges, -1);
+
+  QVERIFY(folding.isRangeFolded(codeId));
+  QVERIFY(!folding.isRangeFolded(headingId));
+  QVERIFY(doc.findBlockByNumber(6).isVisible());
+  QVERIFY(!doc.findBlockByNumber(9).isVisible());
+}
+
+// The option is read exactly once per region: a region settled unfolded while
+// it was off stays unfolded when it is turned on afterwards.
+void TestMarkdownFolding::testAutoFoldOptionOff() {
+  QTextDocument doc(generateLines(30));
+  TextFolding folding(&doc);
+  MarkdownFoldingProvider provider(&folding, &doc);
+  provider.setAutoFoldPreviewsEnabled(false);
+
+  QVector<md::FoldingRegion> regions;
+  regions.append({5, 10, md::Table, 0});
+  provider.updateFoldingRegions(regions);
+  const qint64 id = folding.foldingRangesStartingOnBlock(5).first().first;
+
+  QVector<PreviewedRange> ranges;
+  ranges.append(makeWidgetRange(1, 5, 10, PreviewElementType::Table));
+  auto states = provider.applyPreviewAutoFold(ranges, -1);
+  QVERIFY(!folding.isRangeFolded(id));
+  QCOMPARE(states.size(), 1);
+  QVERIFY(states.first().second == PreviewFoldState::Unfolded);
+
+  provider.setAutoFoldPreviewsEnabled(true);
+  ranges[0].m_foldState = PreviewFoldState::Unfolded;
+  QVERIFY(provider.applyPreviewAutoFold(ranges, -1).isEmpty());
+  QVERIFY(!folding.isRangeFolded(id));
+
+  // A fold and an unfold between two passes cancel out, and the pass only ever
+  // samples the current state, so nothing is lost by the coalescing.
+  QVERIFY(folding.foldRange(id));
+  QVERIFY(folding.toggleRange(id));
+  QVERIFY(provider.applyPreviewAutoFold(ranges, -1).isEmpty());
+  QVERIFY(!folding.isRangeFolded(id));
+}
+
+// A preview which already knows its state has its fold restored, even with the
+// option off: requirement 2 does not depend on requirement 1.
+void TestMarkdownFolding::testAutoFoldRestoresReportedState() {
+  QTextDocument doc(generateLines(30));
+  TextFolding folding(&doc);
+  MarkdownFoldingProvider provider(&folding, &doc);
+  provider.setAutoFoldPreviewsEnabled(false);
+
+  QVector<md::FoldingRegion> regions;
+  regions.append({5, 10, md::Table, 0});
+  provider.updateFoldingRegions(regions);
+  const qint64 id = folding.foldingRangesStartingOnBlock(5).first().first;
+
+  QVector<PreviewedRange> ranges;
+  ranges.append(makeWidgetRange(1, 5, 10, PreviewElementType::Table, PreviewFoldState::Folded));
+  auto states = provider.applyPreviewAutoFold(ranges, -1);
+  QVERIFY(folding.isRangeFolded(id));
+  // The live state now agrees with what the preview remembered.
+  QVERIFY(states.isEmpty());
+}
+
+// Text folding being switched off must never hide source, and must not destroy
+// what a widget preview remembers.
+void TestMarkdownFolding::testAutoFoldWithTextFoldingDisabled() {
+  QTextDocument doc(generateLines(30));
+  TextFolding folding(&doc);
+  MarkdownFoldingProvider provider(&folding, &doc);
+  provider.setAutoFoldPreviewsEnabled(true);
+
+  QVector<md::FoldingRegion> regions;
+  regions.append({5, 10, md::Table, 0});
+  provider.updateFoldingRegions(regions);
+  const qint64 id = folding.foldingRangesStartingOnBlock(5).first().first;
+
+  QVector<PreviewedRange> ranges;
+  ranges.append(makeWidgetRange(1, 5, 10, PreviewElementType::Table, PreviewFoldState::Folded));
+
+  // Switching folding off clears every range, which is what makes the editor
+  // reset the provider's table.
+  folding.setEnabled(false);
+  provider.resetState();
+  QVERIFY(!folding.foldingRangeBlocks(id, nullptr, nullptr));
+
+  // Parsing while disabled must not recreate ranges or hide source.
+  provider.updateFoldingRegions(regions);
+  QVERIFY(folding.foldingRangesStartingOnBlock(5).isEmpty());
+  QVERIFY(provider.applyPreviewAutoFold(ranges, -1).isEmpty());
+  QVERIFY(doc.findBlockByNumber(6).isVisible());
+
+  // No state may be reported: answering "unfolded" would let a rewrite
+  // overwrite what the preview remembers.
+  bool folded = true;
+  QVERIFY(!provider.tryRegionFolded(PreviewElementType::Table, 5, 10, &folded));
+
+  provider.restoreFoldedRange(PreviewElementType::Table, 15, 20);
+  QCOMPARE(folding.foldingRangesStartingOnBlock(15).size(), 0);
+  QVERIFY(doc.findBlockByNumber(16).isVisible());
+
+  // Re-enabling restores the state the widget preview remembered, on the next
+  // pass, without the option having to be involved.
+  folding.setEnabled(true);
+  provider.updateFoldingRegions(regions);
+  provider.applyPreviewAutoFold(ranges, -1);
+  QVERIFY(!doc.findBlockByNumber(6).isVisible());
+}
+
+// The rewrite path folds the recreated range in the same event-loop turn, so
+// the source never visibly expands, and the next parse keeps it.
+void TestMarkdownFolding::testRestoreFoldAfterInPlaceRewrite() {
+  const QString table = QStringLiteral("| Left | Center | Right |\n"
+                                       "| :--- | :----: | ----: |\n"
+                                       "| a    | b      | c     |\n"
+                                       "| d    | e      | f     |");
+  QTextDocument doc(QStringLiteral("# Title\n\nintro\n") + table +
+                    QStringLiteral("\n\ntail 1\ntail 2"));
+
+  TextFolding folding(&doc);
+  MarkdownFoldingProvider provider(&folding, &doc);
+
+  QVector<md::FoldingRegion> regions;
+  regions.append({0, doc.blockCount() - 1, md::Heading, 1});
+  regions.append({3, 6, md::Table, 0});
+  provider.updateFoldingRegions(regions);
+
+  const qint64 tableId = folding.foldingRangesStartingOnBlock(3).first().first;
+  QVERIFY(folding.foldRange(tableId));
+
+  bool folded = false;
+  QVERIFY(provider.tryRegionFolded(PreviewElementType::Table, 3, 6, &folded));
+  QVERIFY(folded);
+
+  // The rewrite adds a row, so everything below it shifts too.
+  const QString rewritten = table + QStringLiteral("\n| g    | h      | i     |");
+  const QTextBlock firstRow = doc.findBlockByNumber(3);
+  const QTextBlock lastRow = doc.findBlockByNumber(6);
+  QTextCursor cursor(&doc);
+  cursor.beginEditBlock();
+  cursor.setPosition(firstRow.position());
+  cursor.setPosition(lastRow.position() + lastRow.length() - 1, QTextCursor::KeepAnchor);
+  cursor.insertText(rewritten);
+  cursor.endEditBlock();
+
+  // Replacing the endpoint source has already discarded the old range.
+  QCOMPARE(folding.foldingRangesStartingOnBlock(3).size(), 0);
+
+  provider.restoreFoldedRange(PreviewElementType::Table, 3, 7);
+  auto ranges = folding.foldingRangesStartingOnBlock(3);
+  QCOMPARE(ranges.size(), 1);
+  const qint64 restoredId = ranges.first().first;
+  QVERIFY(folding.isRangeFolded(restoredId));
+  QVERIFY(!doc.findBlockByNumber(4).isVisible());
+
+  // The next parse describes the rewritten document and must keep the very
+  // same range, still folded.
+  QVector<md::FoldingRegion> reparsed;
+  reparsed.append({0, doc.blockCount() - 1, md::Heading, 1});
+  reparsed.append({3, 7, md::Table, 0});
+  provider.updateFoldingRegions(reparsed);
+
+  ranges = folding.foldingRangesStartingOnBlock(3);
+  QCOMPARE(ranges.size(), 1);
+  QCOMPARE(ranges.first().first, restoredId);
+  QVERIFY(folding.isRangeFolded(restoredId));
+  QVERIFY(!doc.findBlockByNumber(4).isVisible());
+}
+
+QTEST_MAIN(tests::TestMarkdownFolding)

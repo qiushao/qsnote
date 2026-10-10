@@ -1,0 +1,132 @@
+#ifndef TESTS_TEST_MARKDOWNPARSER_H
+#define TESTS_TEST_MARKDOWNPARSER_H
+
+#include <QtTest>
+
+namespace tests {
+class TestMarkdownParser : public QObject {
+  Q_OBJECT
+private slots:
+  void initTestCase();
+  void cleanupTestCase();
+
+  // T5: Block element tests
+  void testHeadings();
+  void testBlockquotes();
+  void testBlockquoteNestingDepth();
+  void testHorizontalRules();
+  void testFencedCodeBlocks();
+  void testFencedCodeBlockIndentationFormat();
+  void testHTMLNodesAreStyledLikeCode();
+  void testFontColorHighlighting_data();
+  void testFontColorHighlighting();
+  void testFontColorPreservesMarkdownAndUpdates();
+  void testFontColorUpdatesUneditedContinuation();
+  void testIndentedCodeBlocks();
+  void testHTMLBlocks();
+  void testHtmlBlockClosingTagIsStyled();
+  void testHtmlBlockKeepsContainerPrefixUnstyled();
+  void testLists();
+  void testListStructureSourceSpans();
+  void testListNumberEditsPreserveStructure();
+  void testFrontmatter();
+  void testDisplayFormula();
+  void testTables();
+
+  // T6: Inline element tests
+  void testEmphasis();
+  void testStrong();
+  void testInlineCode();
+  void testLinks();
+  void testAutoLinks();
+  void testImages();
+  void testHTMLInline();
+  void testHTMLEntities();
+  void testComments();
+  void testReferences();
+  void testConcealUrlSpans();
+  void testConcealReferenceDestinations();
+  void testStrikethrough();
+  void testMark();
+  void testFootnotes();
+  void testInlineEquation();
+  void testInlineDisplayEquation_data();
+  void testInlineDisplayEquation();
+  void testInlineDisplayEquationDoesNotCrossLines();
+
+  // T7: Edge case tests
+  void testSurrogatePairs();
+  void testEmptyElements();
+  void testUnclosedDelimiters();
+  void testDegenerate();
+  void testNestedOverlap();
+  void testAllExtensions();
+
+  // T13: Performance benchmark
+  void testPerformance();
+
+  // Typed preview element extraction.
+  void testTableElementBasic();
+  void testTableElementAlignments();
+  void testTableElementRawCells();
+  void testTableElementEscapedPipes();
+  void testTableElementEmptyAndRaggedRows();
+  void testTableElementSurrogatePositions();
+  void testTableElementNestedPrefixes();
+  void testTableElementInvalid();
+  void testImageCodeMathElements();
+  void testHeadingElementsPublished();
+
+  // Shared cmark source-position mapping, and the `=WxH` size extension.
+  void testCmarkNodeSpans();
+  void testImageSizeElements();
+
+  // The unified snapshot API.
+  void testFetchImageLinksSpans();
+  void testFetchImageLinksWithoutUrlSpan();
+  void testFetchImageLinksClassification();
+  void testFetchImageLinksSortContract();
+  void testWalkerAndSnapshotAgreeOnRegions();
+  void testImageLinkInvariants();
+  void testNestedImages();
+  void testFileUrlClassification();
+
+  // The HTML `<img>` scanner, and HTML images through the snapshot API and the
+  // live walker.
+  void testHtmlImgScannerQuoting();
+  void testHtmlImgScannerSuppression();
+  void testHtmlImgScannerAttrSpans();
+  void testFetchImageLinksHtml();
+  void testFetchImageLinksHtmlContainers();
+  void testFetchImageLinksHtmlRawText();
+  void testFetchImageLinksHtmlAfterMultilineConstruct();
+  void testFetchImageLinksMixedOrdering();
+  void testWalkerHtmlImages();
+  void testGenerateImageTag();
+
+  // The HTML `<table>` scanner and the canonical subset of decision D-i, plus
+  // the Markdown payload codec and HTML tables through the live walker.
+  void testHtmlTableScannerBasic();
+  void testHtmlTableScannerSpans();
+  void testHtmlTableScannerRefusals();
+  void testHtmlTableScannerPayloads();
+  void testHtmlTablePayloadCodec();
+  void testHtmlTableAttrRewrite();
+  void testWalkerHtmlTables();
+  void testWalkerHtmlTableContainers();
+  void testSingleTableScannerGate();
+  void testScannerRawTextStatesAgree();
+  void testHtmlTableClosingTagsAreSingleLine();
+  void testHtmlTableDuplicateAttrRewrite();
+  void testHtmlTableHostileSpans();
+  void testHtmlTableCellTagBalance();
+  void testWalkerHtmlTableUnderListItem();
+  void testWalkerHtmlTableFoldingRegion();
+
+  // Extra selection invalidation
+  void testCursorLineInvalidationExpanded_data();
+  void testCursorLineInvalidationExpanded();
+};
+} // namespace tests
+
+#endif

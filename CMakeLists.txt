@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(qsnote VERSION 1.0.0 LANGUAGES CXX)
+project(qsnote VERSION 1.0.0 LANGUAGES C CXX)
 
 set(APP_VERSION "${PROJECT_VERSION}" CACHE STRING "Application version")
 
@@ -19,7 +19,7 @@ if (WIN32 AND DEFINED ENV{Qt6_DIR})
     list(PREPEND CMAKE_PREFIX_PATH "$ENV{Qt6_DIR}")
 endif ()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets WebEngineWidgets WebChannel)
 
 option(QSNOTE_CLANG_TIDY_ENABLE "Run clang-tidy" ON)
 if (QSNOTE_CLANG_TIDY_ENABLE AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -28,6 +28,7 @@ if (QSNOTE_CLANG_TIDY_ENABLE AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif ()
 
 include(GNUInstallDirs)
+add_subdirectory(third_party)
 add_subdirectory(src)
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -50,12 +51,16 @@ if (QSNOTE_BUILD_TESTS)
     add_executable(qsnote_ui_tests
             tests/UiTest.cpp
             src/ui/MainWindow.cpp
+            src/ui/MarkdownEditor.cpp
+            src/ui/MarkdownPreview.cpp
             src/ui/FlowLayout.cpp
             src/core/NotebookStore.cpp
             src/resources/ui.qrc
+            third_party/vtextedit/demo/data/syntax/syntax.qrc
+            third_party/vnote-web.qrc
     )
     target_include_directories(qsnote_ui_tests PRIVATE src)
-    target_link_libraries(qsnote_ui_tests PRIVATE Qt6::Widgets Qt6::Test)
+    target_link_libraries(qsnote_ui_tests PRIVATE Qt6::Widgets Qt6::Test Qt6::WebEngineWidgets Qt6::WebChannel VTextEdit)
     add_test(NAME qsnote_ui COMMAND qsnote_ui_tests)
-    set_tests_properties(qsnote_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_DATA_HOME=${CMAKE_BINARY_DIR}/test-data")
+    set_tests_properties(qsnote_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu;XDG_DATA_HOME=${CMAKE_BINARY_DIR}/test-data")
 endif ()

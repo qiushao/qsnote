@@ -38,7 +38,7 @@ QTabBar::tab { background: #f6f7f9; color: #8a8f98; border-right: 1px solid #e3e
 QTabBar::tab:selected { background: #ffffff; color: #24292f; border-top-color: #3b6fd4; }
 QTabBar::close-button { image: url(:/icons/close.xpm); subcontrol-position: right; width: 16px; height: 16px; border-radius: 4px; }
 QTabBar::close-button:hover { background: #eef0f3; }
-QPlainTextEdit#editor { border: none; background: #ffffff; padding: 14px 20px; font-family: "Liberation Mono", Consolas, "Noto Sans CJK SC", monospace; font-size: 14px; selection-background-color: #e8effc; }
+QTextEdit#editor { border: none; background: #ffffff; padding: 14px 20px; selection-background-color: #e8effc; }
 QTextBrowser { border: none; background: #ffffff; padding: 14px 24px; selection-background-color: #e8effc; }
 QScrollBar:vertical { background: transparent; width: 8px; margin: 0; }
 QScrollBar:horizontal { background: transparent; height: 8px; margin: 0; }

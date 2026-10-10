@@ -1,0 +1,1566 @@
+#include <vtextedit/vtexteditor.h>
+
+#include <inputmode/abstractinputmode.h>
+#include <inputmode/inputmodemgr.h>
+#include <inputmode/viinputmode.h>
+#include <inputmode/viinputmodefactory.h>
+#include <katevi/interface/kateviconfig.h>
+#include <vtextedit/textblockdata.h>
+#include <vtextedit/texteditorconfig.h>
+#include <vtextedit/theme.h>
+#include <vtextedit/viconfig.h>
+#include <vtextedit/vtextedit.h>
+
+#include "editorcompleter.h"
+#include "editorextraselection.h"
+#include "editorindicatorsborder.h"
+#include "editorinputmode.h"
+#include "indicatorsborder.h"
+#include "inputmodestatuswidget.h"
+#include "ksyntaxhighlighterwrapper.h"
+#include "plaintexthighlighter.h"
+#include "statusindicator.h"
+#include "syntaxhighlighter.h"
+#include "textfolding.h"
+
+#include <Repository>
+#include <Theme>
+#include <utils/utils.h>
+#include <vtextedit/spellchecker.h>
+#include <vtextedit/texteditutils.h>
+#include <vtextedit/textutils.h>
+
+#include <QHBoxLayout>
+#include <QHash>
+#include <QMenu>
+#include <QPair>
+#include <QRegularExpression>
+#include <QScrollBar>
+#include <QTextBlockFormat>
+#include <QTimer>
+#include <QToolTip>
+
+using namespace vte;
+
+// Maximum number of lines to search backwards for a syntax folding range
+// containing the cursor line. Mirrors the constant used by IndicatorsBorder.
+static const int c_maxNumberOfLinesToSearchBackwardsForSyntaxFolding = 1024;
+
+int VTextEditor::s_instanceCount = 0;
+
+Completer *VTextEditor::s_completer = nullptr;
+
+void VTextEditor::FindResultCache::clear() {
+  m_start = -1;
+  m_end = -1;
+
+  m_texts.clear();
+  m_flags = FindFlag::None;
+  m_result.clear();
+  m_regExpMatches.clear();
+}
+
+bool VTextEditor::FindResultCache::matched(const QStringList &p_texts, FindFlags p_flags,
+                                           int p_start, int p_end) const {
+  return (m_flags & ~FindFlag::FindBackward) == (p_flags & ~FindFlag::FindBackward) &&
+         m_start == p_start && m_end == p_end && m_texts == p_texts;
+}
+
+void VTextEditor::FindResultCache::update(const QStringList &p_texts, FindFlags p_flags,
+                                          int p_start, int p_end,
+                                          const QList<QTextCursor> &p_result,
+                                          const QList<QRegularExpressionMatch> &p_regExpMatches) {
+  m_texts = p_texts;
+  m_flags = p_flags;
+  m_start = p_start;
+  m_end = p_end;
+  m_result = p_result;
+  m_regExpMatches = p_regExpMatches;
+}
+
+VTextEditor::VTextEditor(const QSharedPointer<TextEditorConfig> &p_config,
+                         const QSharedPointer<TextEditorParameters> &p_paras, QWidget *p_parent)
+    : QWidget(p_parent), m_config(p_config), m_parameters(p_paras) {
+  if (!m_config) {
+    m_config = QSharedPointer<TextEditorConfig>::create();
+  }
+
+  if (!m_parameters) {
+    m_parameters = QSharedPointer<TextEditorParameters>::create();
+  }
+
+  setupUI();
+
+  setupTextFolding();
+
+  setupExtraSelection();
+
+  setupCompleter();
+
+  connect(m_textEdit, &VTextEdit::contentsChanged, this, &VTextEditor::clearFindResultCache);
+
+  // Status widget.
+  connect(m_textEdit, &QTextEdit::cursorPositionChanged, this,
+          &VTextEditor::updateCursorOfStatusWidget);
+  connect(this, &VTextEditor::syntaxChanged, this, &VTextEditor::updateSyntaxOfStatusWidget);
+  connect(this, &VTextEditor::modeChanged, this, &VTextEditor::updateModeOfStatusWidget);
+
+  // Input method.
+  connect(this, &VTextEditor::modeChanged, this, &VTextEditor::updateInputMethodEnabled);
+
+  updateFromConfig();
+
+  ++s_instanceCount;
+
+  // Trigger necessary parts after init.
+  m_extraSelectionMgr->updateAllExtraSelections();
+}
+
+VTextEditor::~VTextEditor() {
+  --s_instanceCount;
+
+  if (s_instanceCount == 0) {
+    delete s_completer;
+    s_completer = nullptr;
+  }
+}
+
+void VTextEditor::setupUI() {
+  auto mainLayout = new QHBoxLayout(this);
+  mainLayout->setContentsMargins(0, 0, 0, 0);
+  mainLayout->setSpacing(0);
+
+  setupTextEdit();
+
+  setupIndicatorsBorder();
+
+  mainLayout->addWidget(m_indicatorsBorder);
+  mainLayout->addWidget(m_textEdit);
+}
+
+static IndicatorsBorder::LineNumberType
+indicatorsBorderLineNumberType(VTextEditor::LineNumberType p_type) {
+  return static_cast<IndicatorsBorder::LineNumberType>(static_cast<int>(p_type));
+}
+
+void VTextEditor::setupIndicatorsBorder() {
+  m_indicatorsBorderInterface.reset(new EditorIndicatorsBorder(this));
+  m_indicatorsBorder =
+      new IndicatorsBorder(m_indicatorsBorderInterface.data(),
+                           indicatorsBorderLineNumberType(m_config->m_lineNumberType),
+                           m_config->m_textFoldingEnabled, this);
+
+  connect(m_textEdit, &VTextEdit::cursorLineChanged, m_indicatorsBorder,
+          &IndicatorsBorder::updateBorder);
+
+  auto sb = m_textEdit->verticalScrollBar();
+  if (sb) {
+    connect(m_textEdit->verticalScrollBar(), &QScrollBar::valueChanged, m_indicatorsBorder,
+            &IndicatorsBorder::updateBorder);
+  }
+
+  connect(m_textEdit, &VTextEdit::contentsChanged, m_indicatorsBorder,
+          &IndicatorsBorder::updateBorder);
+
+  connect(m_textEdit, &VTextEdit::resized, m_indicatorsBorder, &IndicatorsBorder::updateBorder);
+}
+
+void VTextEditor::setupTextEdit() {
+  m_textEdit = new VTextEdit(this);
+
+  m_textEdit->setAcceptRichText(false);
+  // We don't need its border.
+  m_textEdit->setFrameStyle(QFrame::NoFrame);
+
+  setFocusProxy(m_textEdit);
+
+  m_textEdit->installEventFilter(this);
+
+  auto sb = m_textEdit->verticalScrollBar();
+  if (sb) {
+    m_topLineChangedTimer = new QTimer(this);
+    m_topLineChangedTimer->setSingleShot(true);
+    m_topLineChangedTimer->setInterval(300);
+    connect(m_topLineChangedTimer, &QTimer::timeout, this, &VTextEditor::topLineChanged);
+    connect(sb, &QScrollBar::valueChanged, m_topLineChangedTimer, QOverload<>::of(&QTimer::start));
+  }
+}
+
+void VTextEditor::setText(const QString &p_text) {
+  m_textEdit->setPlainText(p_text);
+  if (m_config->m_lineEndingPolicy == LineEndingPolicy::File) {
+    m_lineEnding = TextUtils::detectLineEnding(p_text);
+  }
+
+  applyLineSpacing();
+}
+
+QString VTextEditor::getText() const {
+  auto text = m_textEdit->toPlainText();
+  LineEnding before = LineEnding::LF;
+  switch (m_config->m_lineEndingPolicy) {
+  case LineEndingPolicy::Platform:
+#if defined(Q_OS_WIN)
+    TextUtils::transformLineEnding(text, before, LineEnding::CRLF);
+#endif
+    break;
+
+  case LineEndingPolicy::File:
+    TextUtils::transformLineEnding(text, before, m_lineEnding);
+    break;
+
+  case LineEndingPolicy::LF:
+    break;
+
+  case LineEndingPolicy::CRLF:
+    TextUtils::transformLineEnding(text, before, LineEnding::CRLF);
+    break;
+
+  case LineEndingPolicy::CR:
+    TextUtils::transformLineEnding(text, before, LineEnding::CR);
+    break;
+  }
+
+  return text;
+}
+
+QTextDocument *VTextEditor::document() const { return m_textEdit->document(); }
+
+VTextEdit *VTextEditor::getTextEdit() const { return m_textEdit; }
+
+void VTextEditor::setupTextFolding() {
+  Q_ASSERT(m_textEdit && m_indicatorsBorder);
+  m_folding = new TextFolding(m_textEdit->document());
+  connect(m_folding, &TextFolding::foldingRangesChanged, m_indicatorsBorder,
+          &IndicatorsBorder::updateBorder);
+}
+
+void VTextEditor::setupExtraSelection() {
+  m_extraSelectionInterface.reset(new EditorExtraSelection(this));
+  m_extraSelectionMgr = new ExtraSelectionMgr(m_extraSelectionInterface.data(), this);
+  connect(m_textEdit, &QTextEdit::cursorPositionChanged, m_extraSelectionMgr,
+          &ExtraSelectionMgr::handleCursorPositionChange);
+  connect(m_textEdit, &VTextEdit::contentsChanged, m_extraSelectionMgr,
+          &ExtraSelectionMgr::handleContentsChange);
+  connect(m_textEdit, &VTextEdit::selectionChanged, m_extraSelectionMgr,
+          &ExtraSelectionMgr::handleSelectionChange);
+
+  Q_ASSERT(m_folding);
+  m_folding->setExtraSelectionMgr(m_extraSelectionMgr);
+
+  m_incrementalSearchExtraSelection = m_extraSelectionMgr->registerExtraSelection();
+  m_extraSelectionMgr->setExtraSelectionEnabled(m_incrementalSearchExtraSelection, true);
+
+  m_searchExtraSelection = m_extraSelectionMgr->registerExtraSelection();
+  m_extraSelectionMgr->setExtraSelectionEnabled(m_searchExtraSelection, true);
+
+  m_searchUnderCursorExtraSelection = m_extraSelectionMgr->registerExtraSelection();
+  m_extraSelectionMgr->setExtraSelectionEnabled(m_searchUnderCursorExtraSelection, true);
+}
+
+void VTextEditor::applyPendingExtraSelections() {
+  if (m_extraSelectionMgr) {
+    m_extraSelectionMgr->applyExtraSelections();
+  }
+}
+
+void VTextEditor::setupCompleter() { m_completerInterface.reset(new EditorCompleter(this)); }
+
+void VTextEditor::updateFromConfig() {
+  Q_ASSERT(m_config);
+  // QTextEdit::font() will reflect the real font point size (after zoom). So we
+  // need to remember the original font point size.
+  static const int baseFontPointSize = m_textEdit->font().pointSize();
+
+  auto &theme = m_config->m_theme;
+  if (!theme) {
+    theme = TextEditorConfig::defaultTheme();
+  }
+
+  // Editor font and palette.
+  {
+    m_themeFont = m_textEdit->font();
+    m_themePalette = m_textEdit->palette();
+
+    const auto &fmt = theme->editorStyle(Theme::EditorStyle::Text);
+
+    if (!fmt.m_fontFamily.isEmpty()) {
+      m_themeFont.setFamily(fmt.m_fontFamily);
+    }
+
+    if (fmt.m_fontPointSize > 0) {
+      m_themeFont.setPointSize(fmt.m_fontPointSize);
+    } else {
+      m_themeFont.setPointSize(baseFontPointSize);
+    }
+
+    auto textColor = fmt.textColor();
+    if (textColor.isValid()) {
+      m_themePalette.setColor(QPalette::Text, textColor);
+    }
+
+    auto bgColor = fmt.backgroundColor();
+    if (bgColor.isValid()) {
+      m_themePalette.setColor(QPalette::Base, bgColor);
+    }
+
+    auto selectionColor = fmt.selectedTextColor();
+    if (selectionColor.isValid()) {
+      m_themePalette.setColor(QPalette::HighlightedText, selectionColor);
+    }
+
+    auto selectionBgColor = fmt.selectedBackgroundColor();
+    if (selectionBgColor.isValid()) {
+      m_themePalette.setColor(QPalette::Highlight, selectionBgColor);
+    }
+
+    m_editorFontPointSize = m_themeFont.pointSize();
+    setFontAndPaletteByStyleSheet(m_themeFont, m_themePalette);
+  }
+
+  {
+    m_folding->setEnabled(m_config->m_textFoldingEnabled);
+    const auto &fmt = theme->editorStyle(Theme::FoldedFoldingRangeLine);
+    m_folding->setFoldedFoldingRangeLineBackgroundColor(fmt.backgroundColor());
+  }
+
+  updateExtraSelectionMgrFromConfig();
+
+  updateIndicatorsBorderFromConfig();
+
+  {
+    setInputMode(m_config->m_inputMode);
+
+    if (m_config->m_inputMode == InputMode::ViMode && m_config->m_viConfig) {
+      auto kateViConfig = m_config->m_viConfig->toKateViConfig();
+      // Align the KateViConfig configs with TextEditorConfig.
+      kateViConfig->setTabWidth(m_config->m_tabStopWidth);
+      auto viFactory = InputModeMgr::getInst().getFactory(InputMode::ViMode);
+      static_cast<ViInputModeFactory *>(viFactory.data())->updateViConfig(kateViConfig);
+    }
+  }
+
+  m_textEdit->setCenterCursor(m_config->m_centerCursor);
+
+  {
+    // Wrap mode.
+    QTextOption::WrapMode wrapMode = QTextOption::WrapAtWordBoundaryOrAnywhere;
+    switch (m_config->m_wrapMode) {
+    case WrapMode::NoWrap:
+      wrapMode = QTextOption::NoWrap;
+      break;
+
+    case WrapMode::WordWrap:
+      wrapMode = QTextOption::WordWrap;
+      break;
+
+    case WrapMode::WrapAnywhere:
+      wrapMode = QTextOption::WrapAnywhere;
+      break;
+
+    case WrapMode::WordWrapOrAnywhere:
+      wrapMode = QTextOption::WrapAtWordBoundaryOrAnywhere;
+      break;
+    }
+
+    m_textEdit->setWordWrapMode(wrapMode);
+  }
+
+  // Tab stop width.
+  {
+    updateSpaceWidth();
+
+    m_textEdit->setExpandTab(m_config->m_expandTab);
+
+    if (m_config->m_tabStopWidth < 1) {
+      m_config->m_tabStopWidth = 4;
+    }
+    m_textEdit->setTabStopWidthInSpaces(m_config->m_tabStopWidth);
+  }
+
+  applyLineSpacing();
+
+  m_textEdit->setMaxContentWidth(m_config->m_maxContentWidth);
+
+  // Update syntax highlighter theme.
+  {
+    auto *sh = dynamic_cast<SyntaxHighlighter *>(m_highlighter);
+    if (sh) {
+      KSyntaxHighlighting::Theme th;
+      if (!m_config->m_syntaxTheme.isEmpty()) {
+        if (Utils::isFilePath(m_config->m_syntaxTheme)) {
+          th = KSyntaxHighlighterWrapper::repository()->themeFromFile(m_config->m_syntaxTheme);
+        } else {
+          th = KSyntaxHighlighterWrapper::repository()->theme(m_config->m_syntaxTheme);
+        }
+      }
+      if (!th.isValid()) {
+        th = KSyntaxHighlighterWrapper::repository()->defaultTheme();
+      }
+      sh->setTheme(th);
+      sh->clearFormatCache();
+      sh->rehighlight();
+    }
+  }
+}
+
+void VTextEditor::applyLineSpacing() {
+  auto lineSpacing = qMax(m_config->m_lineSpacing, 1.0);
+
+  QTextBlockFormat format;
+  if (lineSpacing == 1.0) {
+    format.setLineHeight(0, QTextBlockFormat::SingleHeight);
+  } else {
+    format.setLineHeight(lineSpacing * 100, QTextBlockFormat::ProportionalHeight);
+  }
+
+  auto textDocument = document();
+  auto block = textDocument->begin();
+  for (; block.isValid(); block = block.next()) {
+    const auto current = block.blockFormat();
+    if (current.lineHeight() != format.lineHeight() ||
+        current.lineHeightType() != format.lineHeightType()) {
+      break;
+    }
+  }
+  if (!block.isValid()) {
+    return;
+  }
+  bool modified = textDocument->isModified();
+
+  QTextCursor cursor(textDocument);
+  cursor.select(QTextCursor::Document);
+  cursor.beginEditBlock();
+  cursor.mergeBlockFormat(format);
+  cursor.endEditBlock();
+
+  textDocument->setModified(modified);
+}
+
+void VTextEditor::updateSpaceWidth() {
+  QFont font(m_themeFont);
+  font.setPointSize(m_editorFontPointSize);
+  m_textEdit->setSpaceWidth(QFontMetrics(font).horizontalAdvance(QLatin1Char(' ')));
+}
+
+void VTextEditor::setInputMode(InputMode p_mode) {
+  // Note: the owning pointer is deliberately kept alive across the swap below.
+  // VTextEditor publishes its input mode status widget only later, from
+  // updateStatusWidget(), and ViInputMode::~ViInputMode() asserts that its
+  // status bar is no longer parented. Releasing it earlier would destroy the
+  // outgoing Vi mode while StatusIndicator still hosts its command bar.
+  auto currentMode = m_textEdit->getInputMode();
+  if (currentMode && currentMode->mode() == p_mode) {
+    return;
+  }
+
+  QScopedPointer<EditorInputMode> newInputMode(new EditorInputMode(this));
+
+  // Connect before the mode is installed, so that no mode notification emitted
+  // during the activation of the new input mode is lost.
+  connect(newInputMode.data(), &TextEditInputMode::editorModeChanged, this,
+          &VTextEditor::modeChanged);
+
+  auto modeFactory = InputModeMgr::getInst().getFactory(p_mode);
+  Q_ASSERT(modeFactory);
+  auto mode = modeFactory->createInputMode(newInputMode.data());
+  m_textEdit->setInputMode(mode);
+
+  m_inputModeInterface.swap(newInputMode);
+
+  updateStatusWidget();
+
+  emit modeChanged();
+}
+
+QSharedPointer<AbstractInputMode> VTextEditor::getInputMode() const {
+  return m_textEdit->getInputMode();
+}
+
+void VTextEditor::addSyntaxCustomSearchPaths(const QStringList &p_paths) {
+  // Custom search path will be added only once.
+  KSyntaxHighlighterWrapper::Initialize(p_paths);
+}
+
+void VTextEditor::setSyntax(const QString &p_syntax) {
+  if (m_syntax == p_syntax) {
+    return;
+  }
+
+  m_syntax = p_syntax;
+  delete m_highlighter;
+  m_highlighter = nullptr;
+
+  if (!m_syntax.isEmpty() && SyntaxHighlighter::isValidSyntax(m_syntax)) {
+    m_highlighter = new SyntaxHighlighter(document(), m_config->m_syntaxTheme, m_syntax);
+  } else {
+    m_syntax = QStringLiteral("plaintext");
+    m_highlighter = new PlainTextHighlighter(document());
+  }
+  updateSpellCheck();
+
+  emit syntaxChanged();
+}
+
+QString VTextEditor::getSyntax() const { return m_syntax; }
+
+void VTextEditor::updateExtraSelectionMgrFromConfig() {
+  auto &theme = m_config->m_theme;
+  {
+    const auto &fmt = theme->editorStyle(Theme::CursorLine);
+    m_extraSelectionMgr->setExtraSelectionFormat(ExtraSelectionMgr::CursorLine, fmt.textColor(),
+                                                 fmt.backgroundColor(), true);
+  }
+  {
+    const auto &fmt = theme->editorStyle(Theme::TrailingSpace);
+    m_extraSelectionMgr->setExtraSelectionFormat(ExtraSelectionMgr::TrailingSpace, fmt.textColor(),
+                                                 fmt.backgroundColor(), false);
+    m_extraSelectionMgr->setExtraSelectionEnabled(ExtraSelectionMgr::TrailingSpace,
+                                                  m_config->m_highlightWhitespace);
+  }
+  {
+    const auto &fmt = theme->editorStyle(Theme::Tab);
+    m_extraSelectionMgr->setExtraSelectionFormat(ExtraSelectionMgr::Tab, fmt.textColor(),
+                                                 fmt.backgroundColor(), false);
+    m_extraSelectionMgr->setExtraSelectionEnabled(ExtraSelectionMgr::Tab,
+                                                  m_config->m_highlightWhitespace);
+  }
+  {
+    const auto &fmt = theme->editorStyle(Theme::SelectedText);
+    m_extraSelectionMgr->setExtraSelectionFormat(ExtraSelectionMgr::SelectedText, fmt.textColor(),
+                                                 fmt.backgroundColor(), false);
+  }
+  {
+    const auto &fmt = theme->editorStyle(Theme::IncrementalSearch);
+    m_extraSelectionMgr->setExtraSelectionFormat(m_incrementalSearchExtraSelection, fmt.textColor(),
+                                                 fmt.backgroundColor(), false);
+  }
+  {
+    const auto &fmt = theme->editorStyle(Theme::Search);
+    m_extraSelectionMgr->setExtraSelectionFormat(m_searchExtraSelection, fmt.textColor(),
+                                                 fmt.backgroundColor(), false);
+  }
+  {
+    const auto &fmt = theme->editorStyle(Theme::SearchUnderCursor);
+    m_extraSelectionMgr->setExtraSelectionFormat(m_searchUnderCursorExtraSelection, fmt.textColor(),
+                                                 fmt.backgroundColor(), false);
+  }
+}
+
+void VTextEditor::updateIndicatorsBorderFromConfig() {
+  auto &theme = m_config->m_theme;
+  {
+    const auto &fmt = theme->editorStyle(Theme::IndicatorsBorder);
+    m_indicatorsBorder->setForegroundColor(fmt.textColor());
+    m_indicatorsBorder->setBackgroundColor(fmt.backgroundColor());
+
+    auto font = m_themeFont;
+    if (!fmt.m_fontFamily.isEmpty()) {
+      font.setFamily(fmt.m_fontFamily);
+    }
+    if (fmt.m_fontPointSize > 0) {
+      font.setPointSize(fmt.m_fontPointSize);
+    }
+    m_indicatorsBorder->setFont(font);
+  }
+  {
+    const auto &fmt = theme->editorStyle(Theme::CurrentLineNumber);
+    m_indicatorsBorder->setCurrentLineNumberForegroundColor(fmt.textColor());
+  }
+  {
+    const auto &fmt = theme->editorStyle(Theme::Folding);
+    m_indicatorsBorder->setFoldingColor(fmt.textColor());
+  }
+  {
+    const auto &fmt = theme->editorStyle(Theme::FoldedFolding);
+    m_indicatorsBorder->setFoldedFoldingColor(fmt.textColor());
+  }
+  {
+    const auto &fmt = theme->editorStyle(Theme::FoldingHighlight);
+    m_indicatorsBorder->setFoldingHighlightColor(fmt.textColor());
+  }
+  {
+    m_indicatorsBorder->setLineNumberType(
+        indicatorsBorderLineNumberType(m_config->m_lineNumberType));
+  }
+  {
+    m_indicatorsBorder->setTextFoldingEnabled(m_config->m_textFoldingEnabled);
+  }
+
+  m_indicatorsBorder->updateBorder();
+}
+
+QSharedPointer<TextBlockRange>
+VTextEditor::fetchSyntaxFoldingRangeStartingOnBlock(int p_blockNumber) {
+  if (p_blockNumber < 0 || p_blockNumber >= document()->blockCount()) {
+    return nullptr;
+  }
+
+  if (!m_highlighter || !m_highlighter->isSyntaxFoldingEnabled()) {
+    return nullptr;
+  }
+
+  auto block = document()->findBlockByNumber(p_blockNumber);
+  if (!block.isValid()) {
+    return nullptr;
+  }
+
+  auto data = TextBlockData::get(block);
+  if (!data->isMarkedAsFoldingStart()) {
+    return nullptr;
+  }
+
+  // Search the type of the first folding region which remains pending.
+  int openRegionType = 0;
+  int openRegionOffset = -1;
+  {
+    // <folding id, <offset, count>>.
+    QHash<int, QPair<int, int>> openFoldingMap;
+    for (const auto &folding : data->getFoldings()) {
+      if (folding.isOpen()) {
+        // A folding open, like `{`.
+        auto it = openFoldingMap.find(folding.m_value);
+        if (it != openFoldingMap.end()) {
+          ++(it.value().second);
+        } else {
+          openFoldingMap.insert(folding.m_value, qMakePair(folding.m_offset, 1));
+        }
+      } else {
+        // A folding close, like `}`.
+        auto it = openFoldingMap.find(-folding.m_value);
+        if (it != openFoldingMap.end()) {
+          if (it.value().second > 1) {
+            --(it.value().second);
+          } else {
+            openFoldingMap.erase(it);
+          }
+        }
+      }
+    }
+
+    // Get the first pending open folding with offset.
+    for (auto it = openFoldingMap.begin(); it != openFoldingMap.end(); ++it) {
+      if (openRegionOffset == -1 || it->first < openRegionOffset) {
+        openRegionType = it.key();
+        openRegionOffset = it->first;
+      }
+    }
+  }
+
+  if (openRegionType == 0) {
+    return nullptr;
+  }
+
+  // Search the following lines for the matched close folding.
+  {
+    int numOfOpenRegions = 1;
+    for (auto nextBlock = block.next(); nextBlock.isValid(); nextBlock = nextBlock.next()) {
+      auto nextData = TextBlockData::get(nextBlock);
+      for (const auto &folding : nextData->getFoldings()) {
+        if (folding.m_value == -openRegionType) {
+          // Found one match.
+          --numOfOpenRegions;
+          if (numOfOpenRegions == 0) {
+            // Don't return a valid folding range without contents (only two
+            // lines).
+            if (nextBlock.blockNumber() - p_blockNumber == 1) {
+              return nullptr;
+            }
+
+            // Got the range.
+            return QSharedPointer<TextBlockRange>::create(block, nextBlock);
+          }
+        } else if (folding.m_value == openRegionType) {
+          // Another open folding in the same type.
+          ++numOfOpenRegions;
+        }
+      }
+    }
+  }
+
+  // Since we could not find a matched close folding, the open folding range
+  // spans to the end of the document.
+  return QSharedPointer<TextBlockRange>::create(block, document()->end());
+}
+
+TextFolding *VTextEditor::getTextFolding() const { return m_folding; }
+
+bool VTextEditor::foldAtCursor() {
+  if (!m_folding || !m_folding->isEnabled()) {
+    return false;
+  }
+
+  const int blockNum = m_textEdit->textCursor().block().blockNumber();
+
+  qint64 foldedId = m_folding->deepestFoldableRangeOnBlock(blockNum);
+  if (foldedId != TextFolding::InvalidRangeId) {
+    m_folding->foldRange(foldedId);
+  } else if (m_folding->outermostFoldedRangeOnBlock(blockNum) != TextFolding::InvalidRangeId) {
+    // The cursor line is already inside a fold.
+    return true;
+  } else {
+    // Fall back to syntax foldings: search backwards for the first folding
+    // range containing the cursor line.
+    const int searchEndBlockNum =
+        qMax(0, blockNum - c_maxNumberOfLinesToSearchBackwardsForSyntaxFolding);
+    QSharedPointer<TextBlockRange> syntaxRange;
+    for (int num = blockNum; num >= searchEndBlockNum; --num) {
+      auto range = fetchSyntaxFoldingRangeStartingOnBlock(num);
+      if (range && range->isValid() && range->contains(blockNum)) {
+        syntaxRange = range;
+        break;
+      }
+    }
+
+    if (!syntaxRange) {
+      return true;
+    }
+
+    foldedId = m_folding->newFoldingRange(*syntaxRange, TextFolding::Folded);
+    if (foldedId == TextFolding::InvalidRangeId) {
+      qWarning() << "failed to create a folding range based on syntax" << syntaxRange->toString();
+      return true;
+    }
+  }
+
+  // Relocate the cursor if its block became invisible. Folding hides only the
+  // strict interior, so the range's first block is still visible.
+  auto cursor = m_textEdit->textCursor();
+  if (!cursor.block().isVisible()) {
+    int firstBlockNum = -1;
+    if (m_folding->foldingRangeBlocks(foldedId, &firstBlockNum, nullptr)) {
+      auto firstBlock = document()->findBlockByNumber(firstBlockNum);
+      if (firstBlock.isValid()) {
+        const int column = qMin(cursor.positionInBlock(), firstBlock.length() - 1);
+        cursor.setPosition(firstBlock.position() + column);
+        m_textEdit->setTextCursor(cursor);
+      }
+    }
+  }
+
+  m_textEdit->ensureCursorVisible();
+  return true;
+}
+
+bool VTextEditor::unfoldAtCursor() {
+  if (!m_folding || !m_folding->isEnabled()) {
+    return false;
+  }
+
+  const int blockNum = m_textEdit->textCursor().block().blockNumber();
+  const qint64 id = m_folding->outermostFoldedRangeOnBlock(blockNum);
+  if (id == TextFolding::InvalidRangeId) {
+    return true;
+  }
+
+  m_folding->toggleRange(id);
+  m_textEdit->ensureCursorVisible();
+  return true;
+}
+
+bool VTextEditor::isReadOnly() const { return m_textEdit->isReadOnly(); }
+
+void VTextEditor::setReadOnly(bool p_enabled) { m_textEdit->setReadOnly(p_enabled); }
+
+void VTextEditor::focusInEvent(QFocusEvent *p_event) {
+  QWidget::focusInEvent(p_event);
+
+  auto inputMode = getInputMode();
+  if (inputMode) {
+    inputMode->focusIn();
+  }
+
+  if (m_parameters->m_spellCheckEnabled) {
+    SpellChecker::getInst().setCurrentLanguage(m_parameters->m_defaultSpellCheckLanguage);
+  }
+
+  emit focusIn();
+}
+
+void VTextEditor::focusOutEvent(QFocusEvent *p_event) {
+  QWidget::focusOutEvent(p_event);
+
+  auto inputMode = getInputMode();
+  if (inputMode) {
+    inputMode->focusOut();
+  }
+
+  emit focusOut();
+}
+
+Completer *VTextEditor::completer() const {
+  if (!s_completer) {
+    const_cast<VTextEditor *>(this)->s_completer = new Completer();
+  }
+
+  return s_completer;
+}
+
+void VTextEditor::triggerCompletion(bool p_reversed) {
+  if (isReadOnly()) {
+    return;
+  }
+
+  auto prefixRange = Completer::findCompletionPrefix(m_completerInterface.data());
+  auto candidates = Completer::generateCompletionCandidates(
+      m_completerInterface.data(), prefixRange.first, prefixRange.second, p_reversed);
+
+  QRect popupRect = m_textEdit->cursorRect();
+  popupRect.translate(m_textEdit->viewport()->pos());
+  completer()->triggerCompletion(m_completerInterface.data(), candidates, prefixRange, p_reversed,
+                                 popupRect);
+}
+
+bool VTextEditor::isCompletionActive() const {
+  return completer()->isActive(m_completerInterface.data());
+}
+
+void VTextEditor::completionNext(bool p_reversed) { completer()->next(p_reversed); }
+
+void VTextEditor::completionExecute() { completer()->execute(); }
+
+void VTextEditor::abortCompletion() { completer()->finishCompletion(); }
+
+QSharedPointer<QWidget> VTextEditor::statusWidget() {
+  if (!m_statusIndicator) {
+    m_statusIndicator.reset(createStatusWidget());
+    updateStatusWidget();
+  }
+
+  return m_statusIndicator;
+}
+
+void VTextEditor::updateStatusWidget() {
+  updateCursorOfStatusWidget();
+  updateSyntaxOfStatusWidget();
+  updateModeOfStatusWidget();
+  updateInputModeStatusWidget();
+}
+
+StatusIndicator *VTextEditor::createStatusWidget() {
+  auto widget = new StatusIndicator();
+  widget->updateSpellCheck(
+      m_parameters->m_spellCheckEnabled, m_parameters->m_autoDetectLanguageEnabled,
+      m_parameters->m_defaultSpellCheckLanguage, SpellChecker::getInst().availableDictionaries());
+  connect(widget, &StatusIndicator::focusOut, this, [this]() { m_textEdit->setFocus(); });
+  connect(widget, &StatusIndicator::spellCheckChanged, this,
+          [this](bool p_enabled, bool p_autoDetect, const QString &p_currentLang) {
+            m_parameters->m_spellCheckEnabled = p_enabled;
+            m_parameters->m_autoDetectLanguageEnabled = p_autoDetect;
+            m_parameters->m_defaultSpellCheckLanguage = p_currentLang;
+            updateSpellCheck();
+          });
+  return widget;
+}
+
+void VTextEditor::updateCursorOfStatusWidget() {
+  if (m_statusIndicator) {
+    auto pos = getCursorPosition();
+    m_statusIndicator->updateCursor(m_textEdit->document()->blockCount(), pos.first + 1,
+                                    pos.second);
+  }
+}
+
+void VTextEditor::updateSyntaxOfStatusWidget() {
+  if (m_statusIndicator) {
+    m_statusIndicator->updateSyntax(getSyntax());
+  }
+}
+
+void VTextEditor::updateModeOfStatusWidget() {
+  if (m_statusIndicator) {
+    m_statusIndicator->updateMode(getEditorMode());
+  }
+}
+
+void VTextEditor::updateInputModeStatusWidget() {
+  // An override, when there is one, takes the editor's single slot for as long
+  // as it is installed (decision D4).
+  const bool overridden = !m_overriddenInputModeStatusWidget.isNull();
+  auto inputModeWidget =
+      overridden ? m_overriddenInputModeStatusWidget : getInputMode()->statusWidget();
+  if (m_statusIndicator) {
+    m_statusIndicator->updateInputModeStatusWidget(inputModeWidget);
+  }
+
+  // Return focus to the editor when the input-mode status widget (e.g. the Vi
+  // command bar) loses focus. Wired here so it works even without the embedded
+  // StatusIndicator (the migrated status-bar path never creates one).
+  //
+  // Deliberately NOT wired for an override: the widget then belongs to an
+  // in-place preview which still owns the focus, and pulling it back into the
+  // editor would drop the user out of the very cell they are editing. The
+  // overriding caller wires its own.
+  disconnect(m_inputModeFocusConnection);
+  if (inputModeWidget && !overridden) {
+    m_inputModeFocusConnection = connect(inputModeWidget.data(), &InputModeStatusWidget::focusOut,
+                                         this, [this]() { m_textEdit->setFocus(); });
+  }
+
+  // Emit outside the m_statusIndicator guard so migrated hosts (which never
+  // create a StatusIndicator) still receive the widget swap.
+  emit inputModeStatusWidgetChanged(inputModeWidget ? inputModeWidget->widget()
+                                                    : QSharedPointer<QWidget>());
+}
+
+void VTextEditor::overrideInputModeStatusWidget(
+    const QSharedPointer<InputModeStatusWidget> &p_widget) {
+  if (m_overriddenInputModeStatusWidget == p_widget) {
+    return;
+  }
+
+  m_overriddenInputModeStatusWidget = p_widget;
+  updateInputModeStatusWidget();
+}
+
+EditorMode VTextEditor::getEditorMode() const {
+  auto inputMode = getInputMode();
+  Q_ASSERT(inputMode);
+  return inputMode->editorMode();
+}
+
+QSharedPointer<Theme> VTextEditor::theme() const { return m_config->m_theme; }
+
+const QString &VTextEditor::getBasePath() const { return m_basePath; }
+
+void VTextEditor::setBasePath(const QString &p_basePath) { m_basePath = p_basePath; }
+
+const TextEditorConfig &VTextEditor::getConfig() const { return *m_config; }
+
+void VTextEditor::setConfig(const QSharedPointer<TextEditorConfig> &p_config) {
+  m_config = p_config;
+  updateFromConfig();
+}
+
+bool VTextEditor::eventFilter(QObject *p_obj, QEvent *p_event) {
+  if (p_obj == m_textEdit) {
+    if (p_event->type() == QEvent::FocusIn) {
+      emit focusIn();
+    }
+  }
+
+  return QWidget::eventFilter(p_obj, p_event);
+}
+
+bool VTextEditor::isModified() const { return m_textEdit->document()->isModified(); }
+
+void VTextEditor::setModified(bool p_modified) { m_textEdit->document()->setModified(p_modified); }
+
+QPair<int, int> VTextEditor::getCursorPosition() const {
+  auto cursor = m_textEdit->textCursor();
+  return qMakePair(cursor.block().blockNumber(), cursor.positionInBlock());
+}
+
+int VTextEditor::getTopLine() const {
+  return TextEditUtils::firstVisibleBlock(m_textEdit).blockNumber();
+}
+
+void VTextEditor::scrollToLine(int p_lineNumber, bool p_forceCursor) {
+  if (p_lineNumber < 0) {
+    return;
+  }
+
+  if (p_lineNumber >= document()->blockCount()) {
+    p_lineNumber = document()->blockCount() - 1;
+  }
+
+  // First, scroll @p_lineNumber at the top. If cursor is not visible now,
+  // set the cursor to @p_lineNumber. Otherwise, leave the cursor untouched.
+  TextEditUtils::scrollBlockInPage(m_textEdit, p_lineNumber, TextEditUtils::PagePosition::Top, 0);
+
+  const auto rect = m_textEdit->cursorRect();
+  if (p_forceCursor || rect.y() < 0 || rect.y() > m_textEdit->viewport()->rect().height()) {
+    // Move the cursor.
+    auto cursor = m_textEdit->textCursor();
+    auto block = document()->findBlockByNumber(p_lineNumber);
+    cursor.setPosition(block.position() + block.length() - 1);
+    m_textEdit->setTextCursor(cursor);
+  }
+}
+
+void VTextEditor::enterInsertModeIfApplicable() {
+  auto inputMode = getInputMode();
+  Q_ASSERT(inputMode);
+  if (inputMode->mode() == InputMode::ViMode) {
+    auto viInputMode = dynamic_cast<ViInputMode *>(inputMode.data());
+    viInputMode->changeViInputMode(KateVi::ViMode::InsertMode);
+  }
+}
+
+void VTextEditor::insertText(const QString &p_text) { m_textEdit->insertPlainText(p_text); }
+
+int VTextEditor::zoomDelta() const { return m_zoomDelta; }
+
+int VTextEditor::editorFontPointSize() const { return m_editorFontPointSize; }
+
+int VTextEditor::baseEditorFontPointSize() const { return m_themeFont.pointSize(); }
+
+// zoomIn() and zoomOut() does not work if we set stylesheet of editor.
+void VTextEditor::zoom(int p_delta) {
+  if (p_delta == m_zoomDelta) {
+    return;
+  }
+
+  const int minSize = 2;
+  int step = p_delta - m_zoomDelta;
+  if (m_editorFontPointSize <= minSize && step < 0) {
+    return;
+  }
+
+  int ptSz = m_editorFontPointSize + step;
+  ptSz = qMax(ptSz, minSize);
+
+  if (m_editorFontPointSize == ptSz) {
+    return;
+  }
+
+  m_zoomDelta = p_delta;
+  m_editorFontPointSize = ptSz;
+
+  // Make not take effect directly.
+  setFontPointSizeByStyleSheet(ptSz);
+
+  // Indicator border.
+  {
+    auto font = m_indicatorsBorder->getFont();
+    int ptSz = font.pointSize() + step;
+    ptSz = qMax(ptSz, minSize);
+    font.setPointSize(ptSz);
+    m_indicatorsBorder->setFont(font);
+  }
+
+  updateSpaceWidth();
+}
+
+void VTextEditor::setFontPointSizeByStyleSheet(int p_ptSize) {
+  QFont ft = m_themeFont;
+  ft.setPointSize(p_ptSize);
+  setFontAndPaletteByStyleSheet(ft, m_themePalette);
+
+  // To make sure the font().pointSize() is updated in case of continuous zoom.
+  ensurePolished();
+}
+
+// Blend p_color1 toward p_color2 by p_ratio (0-255).
+// p_ratio=0 returns p_color1, p_ratio=255 returns p_color2.
+static QColor blendColors(const QColor &p_color1, const QColor &p_color2, int p_ratio) {
+  int r = (p_color1.red() * (255 - p_ratio) + p_color2.red() * p_ratio) / 255;
+  int g = (p_color1.green() * (255 - p_ratio) + p_color2.green() * p_ratio) / 255;
+  int b = (p_color1.blue() * (255 - p_ratio) + p_color2.blue() * p_ratio) / 255;
+  return QColor(r, g, b);
+}
+
+void VTextEditor::setFontAndPaletteByStyleSheet(const QFont &p_font, const QPalette &p_palette) {
+  // Compute margin background color.
+  const auto &marginFmt = m_config->m_theme->editorStyle(Theme::ContentMargin);
+  auto marginBg = marginFmt.backgroundColor();
+  if (!marginBg.isValid()) {
+    // Auto-derive: tint editor background ~4% toward black (light) or white (dark).
+    const auto baseBg = p_palette.color(QPalette::Base);
+    const auto target = (baseBg.value() > 128) ? Qt::black : Qt::white;
+    marginBg = blendColors(baseBg, target, 10);
+  }
+
+  // The outer vte--VTextEdit background-color paints the non-viewport margin strips
+  // (side margins from maxContentWidth, scrollbar corner).
+  QString styles(QStringLiteral("vte--VTextEdit {"
+                                "font-family: \"%1\";"
+                                "font-size: %2pt;"
+                                "color: %3;"
+                                "background-color: %4;"
+                                "selection-color: %5;"
+                                "selection-background-color: %6; }")
+                     .arg(p_font.family())
+                     .arg(p_font.pointSize())
+                     .arg(p_palette.color(QPalette::Text).name())
+                     .arg(marginBg.name())
+                     .arg(p_palette.color(QPalette::HighlightedText).name())
+                     .arg(p_palette.color(QPalette::Highlight).name()));
+  setStyleSheet(styles);
+
+  // Set the viewport's content background separately.
+  // Using .QWidget selector to match only QWidget itself (not subclasses).
+  m_textEdit->viewport()->setStyleSheet(QStringLiteral(".QWidget { background-color: %1; }")
+                                            .arg(p_palette.color(QPalette::Base).name()));
+}
+
+void VTextEditor::peekText(const QString &p_text, FindFlags p_flags) {
+  if (p_text.isEmpty()) {
+    clearIncrementalSearchHighlight();
+    return;
+  }
+  int start = m_textEdit->textCursor().position();
+  int skipPosition = start;
+
+  while (true) {
+    auto cursor = m_textEdit->findText(p_text, p_flags, start);
+    if (cursor.isNull()) {
+      break;
+    }
+
+    if (!(p_flags & FindFlag::FindBackward) && cursor.selectionStart() == skipPosition) {
+      // Skip the first match.
+      skipPosition = -1;
+      start = cursor.selectionEnd();
+      continue;
+    }
+
+    TextEditUtils::ensureBlockVisible(m_textEdit,
+                                      document()->findBlock(cursor.selectionStart()).blockNumber());
+    QList<QTextCursor> selections;
+    selections.append(cursor);
+    m_extraSelectionMgr->setSelections(m_incrementalSearchExtraSelection, selections);
+    return;
+  }
+
+  clearIncrementalSearchHighlight();
+}
+
+VTextEditor::FindResult VTextEditor::findText(const QStringList &p_texts, FindFlags p_flags,
+                                              int p_start, int p_end, int p_currentMatchLine) {
+  auto cursor = m_textEdit->textCursor();
+  bool skipCurrent = true;
+  if (p_currentMatchLine > -1) {
+    int pos = document()->findBlockByNumber(p_currentMatchLine).position();
+    cursor.setPosition(pos);
+    skipCurrent = false;
+  }
+  auto result = findTextHelper(p_texts, p_flags, p_start, p_end, skipCurrent, cursor);
+  if (!cursor.isNull()) {
+    cursor.setPosition(cursor.selectionStart());
+    m_textEdit->setTextCursor(cursor);
+  }
+  return result;
+}
+
+VTextEditor::FindResult VTextEditor::findTextHelper(const QStringList &p_texts, FindFlags p_flags,
+                                                    int p_start, int p_end, bool p_skipCurrent,
+                                                    QTextCursor &p_cursor) {
+  clearIncrementalSearchHighlight();
+
+  FindResult result;
+  if (p_texts.isEmpty() || (p_texts.size() == 1 && p_texts[0].isEmpty()) ||
+      (p_start >= p_end && p_end >= 0)) {
+    clearSearchHighlight();
+    p_cursor = QTextCursor();
+    return result;
+  }
+
+  const auto &allResults = findAllText(p_texts, p_flags, p_start, p_end);
+  if (!allResults.isEmpty()) {
+    // Locate to the right match and update current cursor.
+    bool wrapped = false;
+    int idx = selectCursor(allResults, p_cursor.position(), p_skipCurrent,
+                           !(p_flags & FindFlag::FindBackward), wrapped);
+    Q_ASSERT(idx != -1);
+    p_cursor = allResults[idx];
+
+    // Highlight.
+    highlightSearch(allResults, idx);
+
+    result.m_totalMatches = allResults.size();
+    result.m_currentMatchIndex = idx;
+    result.m_wrapped = wrapped;
+  } else {
+    clearSearchHighlight();
+    p_cursor = QTextCursor();
+  }
+
+  return result;
+}
+
+VTextEditor::FindResult VTextEditor::replaceText(const QString &p_text, FindFlags p_flags,
+                                                 const QString &p_replaceText, int p_start,
+                                                 int p_end) {
+  if (isReadOnly()) {
+    return FindResult();
+  }
+  auto cursor = m_textEdit->textCursor();
+  auto result = findTextHelper(QStringList(p_text), p_flags, p_start, p_end, false, cursor);
+  if (result.m_totalMatches > 0) {
+    Q_ASSERT(!cursor.isNull());
+    const auto text =
+        (p_flags & FindFlag::RegularExpression)
+            ? expandRegularExpressionReplacement(
+                  p_replaceText, m_findResultCache.m_regExpMatches.at(result.m_currentMatchIndex))
+            : p_replaceText;
+    cursor.insertText(text);
+    m_textEdit->setTextCursor(cursor);
+    result.m_totalMatches = 1;
+    clearSearchHighlight();
+  }
+  return result;
+}
+
+namespace {
+struct Replacement {
+  int m_start;
+  int m_end;
+  QString m_text;
+};
+} // namespace
+
+VTextEditor::FindResult VTextEditor::replaceAll(const QString &p_text, FindFlags p_flags,
+                                                const QString &p_replaceText, int p_start,
+                                                int p_end) {
+  if (isReadOnly()) {
+    return FindResult();
+  }
+  clearIncrementalSearchHighlight();
+
+  FindResult result;
+  QVector<Replacement> replacements;
+  {
+    const auto &matches = findAllText(QStringList(p_text), p_flags, p_start, p_end);
+    replacements.reserve(matches.size());
+    for (int idx = 0; idx < matches.size(); ++idx) {
+      const auto text = (p_flags & FindFlag::RegularExpression)
+                            ? expandRegularExpressionReplacement(
+                                  p_replaceText, m_findResultCache.m_regExpMatches.at(idx))
+                            : p_replaceText;
+      replacements.append({matches[idx].selectionStart(), matches[idx].selectionEnd(), text});
+    }
+  }
+
+  if (!replacements.isEmpty()) {
+    result.m_totalMatches = replacements.size();
+    QTextCursor finalCursor(document());
+    finalCursor.setPosition(replacements.constLast().m_end);
+    QTextCursor cursor(document());
+    cursor.beginEditBlock();
+    for (auto it = replacements.crbegin(); it != replacements.crend(); ++it) {
+      cursor.setPosition(it->m_start);
+      cursor.setPosition(it->m_end, QTextCursor::KeepAnchor);
+      cursor.insertText(it->m_text);
+    }
+    cursor.endEditBlock();
+    m_textEdit->setTextCursor(finalCursor);
+  }
+
+  clearSearchHighlight();
+  return result;
+}
+
+void VTextEditor::clearIncrementalSearchHighlight() {
+  m_extraSelectionMgr->setSelections(m_incrementalSearchExtraSelection, QList<QTextCursor>());
+}
+
+void VTextEditor::clearFindResultCache() { m_findResultCache.clear(); }
+
+void VTextEditor::clearSearchHighlight() {
+  m_extraSelectionMgr->setSelections(m_searchExtraSelection, QList<QTextCursor>());
+  m_extraSelectionMgr->setSelections(m_searchUnderCursorExtraSelection, QList<QTextCursor>());
+}
+
+const QList<QTextCursor> &VTextEditor::findAllText(const QStringList &p_texts, FindFlags p_flags,
+                                                   int p_start, int p_end) {
+  if (p_texts.isEmpty() || (p_texts.size() == 1 && p_texts[0].isEmpty())) {
+    m_findResultCache.clear();
+    return m_findResultCache.m_result;
+  }
+
+  if (m_findResultCache.matched(p_texts, p_flags, p_start, p_end)) {
+    return m_findResultCache.m_result;
+  }
+
+  int cnt = 0;
+  QList<QTextCursor> results;
+  QList<QRegularExpressionMatch> regExpMatches;
+  const bool captureMatches = p_texts.size() == 1 && (p_flags & FindFlag::RegularExpression);
+  for (const auto &text : p_texts) {
+    if (text.isEmpty()) {
+      continue;
+    }
+
+    ++cnt;
+    results.append(m_textEdit->findAllText(text, p_flags, p_start, p_end,
+                                           captureMatches ? &regExpMatches : nullptr));
+  }
+
+  if (cnt > 1) {
+    // Sort it.
+    std::sort(results.begin(), results.end());
+  }
+
+  m_findResultCache.update(p_texts, p_flags, p_start, p_end, results, regExpMatches);
+
+  return m_findResultCache.m_result;
+}
+
+int VTextEditor::selectCursor(const QList<QTextCursor> &p_cursors, int p_pos, bool p_skipCurrent,
+                              bool p_forward, bool &p_isWrapped) {
+  Q_ASSERT(!p_cursors.isEmpty());
+
+  p_isWrapped = false;
+  int first = 0, last = p_cursors.size() - 1;
+  int lastMatch = -1;
+  while (first <= last) {
+    int mid = (first + last) / 2;
+    const QTextCursor &cur = p_cursors.at(mid);
+    if (p_forward) {
+      if (cur.selectionStart() < p_pos) {
+        first = mid + 1;
+      } else if (cur.selectionStart() == p_pos) {
+        if (!p_skipCurrent) {
+          // Found it.
+          lastMatch = mid;
+        } else if (mid < p_cursors.size() - 1) {
+          // Next one is the right one.
+          lastMatch = mid + 1;
+        } else {
+          lastMatch = 0;
+          p_isWrapped = true;
+        }
+        break;
+      } else {
+        // It is a match.
+        if (lastMatch == -1 || mid < lastMatch) {
+          lastMatch = mid;
+        }
+
+        last = mid - 1;
+      }
+    } else {
+      if (cur.selectionStart() > p_pos) {
+        last = mid - 1;
+      } else if (cur.selectionStart() == p_pos) {
+        if (!p_skipCurrent) {
+          // Found it.
+          lastMatch = mid;
+        } else if (mid > 0) {
+          // Previous one is the right one.
+          lastMatch = mid - 1;
+        } else {
+          lastMatch = p_cursors.size() - 1;
+          p_isWrapped = true;
+        }
+        break;
+      } else {
+        // It is a match.
+        if (lastMatch == -1 || mid > lastMatch) {
+          lastMatch = mid;
+        }
+
+        first = mid + 1;
+      }
+    }
+  }
+
+  if (lastMatch == -1) {
+    p_isWrapped = true;
+    lastMatch = p_forward ? 0 : (p_cursors.size() - 1);
+  }
+
+  return lastMatch;
+}
+
+void VTextEditor::highlightSearch(const QList<QTextCursor> &p_results, int p_currentIdx) {
+  Q_ASSERT(!p_results.isEmpty() && p_currentIdx >= 0);
+  m_extraSelectionMgr->setSelections(m_searchExtraSelection, p_results);
+
+  QList<QTextCursor> searchUnderCursor;
+  searchUnderCursor << p_results[p_currentIdx];
+  m_extraSelectionMgr->setSelections(m_searchUnderCursorExtraSelection, searchUnderCursor);
+
+  const int selStart = p_results[p_currentIdx].selectionStart();
+  if (selStart == p_results[p_currentIdx].selectionEnd()) {
+    // Zero-length match.
+    const auto rect = m_textEdit->cursorRect(p_results[p_currentIdx]);
+    QToolTip::hideText();
+    QToolTip::showText(m_textEdit->viewport()->mapToGlobal(rect.topLeft()), tr("Zero-length match"),
+                       m_textEdit);
+  }
+}
+
+QString VTextEditor::expandRegularExpressionReplacement(const QString &p_replaceText,
+                                                        const QRegularExpressionMatch &p_match) {
+  const int firstEscape = p_replaceText.indexOf(QLatin1Char('\\'));
+  if (firstEscape < 0) {
+    return p_replaceText;
+  }
+  QString text;
+  text.reserve(p_replaceText.size());
+  text.append(p_replaceText.constData(), firstEscape);
+  const int captureCount = p_match.regularExpression().captureCount();
+  for (int idx = firstEscape; idx < p_replaceText.size(); ++idx) {
+    const auto ch = p_replaceText.at(idx);
+    if (ch != QLatin1Char('\\') || idx + 1 == p_replaceText.size()) {
+      text.append(ch);
+      continue;
+    }
+    const auto escaped = p_replaceText.at(idx + 1);
+    if (escaped == QLatin1Char('n')) {
+      text.append(QLatin1Char('\n'));
+    } else if (escaped == QLatin1Char('t')) {
+      text.append(QLatin1Char('\t'));
+    } else if (escaped == QLatin1Char('\\')) {
+      text.append(QLatin1Char('\\'));
+    } else if (escaped >= QLatin1Char('1') && escaped <= QLatin1Char('9')) {
+      int capture = escaped.unicode() - '0';
+      if (idx + 2 < p_replaceText.size()) {
+        const auto second = p_replaceText.at(idx + 2);
+        const int twoDigits = capture * 10 + second.unicode() - '0';
+        if (second >= QLatin1Char('0') && second <= QLatin1Char('9') && twoDigits <= captureCount) {
+          capture = twoDigits;
+          ++idx;
+        }
+      }
+      if (capture <= captureCount) {
+        text.append(p_match.captured(capture));
+      } else {
+        text.append(ch);
+        text.append(escaped);
+      }
+    } else {
+      text.append(ch);
+      text.append(escaped);
+    }
+    ++idx;
+  }
+  return text;
+}
+
+void VTextEditor::updateSpellCheck() {
+  if (m_parameters->m_spellCheckEnabled) {
+    SpellChecker::getInst().setCurrentLanguage(m_parameters->m_defaultSpellCheckLanguage);
+  }
+  if (m_highlighter) {
+    m_highlighter->setSpellCheckEnabled(m_parameters->m_spellCheckEnabled);
+    m_highlighter->setAutoDetectLanguageEnabled(m_parameters->m_autoDetectLanguageEnabled);
+  }
+}
+
+bool VTextEditor::isSpellCheckEnabled() const { return m_parameters->m_spellCheckEnabled; }
+
+bool VTextEditor::isAutoDetectLanguageEnabled() const {
+  return m_parameters->m_autoDetectLanguageEnabled;
+}
+
+QString VTextEditor::currentSpellCheckLanguage() const {
+  return m_parameters->m_defaultSpellCheckLanguage;
+}
+
+QMap<QString, QString> VTextEditor::availableSpellCheckDictionaries() const {
+  return SpellChecker::getInst().availableDictionaries();
+}
+
+void VTextEditor::setSpellCheckEnabled(bool p_enabled) {
+  m_parameters->m_spellCheckEnabled = p_enabled;
+  updateSpellCheck();
+  emit spellCheckStateChanged();
+}
+
+void VTextEditor::setAutoDetectLanguageEnabled(bool p_enabled) {
+  m_parameters->m_autoDetectLanguageEnabled = p_enabled;
+  updateSpellCheck();
+  emit spellCheckStateChanged();
+}
+
+void VTextEditor::setSpellCheckLanguage(const QString &p_language) {
+  m_parameters->m_defaultSpellCheckLanguage = p_language;
+  updateSpellCheck();
+  emit spellCheckStateChanged();
+}
+
+QSharedPointer<QWidget> VTextEditor::inputModeStatusWidget() const {
+  // The widget really occupying the slot, which is the override when there is
+  // one: a host asking "what should I be showing" must get the same answer
+  // inputModeStatusWidgetChanged() last carried.
+  auto widget = m_overriddenInputModeStatusWidget ? m_overriddenInputModeStatusWidget
+                                                  : getInputMode()->statusWidget();
+  return widget ? widget->widget() : QSharedPointer<QWidget>();
+}
+
+bool VTextEditor::appendSpellCheckMenu(QContextMenuEvent *p_event, QMenu *p_menu) {
+  if (!m_highlighter || !m_parameters->m_spellCheckEnabled) {
+    return false;
+  }
+
+  auto &spellChecker = SpellChecker::getInst();
+  if (!spellChecker.isValid()) {
+    return false;
+  }
+
+  auto mouseCursor = m_textEdit->cursorForPosition(p_event->pos());
+  const int mouseCursorPos = mouseCursor.position();
+  mouseCursor.select(QTextCursor::WordUnderCursor);
+  if (mouseCursor.selectionStart() > mouseCursorPos ||
+      mouseCursor.selectionEnd() <= mouseCursorPos) {
+    return false;
+  }
+
+  const auto selectedWord = mouseCursor.selectedText();
+  if (selectedWord.isEmpty()) {
+    return false;
+  }
+
+  if (!spellChecker.isMisspelled(selectedWord)) {
+    return false;
+  }
+
+  p_menu->addSeparator();
+  auto subMenu = p_menu->addMenu(tr("Spelling \"%1\"").arg(selectedWord));
+
+  subMenu->addAction(tr("Ignore Word"), this, [this, selectedWord, mouseCursorPos]() {
+    SpellChecker::getInst().ignoreWord(selectedWord);
+    auto block = document()->findBlock(mouseCursorPos);
+    m_highlighter->refreshBlockSpellCheck(block);
+  });
+
+  subMenu->addAction(tr("Add To Dictionary"), this, [this, selectedWord, mouseCursorPos]() {
+    SpellChecker::getInst().addToDictionary(selectedWord);
+    auto block = document()->findBlock(mouseCursorPos);
+    m_highlighter->refreshBlockSpellCheck(block);
+  });
+
+  subMenu->addSeparator();
+
+  const auto suggestions =
+      spellChecker.suggest(selectedWord, m_parameters->m_autoDetectLanguageEnabled);
+  if (suggestions.isEmpty()) {
+    auto act = subMenu->addAction(tr("No Suggestions"));
+    act->setEnabled(false);
+  } else {
+    const int magic = 0x133;
+    const int maxSuggestions = 8;
+    for (int i = 0; i < maxSuggestions && i < suggestions.size(); ++i) {
+      if (suggestions[i].isEmpty()) {
+        --i;
+        continue;
+      }
+      auto act = subMenu->addAction(suggestions[i]);
+      act->setData(magic);
+    }
+
+    connect(p_menu, &QMenu::triggered, this, [this, mouseCursor, magic](QAction *p_act) {
+      if (p_act->data().toInt() == magic) {
+        Q_ASSERT(mouseCursor.hasSelection());
+        // @mouseCursor is const.
+        auto cursor = mouseCursor;
+        cursor.insertText(p_act->text());
+        m_textEdit->setTextCursor(cursor);
+      }
+    });
+  }
+
+  return true;
+}
+
+void VTextEditor::enableInternalContextMenu() {
+  connect(m_textEdit, &vte::VTextEdit::contextMenuEventRequested, this,
+          [this](QContextMenuEvent *p_event, bool *p_handled, QScopedPointer<QMenu> *p_menu) {
+            *p_handled = true;
+            p_menu->reset(m_textEdit->createStandardContextMenu(p_event->pos()));
+            appendSpellCheckMenu(p_event, p_menu->data());
+          });
+}
+
+void VTextEditor::updateInputMethodEnabled() {
+  m_textEdit->setInputMethodEnabled(isTextInsertingEditorMode(getEditorMode()));
+}
+
+void VTextEditor::updateIndicatorsBorder() { m_indicatorsBorder->updateBorder(); }
+
+void VTextEditor::setLeaderKeyToSkip(int p_key, Qt::KeyboardModifiers p_modifiers) {
+  m_textEdit->setLeaderKeyToSkip(p_key, p_modifiers);
+}

@@ -1,0 +1,258 @@
+#ifndef TEXTFOLDING_H
+#define TEXTFOLDING_H
+
+#include <QFlags>
+#include <QHash>
+#include <QObject>
+#include <QSharedPointer>
+#include <QVector>
+
+#include <vtextedit/textrange.h>
+
+class QTextBlock;
+class QTextDocument;
+
+namespace tests {
+class TestTextFolding;
+}
+
+namespace vte {
+class ExtraSelectionMgr;
+
+// From KDE's text folding implementation.
+class TextFolding : public QObject {
+  Q_OBJECT
+public:
+  friend class tests::TestTextFolding;
+
+  enum FoldingRangeFlag {
+    // Range is persistent.
+    // Highlighting won't add folddings by default. It will create a
+    // temporary folding once user click to fold it.
+    Persistent = 0x1,
+
+    // Range is folded.
+    Folded = 0x2
+  };
+  Q_DECLARE_FLAGS(FoldingRangeFlags, FoldingRangeFlag)
+
+  enum { InvalidRangeId = -1 };
+
+  explicit TextFolding(QTextDocument *p_document);
+
+  ~TextFolding();
+
+  bool hasFoldedFolding() const;
+
+  bool isEmpty() const;
+
+  // Current block extent of a live range. False when @p_id is unknown or the
+  // range no longer maps onto the document.
+  //
+  // A range may be dropped without notice by checkAndUpdateFoldings() once the
+  // blocks it spans have been replaced, so an owner which caches range ids has
+  // to be able to tell a live id from a stale one; both output pointers may be
+  // null when only that question matters.
+  bool foldingRangeBlocks(qint64 p_id, int *p_firstBlock, int *p_lastBlock) const;
+
+  bool isRangeFolded(qint64 p_id) const;
+
+  // Fold a live range. No-op when already folded. False when @p_id is unknown.
+  bool foldRange(qint64 p_id);
+
+  bool isEnabled() const;
+
+  qint64 newFoldingRange(const TextBlockRange &p_range, FoldingRangeFlags p_flags);
+
+  struct RangeSpec {
+    int m_first = -1;
+    int m_last = -1;
+    FoldingRangeFlags m_flags;
+    qint64 m_id = InvalidRangeId;
+  };
+
+  // Replace the entire tree without signals or layout callbacks. Accepted ids
+  // are written back; rejected entries receive InvalidRangeId. The owner must
+  // install its index before calling notifyFoldingRangesChanged().
+  void replaceFoldingRanges(QVector<RangeSpec> &p_ranges);
+
+  void notifyFoldingRangesChanged();
+
+  QVector<QPair<qint64, TextFolding::FoldingRangeFlags>>
+  foldingRangesStartingOnBlock(int p_blockNumber) const;
+
+  QSharedPointer<QPair<qint64, TextBlockRange>> leafFoldingRangeOnBlock(int p_blockNumber) const;
+
+  // Deepest unfolded range containing @p_blockNumber that has no folded
+  // ancestor. Walks the containing chain outermost-first and stops at the first
+  // folded range. InvalidRangeId when the chain is empty or its outermost range
+  // is already folded.
+  qint64 deepestFoldableRangeOnBlock(int p_blockNumber) const;
+
+  // Outermost folded range containing @p_blockNumber, or InvalidRangeId.
+  qint64 outermostFoldedRangeOnBlock(int p_blockNumber) const;
+
+  bool toggleRange(qint64 p_id);
+
+  bool removeFoldingRange(qint64 p_id);
+
+  QString debugDump() const;
+
+  void setExtraSelectionMgr(ExtraSelectionMgr *p_mgr);
+
+  int lineToVisibleLine(int p_line) const;
+
+  int visibleLineToLine(int p_line) const;
+
+  void setEnabled(bool p_enable);
+
+  void setFoldedFoldingRangeLineBackgroundColor(const QColor &p_color);
+
+public slots:
+  void clear();
+
+  void checkAndUpdateFoldings();
+
+signals:
+  void foldingRangesChanged();
+
+private:
+  class FoldingRange {
+  public:
+    FoldingRange(const TextBlockRange &p_range, FoldingRangeFlags p_flags);
+
+    ~FoldingRange();
+
+    FoldingRange(const FoldingRange &) = delete;
+    FoldingRange &operator=(const FoldingRange &) = delete;
+
+    int first() const;
+
+    int last() const;
+
+    bool contains(const FoldingRange *p_range) const;
+
+    bool contains(int p_blockNumber) const;
+
+    bool before(const FoldingRange *p_range) const;
+
+    bool isFolded() const;
+
+    bool isValid() const;
+
+    QString toString() const;
+
+    typedef QVector<FoldingRange *> Vector;
+
+    // Numeric source anchors only: QTextBlock::isValid() cannot establish
+    // that a saved handle survived a structural document edit.
+    int m_firstBlock = -1;
+    int m_lastBlock = -1;
+    int m_firstPosition = -1;
+    int m_lastPosition = -1;
+
+    TextBlockRange toBlockRange(QTextDocument *p_document) const;
+
+    FoldingRange *m_parent = nullptr;
+
+    // Direct nested children of current folding range.
+    // Sorted and non-overlapping.
+    FoldingRange::Vector m_nestedRanges;
+
+    FoldingRangeFlags m_flags;
+
+    // Id of this range.
+    qint64 m_id = InvalidRangeId;
+  };
+
+  bool insertNewFoldingRange(FoldingRange *p_parent, FoldingRange::Vector &p_ranges,
+                             FoldingRange *p_newRange);
+
+  void updateFoldedRangesForNewRange(TextFolding::FoldingRange *p_newRange);
+
+  void updateFoldedRangesForRemovedRange(TextFolding::FoldingRange *p_oldRange);
+
+  void foldingRangesStartingOnBlock(const TextFolding::FoldingRange::Vector &p_ranges,
+                                    int p_blockNumber,
+                                    QVector<QPair<qint64, FoldingRangeFlags>> &p_results) const;
+
+  void setRangeFolded(const TextBlockRange &p_range, bool p_folded) const;
+
+  void foldRange(FoldingRange *p_range);
+
+  // Return true if @p_range is removed.
+  // Removes the id mapping before notifying observers.
+  bool unfoldRange(FoldingRange *p_range, bool p_remove = false);
+
+  QSharedPointer<QPair<qint64, TextBlockRange>>
+  leafFoldingRangeOnBlock(const TextFolding::FoldingRange::Vector &p_ranges,
+                          int p_blockNumber) const;
+
+  // Append every range in @p_ranges (recursively) containing @p_blockNumber to
+  // @p_chain, outermost first.
+  void foldingRangeChainOnBlock(const TextFolding::FoldingRange::Vector &p_ranges,
+                                int p_blockNumber, FoldingRange::Vector &p_chain) const;
+
+  void markDocumentContentsDirty(int p_position = 0, int p_length = INT_MAX) const;
+
+  void markDocumentContentsDirty(const TextBlockRange &p_range);
+
+  FoldingRange::Vector
+  retrieveFoldedRanges(const TextFolding::FoldingRange::Vector &p_ranges) const;
+
+  void unfoldRangeWithNestedFoldedRanges(
+      const TextBlockRange &p_range,
+      const TextFolding::FoldingRange::Vector &p_foldedChildren) const;
+
+  void handleContentsChange(int p_position, int p_charsRemoved, int p_charsAdded);
+
+  bool isCurrent() const;
+
+  qint64 allocateRangeId();
+
+  void hardClear();
+
+  QString debugDump(const TextFolding::FoldingRange::Vector &p_ranges, bool p_recursive) const;
+
+  static bool compareRangeByStart(const FoldingRange *p_a, const FoldingRange *p_b);
+
+  static bool compareRangeByEnd(const FoldingRange *p_a, const FoldingRange *p_b);
+
+  static bool compareRangeByStartBeforeBlock(const FoldingRange *p_range, int p_blockNumber);
+
+  static bool compareRangeByStartAfterBlock(int p_blockNumber, const FoldingRange *p_range);
+
+  QTextDocument *m_document = nullptr;
+
+  bool m_enabled = true;
+
+  int m_documentRevision = 0;
+  bool m_contentsChangePending = false;
+
+  // Used to highlight folded ranges via extra selection.
+  ExtraSelectionMgr *m_extraSelectionMgr = nullptr;
+
+  int m_extraSelectionType = 0;
+
+  // Background of extra selection of folded folding range.
+  QColor m_foldedFoldingRangeLineBackground = "#befbdd";
+
+  // Sorted and non-overlapping.
+  FoldingRange::Vector m_foldingRanges;
+
+  // Folded folding ranges.
+  // Sorted and non-overlapping.
+  // Subset of m_foldingRanges.
+  // Flat: if the parent is folded, then all its children will be removed from
+  // this.
+  FoldingRange::Vector m_foldedFoldingRanges;
+
+  qint64 m_nextId = 0;
+
+  QHash<qint64, FoldingRange *> m_idToFoldingRange;
+};
+} // namespace vte
+
+Q_DECLARE_OPERATORS_FOR_FLAGS(vte::TextFolding::FoldingRangeFlags)
+
+#endif // TEXTFOLDING_H

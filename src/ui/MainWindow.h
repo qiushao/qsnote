@@ -3,12 +3,19 @@
 
 #include "core/NotebookStore.h"
 #include <QMainWindow>
+#include <QHash>
 #include <QSet>
+#include <QSharedPointer>
 
+class MarkdownEditor;
+class MarkdownPreview;
 class QComboBox;
 class QLabel;
 class QLineEdit;
-class QPlainTextEdit;
+class QMenu;
+namespace vte {
+class VTextEdit;
+}
 class QPushButton;
 class QSplitter;
 class QStackedWidget;
@@ -23,6 +30,7 @@ class MainWindow : public QMainWindow {
 
 public:
     explicit MainWindow(QWidget *parent = nullptr);
+    ~MainWindow() override;
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
@@ -42,8 +50,26 @@ private:
     void showTreeMenu(const QPoint &position);
     void openNote(const QString &id);
     void closeTab(int index);
+    enum class ViewMode { Edit, Preview, Split };
+    struct Heading {
+        QString title;
+        int level = 0;
+        int line = 0;
+    };
+    struct EditorSession {
+        MarkdownEditor *editor = nullptr;
+        QSharedPointer<QWidget> status;
+        QMenu *menu = nullptr;
+        QVector<Heading> headings;
+        ViewMode mode = ViewMode::Edit;
+        int verticalScroll = 0;
+        int horizontalScroll = 0;
+        int previewLine = 0;
+    };
+    void activateEditor(const QString &id);
+    void removeEditor(const QString &id);
     void setPreview(bool enabled);
-    void insertMarkdown(const QString &before, const QString &after, const QString &placeholder, bool block);
+    void setViewMode(ViewMode mode);
     void showSiteConfig();
     void showSitePreview();
     void exportNotebook();
@@ -65,8 +91,17 @@ private:
     QLabel *treeHint_ = nullptr;
     QTabBar *tabs_ = nullptr;
     QStackedWidget *pages_ = nullptr;
-    QPlainTextEdit *editor_ = nullptr;
-    QTextBrowser *preview_ = nullptr;
+    QStackedWidget *editors_ = nullptr;
+    QStackedWidget *editorStatuses_ = nullptr;
+    QHash<QString, EditorSession> editorSessions_;
+    QString activeEditorId_;
+    MarkdownEditor *markdownEditor_ = nullptr;
+    vte::VTextEdit *editor_ = nullptr;
+    MarkdownPreview *preview_ = nullptr;
+    QSplitter *editorSplitter_ = nullptr;
+    QTimer *previewTimer_ = nullptr;
+    ViewMode viewMode_ = ViewMode::Edit;
+    bool syncingPreviewScroll_ = false;
     QTreeWidget *outline_ = nullptr;
     QLabel *outlineHint_ = nullptr;
     QLabel *status_ = nullptr;
@@ -77,6 +112,7 @@ private:
     QPushButton *export_ = nullptr;
     QPushButton *editMode_ = nullptr;
     QPushButton *previewMode_ = nullptr;
+    QPushButton *splitMode_ = nullptr;
     QTimer *saveTimer_ = nullptr;
     bool previewModeEnabled_ = false;
     bool leftRequested_ = true;

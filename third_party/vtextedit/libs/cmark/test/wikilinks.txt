@@ -1,0 +1,75 @@
+# Wikilinks
+
+```````````````````````````````` example
+[[Page]]
+.
+<p><a class="wikilink" href="Page">Page</a></p>
+````````````````````````````````
+
+```````````````````````````````` example
+[[Page|Text]]
+.
+<p><a class="wikilink" href="Page">Text</a></p>
+````````````````````````````````
+
+```````````````````````````````` example
+[[Page#Heading]]
+.
+<p><a class="wikilink" href="Page#Heading">Page#Heading</a></p>
+````````````````````````````````
+
+```````````````````````````````` example
+[[Page#H|Custom]]
+.
+<p><a class="wikilink" href="Page#H">Custom</a></p>
+````````````````````````````````
+
+```````````````````````````````` example
+[[A]] and [[B]]
+.
+<p><a class="wikilink" href="A">A</a> and <a class="wikilink" href="B">B</a></p>
+````````````````````````````````
+
+```````````````````````````````` example
+[[]]
+.
+<p>[[]]</p>
+````````````````````````````````
+
+```````````````````````````````` example
+[[unclosed
+.
+<p>[[unclosed</p>
+````````````````````````````````
+
+```````````````````````````````` example
+Text with [[link]] inside
+.
+<p>Text with <a class="wikilink" href="link">link</a> inside</p>
+````````````````````````````````
+
+```````````````````````````````` example
+[[a|b|c]]
+.
+<p><a class="wikilink" href="a">b|c</a></p>
+````````````````````````````````
+
+```````````````````````````````` example
+before[[Page]]after
+.
+<p>before<a class="wikilink" href="Page">Page</a>after</p>
+````````````````````````````````
+
+```````````````````````````````` example
+*before* [[Page]] **after**
+.
+<p><em>before</em> <a class="wikilink" href="Page">Page</a> <strong>after</strong></p>
+````````````````````````````````
+
+```````````````````````````````` example
+- [[Page]]
+.
+<ul>
+<li><a class="wikilink" href="Page">Page</a></li>
+</ul>
+````````````````````````````````

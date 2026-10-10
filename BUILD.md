@@ -1,13 +1,13 @@
 # 构建 qsnote
 
-需要 CMake 3.18+、支持 C++17 的编译器及 Qt 6（Core、Gui、Widgets）。Linux 默认启用 clang-tidy。
+需要 CMake 3.18+、支持 C++17 的编译器及 Qt 6（Core、Gui、Widgets、Network、Svg、Core5Compat、LinguistTools、WebEngineWidgets、WebChannel，及与运行库版本匹配的 Gui 私有开发头文件）。Linux 默认启用 clang-tidy。
 
 ## Linux
 
 Ubuntu / Debian 安装依赖：
 
 ```bash
-sudo apt install build-essential cmake qt6-base-dev libgl1-mesa-dev clang-tidy clang-format
+sudo apt install build-essential cmake qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools qt6-svg-dev qt6-5compat-dev qt6-webengine-dev qt6-webchannel-dev libgl1-mesa-dev clang-tidy clang-format
 ```
 
 在工程根目录执行：
@@ -47,7 +47,7 @@ cmake --build build --config Release --parallel
 ./build/src/Release/qsnote.exe
 ```
 
-安装规则仅安装应用本身；分发 macOS / Windows 应用时，需要使用 Qt 的 `macdeployqt` / `windeployqt` 部署运行时。
+安装规则包含应用和 VTextEdit 动态库；分发 macOS / Windows 应用时，需要使用 Qt 的 `macdeployqt` / `windeployqt` 部署运行时。
 
 ## GitHub Actions
 
@@ -86,4 +86,6 @@ ctest --test-dir build --output-on-failure
 
 测试使用独立的应用名与测试数据目录，不读取正式笔记；覆盖空白启动、360～1440 像素窗口布局、新建三种笔记本、右键操作、章节层级、多标签编辑、保存重载、搜索、大纲、站点元数据、配置预览和导出内容。测试运行目录生成界面 PNG，便于与原型进行视觉对照。
 
-应用使用 Qt Widgets 和原生 Markdown 渲染，无在线字体、CDN 或 WebEngine 依赖。站点发布配置仅保存和导出，不自动上传到托管服务。
+Markdown 编辑使用 third_party 中的 VTextEdit 源码，阅读 / 分屏预览使用 Qt WebEngine 与本地 VNote 渲染资源，站点和电子书 HTML 导出暂用 cmark 解析器；完整迁移仍在进行（见 docs/vtextedit-migration.md）。构建不下载依赖、不初始化子模块。站点发布配置仅保存和导出，不自动上传到托管服务。
+
+VTextEdit 的语法高亮、Vim、拼写检查和 cmark 依赖均已放入 `third_party/vtextedit/libs`，版本记录见 `third_party/README.md`。系统 Qt 仍由包管理器或 Qt 安装器提供；不要混用不同 Qt 版本的私有头文件。

@@ -1,0 +1,59 @@
+#ifndef TESTS_TEST_TEXTFOLDING_H
+#define TESTS_TEST_TEXTFOLDING_H
+
+#include <QtTest>
+
+#include <textfolding.h>
+
+class QTextDocument;
+
+namespace tests {
+class TestTextFolding : public QObject {
+  Q_OBJECT
+private slots:
+  void initTestCase();
+
+  // Define test cases here per slot.
+  void testNewFoldingRange();
+
+  void textFoldRange();
+
+  void testRemoveFoldingRange();
+
+  void testDocumentReplacement();
+
+  void testDocumentClear();
+
+  void testRangeAccessors();
+
+  void testHardClearRestoresVisibility();
+
+  void testFoldedLineSelectionSurvivesInPlaceReplacement();
+
+  void testDeepestFoldableRangeOnBlock();
+
+  void testOutermostFoldedRangeOnBlock();
+
+  void testFoldQueriesWhenDisabled();
+
+  void testBulkBlockDeletionRemapsSurvivors();
+
+  void testGroupedBoundaryInsertionsUndoRedo();
+
+  void cleanupTestCase();
+
+  // Will be executed before any test function.
+  void cleanup();
+
+private:
+  qint64 insertNewFoldingRange(
+      int p_first, int p_last,
+      vte::TextFolding::FoldingRangeFlags p_flags = vte::TextFolding::FoldingRangeFlags());
+
+  QTextDocument *m_doc = nullptr;
+
+  vte::TextFolding *m_textFolding = nullptr;
+};
+} // namespace tests
+
+#endif

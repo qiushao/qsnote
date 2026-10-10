@@ -1,0 +1,35 @@
+:root { color-scheme: light; font: 16px/1.75 system-ui, sans-serif; color: #24292f; background: white; }
+body { margin: 0; overflow-wrap: anywhere; }
+main { max-width: 900px; margin: auto; padding: 24px 32px 60px; }
+h1,h2,h3,h4,h5,h6 { line-height: 1.35; margin: 1.2em 0 .6em; }
+h1,h2 { padding-bottom: .25em; border-bottom: 1px solid #e3e5e8; }
+.vx-heading-fold-toggle { margin-left: .6em; border: 0; border-radius: 3px; background: transparent; color: #656d76; cursor: pointer; font-size: .75em; padding: .15em .4em; }
+.vx-heading-fold-toggle::before { content: '▾'; }
+.vx-heading-fold-toggle[aria-expanded=false]::before { content: '▸'; }
+.vx-heading-fold-toggle:hover,.vx-heading-fold-toggle:focus-visible { background: #e8effc; }
+a { color: #3567c7; } img,svg { max-width: 100%; } img { cursor: zoom-in; }
+pre { padding: 16px; overflow: auto; background: #f6f7f9; border-radius: 6px; }
+code { font-family: monospace; background: #f6f7f9; } pre code { overflow-wrap: normal; }
+blockquote { margin-left: 0; padding-left: 16px; border-left: 4px solid #d8dce2; color: #656d76; }
+table { border-collapse: collapse; display: block; overflow-x: auto; }
+td,th { padding: 6px 12px; border: 1px solid #d8dce2; } th { background: #f6f7f9; }
+.task-list-item { list-style: none; } input[type=checkbox] { margin-right: .6em; }
+figure { margin: 1em 0; } figcaption { text-align: center; color: #656d76; }
+eqn { display: block; overflow-x: auto; } aside { padding: 12px; background: #eef4ff; border-left: 4px solid #3b6fd4; }
+eq .katex-display { display: inline-block; margin: 0; vertical-align: middle; }
+.code-toolbar { position: relative; }
+.code-toolbar > .toolbar { position: absolute; top: 4px; right: 8px; }
+.toolbar button { border: 1px solid #d8dce2; border-radius: 4px; padding: 2px 8px; background: white; cursor: pointer; }
+.diagram { overflow: auto; margin: 16px 0; text-align: center; }
+.render-error { color: #b42318; white-space: pre-wrap; }
+.token.comment,.token.prolog,.token.doctype { color: #6e7781; }
+.token.keyword,.token.tag,.token.boolean { color: #cf222e; }
+.token.string,.token.attr-value { color: #0a3069; }
+.token.function,.token.class-name { color: #8250df; }
+.token.number,.token.operator { color: #0550ae; }
+.image-viewer { max-width: 95vw; max-height: 95vh; padding: 10px; border: none; }
+.image-viewer img { max-height: 90vh; object-fit: contain; cursor: zoom-out; }
+.image-viewer::backdrop { background: #000b; }
+@media (max-width: 500px) { main { padding: 16px; } }
+@media print { main { max-width: none; padding: 0; } pre,table,.diagram { break-inside: avoid; } }
+@media print { .vx-heading-fold-toggle { display: none; } .vx-heading-fold-content[hidden] { display: block; } }

@@ -1,8 +1,10 @@
 #include "ui/MainWindow.h"
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QTranslator>
 
 int main(int argc, char *argv[]) {
+    QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
     QApplication app(argc, argv);
     QCoreApplication::setApplicationName("qsnote");
     QCoreApplication::setApplicationVersion(APP_VERSION);
@@ -13,6 +15,9 @@ int main(int argc, char *argv[]) {
     parser.addHelpOption();
     parser.addVersionOption();
     parser.process(app);
+
+    QTranslator editorTranslator;
+    if (editorTranslator.load(":/translations/vtextedit_zh_CN.qm")) QCoreApplication::installTranslator(&editorTranslator);
 
     MainWindow window;
     window.show();

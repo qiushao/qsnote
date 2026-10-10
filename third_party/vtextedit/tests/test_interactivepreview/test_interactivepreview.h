@@ -1,0 +1,419 @@
+#ifndef TESTS_TEST_INTERACTIVEPREVIEW_H
+#define TESTS_TEST_INTERACTIVEPREVIEW_H
+
+#include <QtTest>
+
+#include <QVector>
+
+#include <functional>
+
+#include <vtextedit/preview.h>
+#include <vtextedit/previewwidget.h>
+
+namespace vte {
+class VMarkdownEditor;
+}
+
+namespace tests {
+// A renderer which simply records what it was asked to render.
+class RecordingPreviewWidget : public vte::PreviewWidget, public vte::PreviewTypeActionHandler {
+  Q_OBJECT
+  Q_INTERFACES(vte::PreviewTypeActionHandler)
+public:
+  RecordingPreviewWidget(vte::PreviewWidgetContext *p_context, QWidget *p_parent,
+                         const QVector<vte::PreviewElementType> &p_types, const QSize &p_hint);
+
+  QVector<vte::PreviewElementType> supportedTypes() const Q_DECL_OVERRIDE;
+
+  bool setPreview(const QSharedPointer<const vte::Preview> &p_preview) Q_DECL_OVERRIDE;
+  void handleTypeAction(vte::TypeAction p_action, const QVariant &p_data) Q_DECL_OVERRIDE;
+
+  // Destroy this instance from inside the second setPreview() call.
+  bool m_selfDestructOnUpdate = false;
+
+  // Refuse exactly one snapshot, the way a renderer which cannot bind the new
+  // source does. The host rebuilds the item through the factory chain.
+  bool m_refuseNextSetPreview = false;
+
+  // Run one bounded nested event loop from inside the next setPreview() call,
+  // the way a real renderer opening a modal dialog would.
+  bool m_spinOnNextSetPreview = false;
+
+  // Invoked from inside that nested loop, so a test can assert on the host
+  // while the callback is still on the stack.
+  std::function<void()> m_duringSpin;
+
+  int m_spinCount = 0;
+
+  // Host object carrying the reconcile delivery counter, sampled around the
+  // nested loop. A blocked delivery calls into nothing, so the counter is the
+  // only way to tell one consumed delivery from a re-armed spin.
+  QObject *m_deliveryCounterSource = nullptr;
+
+  int m_deliveriesBeforeSpin = -1;
+
+  int m_deliveriesAfterSpin = -1;
+
+  // Host object carrying the fold refresh counter, sampled when the nested
+  // loop is entered. A fold pass which ran before the callback is not evidence
+  // of anything; one which runs inside it is.
+  QObject *m_foldCounterSource = nullptr;
+
+  int m_foldRefreshesBeforeSpin = -1;
+
+  QSize sizeHint() const Q_DECL_OVERRIDE;
+
+  qreal preferredWidthFraction() const Q_DECL_OVERRIDE;
+
+  // Share of the text column this double claims. Only a preview on its own
+  // band may be widened by it.
+  qreal m_widthFraction = 0;
+
+  // Every measurement the host performs goes through here.
+  mutable int m_sizeHintCount = 0;
+
+  bool hasHeightForWidth() const Q_DECL_OVERRIDE;
+
+  int heightForWidth(int p_width) const Q_DECL_OVERRIDE;
+
+  // When set, the height is derived from the assigned width.
+  bool m_wrapping = false;
+
+  QSharedPointer<const vte::Preview> m_preview;
+
+  int m_setPreviewCount = 0;
+
+  vte::TypeAction m_lastTypeAction;
+
+  QVariant m_lastTypeActionData;
+
+  int m_typeActionCount = 0;
+
+  vte::PreviewReplacementResult m_lastResult;
+
+  int m_resultCount = 0;
+
+  // Every outcome this instance was handed, in order.
+  QVector<vte::PreviewReplacementResult::Status> m_results;
+
+  // Requested once from inside the next geometryContextChanged, which the host
+  // emits synchronously while it is applying geometry.
+  QString m_requestOnGeometryContext;
+
+  int m_geometryContextCount = 0;
+
+  // Run one bounded nested event loop from inside the next replacement
+  // completion, the way a renderer reporting the outcome in a modal dialog
+  // would. The completion runs while the replacement transaction is still on
+  // the stack.
+  bool m_spinOnNextReplacementFinished = false;
+
+  std::function<void()> m_duringReplacementSpin;
+
+  // The generic hook the host calls when the focus goes back to the editor.
+  void clearSelection() Q_DECL_OVERRIDE;
+
+  int m_clearSelectionCount = 0;
+
+  // Requested once from inside the next clearSelection(), which the host calls
+  // from inside a factory-callback block. The document must not change while
+  // that call is still on the stack.
+  QString m_requestOnClearSelection;
+
+  // The document as it stood right after that reentrant request was made.
+  QString m_documentDuringClearSelection;
+
+  // Sampled by the test to fill m_documentDuringClearSelection.
+  std::function<QString()> m_documentSource;
+
+private slots:
+  void handleReplacementFinished(const vte::PreviewReplacementResult &p_result);
+
+  void handleGeometryContextChanged();
+
+private:
+  QVector<vte::PreviewElementType> m_types;
+
+  QSize m_hint;
+};
+
+class RecordingPreviewFactory : public vte::PreviewWidgetFactory {
+  Q_OBJECT
+public:
+  explicit RecordingPreviewFactory(const QVector<vte::PreviewElementType> &p_types,
+                                   QObject *p_parent = nullptr);
+
+  QVector<vte::PreviewElementType> supportedTypes() const Q_DECL_OVERRIDE;
+
+  vte::PreviewWidget *createWidget(vte::PreviewWidgetContext *p_context,
+                                   const QSharedPointer<const vte::Preview> &p_preview,
+                                   QWidget *p_parent) Q_DECL_OVERRIDE;
+
+  // Decline every request, so the host falls through to the next factory.
+  bool m_decline = false;
+
+  // Create an instance which refuses the snapshot it was created for.
+  bool m_refuseSetPreview = false;
+
+  // Create wrapping instances whose height depends on the assigned width.
+  bool m_wrapping = false;
+
+  // Build a preview without the optional type-action interface.
+  bool m_handlerless = false;
+
+  // Handed to every recording instance this factory creates.
+  qreal m_widthFraction = 0;
+
+  // Unregister this factory from inside supportedTypes()/createWidget().
+  vte::VMarkdownEditor *m_unregisterSelfIn = nullptr;
+
+  // Attempt a (forbidden) reentrant registration from inside createWidget().
+  vte::VMarkdownEditor *m_registerReentrantlyIn = nullptr;
+
+  // Same, but from inside supportedTypes(). That callback is reached from the
+  // registry scan rather than from widget construction, so it needs its own
+  // hook to prove the scan is guarded too.
+  vte::VMarkdownEditor *m_registerReentrantlyInSupportedTypes = nullptr;
+
+  bool m_reentrantRegistrationAccepted = false;
+
+  int m_createCount = 0;
+
+  // Survives the factory, so a self-unregistering factory can still be
+  // asserted on after it has been destroyed.
+  int *m_createCountSink = nullptr;
+
+  int m_supportedTypesCount = 0;
+
+  QSize m_hint = QSize(120, 30);
+
+  QVector<RecordingPreviewWidget *> m_widgets;
+
+private:
+  QVector<vte::PreviewElementType> m_types;
+};
+
+class TestInteractivePreview : public QObject {
+  Q_OBJECT
+private slots:
+  void testBuiltinTableWidgetCreated();
+  void testSourceTypeActionRouting();
+  void testPreviewTypeActionRouting();
+  void testHandlerlessPreviewConsumesTypeAction();
+  void testTableTypeActions_data();
+  void testTableTypeActions();
+  void testTableTypeActionToggleAndUndo();
+  void testTableConsumesUnsupportedAndReadOnlyActions();
+  void testTableImageInsertion_data();
+  void testTableImageInsertion();
+  void testTableImageRequestOneShot();
+  void testTableImageInsertionRejectsPayload_data();
+  void testTableImageInsertionRejectsPayload();
+  void testTableImageInsertionRejectsInvalidatedRequest_data();
+  void testTableImageInsertionRejectsInvalidatedRequest();
+  void testTableImageRequestSurvivesCommitEcho();
+  void testTableImageRequestCanCompleteSynchronously();
+
+  void testTableSourceFormattingPolicy();
+  void testAlignedCommitSurvivesTheRealParser();
+  void testCellsCarrySyntaxHighlighting();
+  void testHighlightingSurvivesACommit();
+  void testHtmlCellHighlightingUsesCommentPayload();
+  void testCellHighlightingFollowsHighlighterStyles();
+  void testHighlightingStopsAtTheRunEnd();
+  void testNoWidgetForImageCodeMathByDefault();
+  void testImagePreviewPublications();
+  void testMathPreviewPublications();
+  void testInlineDisplayMathPlacement();
+  void testPreviewPublicationClearing_data();
+  void testPreviewPublicationClearing();
+  void testObsoletePreviewPublication();
+  void testTableInlinePreviewObjectsAndGeometry();
+  void testTableInlineDisplayMathEditRoundTrip();
+  void testTableInlinePreviewSourceRoundTrip();
+  void testTableInlinePreviewPresentationHasNoFeedback();
+  void testTableInlinePreviewKeepsEmptyUndoHistory();
+  void testTableInlinePreviewSourceTypeFlags();
+  void testTableInlinePreviewRowMapping_data();
+  void testTableInlinePreviewRowMapping();
+  void testTableInlinePreviewCanonicalEcho_data();
+  void testTableInlinePreviewCanonicalEcho();
+  void testTableInlinePreviewRejectsUnboundSpans_data();
+  void testTableInlinePreviewRejectsUnboundSpans();
+  void testTableInlinePreviewRejectsStalePublication();
+  void testTableInlinePreviewUsesRebasedLiveAnchor();
+  void testTableInlinePreviewDirtyCellBeforeResult();
+  void testTableInlinePreviewClearBeforeFreshPublication_data();
+  void testTableInlinePreviewClearBeforeFreshPublication();
+  void testTableInlinePreviewRetirementAndRemoval();
+  void testTableInlinePreviewOffscreenRealization();
+  void testHtmlTableInlinePreviewsRemainSourceOnly();
+  void testCustomFactoryOverridesBuiltin();
+  void testMultiTypeFactory();
+  void testFactoryPriorityAndOrder();
+  void testDecliningFactoryFallsThrough();
+  void testRefusingWidgetFallsThrough();
+  void testRegistrationValidation();
+  void testUnregisterRestoresFallback();
+  void testUnregisterDestroysFactory();
+  void testEditorDestructionDestroysFactory();
+  void testIdentityReuseOnUnrelatedEdit();
+  void testReplacementAccepted();
+  void testReplacementIsOneUndoStep();
+  void testReplacementRejectedWhenReadOnly();
+  void testReplacementRejectedOnStaleSnapshot();
+  void testReplacementRejectedOnTypeMismatch();
+  void testReplacementRejectedOnElementCountMismatch();
+  void testReplacementAcceptedAfterUnrelatedEdit();
+  void testReplacementPreservesBlockquotePrefix();
+
+  // The (original syntax -> candidate syntax) transition matrix.
+  void testTableSyntaxTransitionMatrix();
+  void testHtmlTableSourceIsFoldedToItsOwnExtent();
+  void testTableEditCommitsCanonicalMarkdown();
+  void testEnterInTheLastCellGrowsTheSource();
+  void testAColumnInsertGrowsTheSource();
+  void testAnAlignmentChangeReachesTheDelimiterRow();
+
+  void testPaddedSourceIsOnlyRewrittenOnARealEdit();
+  void testSourceBitDisablesTablePreview();
+  void testGlobalDisableRemovesWidgets();
+  void testDuplicateTablesGetDistinctIdentities();
+  void testWidgetGeometryFollowsScrolling();
+  void testPreviewWidgetLocationsFollowGeometry();
+  void testPreviewWidgetLocationsDoNotRealize();
+  void testPreviewWidgetLocationsRejectHiddenAndDisabled();
+  void testPreviewWidgetFocusPreservesFoldedSourceAndScroll();
+  void testPreviewWidgetFocusUsesProxyAndRevalidates();
+  void testPreviewWidgetFocusRejectsBlockedHost();
+  void testAnUnchangedRebindDoesNotRemeasure();
+  void testEditingTheTableDoesRemeasure();
+
+  // Regressions.
+  void testReplacementRejectedOnChangedContainerChain();
+  void testReplacementRejectedWhenSplittingTrailingText();
+  void testSourceMismatchDoesNotRestoreStaleValues();
+  void testFactoryUnregisteringItselfFromCallback();
+  void testReentrantRegistrationRejected();
+  void testEditorDestructionDestroysWidgetsAndContexts();
+  void testEditorDestructionDestroysPendingRemovals();
+  void testWrappingWidgetGeometryIsStable();
+  void testWrappedInlineSourceMeasuredAtAssignedWidth();
+  void testReplacementOfLaterInlineElement();
+  void testWidgetDestroyingItselfOnUpdateFallsBack();
+  void testCommitKeepsTheSameWidget();
+  void testConfigChangeKeepsLiveAnchors();
+  void testReplacementRejectsExoticLineSeparators();
+  void testOversizedTableFallsBackToSource();
+  void testReadOnlyEditorDisablesCellEditing();
+  void testNoSnapshotWorkWithoutAClaimableFactory();
+  void testTableSheetRefitsAfterFontChange();
+  void testTableSheetFitsWithALargeThemeFont();
+  void testTableSheetUsesTheThemeGenericFont();
+  void testBackToBackReplacementsAccepted();
+  void testBackToBackReplacementsAcceptedForNonTable();
+  void testRebasedSourceSurvivesRebuild();
+  void testReadOnlyToggleReachesLiveSheets();
+  void testRaggedTableIsNotEditable();
+  void testCommitKeepsCellEditorAcrossNextParse();
+  void testTableIsOptInByDefault();
+  void testMultiLineImageIsStandalone();
+
+  // Sheet geometry.
+  void testClickEditsACellInPlace();
+  void testTableSheetHeightMatchesItsRows();
+  void testTableSheetSpansContentWidth();
+  void testTableSheetKeepsANaturalWidthInsideTheBand();
+  void testInlinePreviewIgnoresTheWidthFraction();
+  void testTableColumnsShareTheExtraWidth();
+  void testSingleColumnTableFillsTheSheet();
+  void testTableWidthFollowsEditorResize();
+
+  // Debounced write-back against the host's item lifecycle.
+  void testRemovalDuringTheDebounceKeepsTheEdit();
+  void testRebuildDuringTheDebounceKeepsTheEdit();
+  void testEditorDestructionFlushesADirtySheet();
+  void testUndoReachesTheEditorAfterTheFlush();
+  void testArrowOutMovesTheEditorCaretToTheLiveAnchor();
+
+  // Review fixes.
+  void testRejectionAfterAcceptKeepsCommittedValues();
+  void testReconcileIsDeferredDuringWidgetCallback();
+  void testBlockedReconcileIsNotRearmedWhileBlocked();
+  void testMeasurementIsNotRepeatedWhenNothingChanged();
+  void testWideCellSurvivesRoundTrip();
+  void testRebasedTableMatchesGenerationSnapshot();
+  void testStaleGenerationReplayAfterShrink();
+
+  // Local review fixes.
+  void testUnregisteringTheBuiltinFactoryIsSafe();
+  void testReentrantRegistrationFromSupportedTypesRejected();
+  void testGenerationDeliveredDuringCallbackIsNotLost();
+  void testReplacementCannotSplitATableCell();
+  void testSourceTextRectFollowsTheSource();
+
+  // Auto-folding a previewed element, and keeping its fold state across a
+  // preview driven rewrite.
+  void testPreviewedTableIsFoldedOnce();
+  void testAutoFoldIsOptional();
+  void testCaretInsideKeepsTheSourceOpen();
+  void testFoldSurvivesASheetCellEdit();
+  void testNoPaintObservesTheOpenSourceDuringACellEdit();
+  void testNoDocumentSizeIsPublishedForTheOpenSource();
+  void testFoldSurvivesASheetCellEditInAnHtmlTable();
+  void testFoldSurvivesAMergeAction();
+  void testFoldSurvivesASheetCellEditInABlockquotedTable();
+  void testFoldSurvivesADebouncedCommit();
+  void testFoldSurvivesARewriteWithTrailingBlankLines();
+  void testRewriteKeepsAFoldedTableBelowFolded();
+  void testCaretSkippedTableStaysOpenAcrossARewrite();
+  void testRewriteWhileFoldingIsDisabledKeepsTheState();
+  void testFoldStateSurvivesAWidgetRebuild();
+  void testGutterUnfoldBeforeARewriteIsHonoured();
+  void testGutterFoldBeforeARewriteIsHonoured();
+  void testUndoOfARewriteReDecides();
+  void testFullReplacementReDecides();
+  void testDeletedSourceFoldsNothing();
+  void testFoldRefreshIsDeferredDuringWidgetCallback();
+
+  // Scrolling while a preview widget has the focus.
+  void testSheetEditDoesNotScrollToTheEditorCaret();
+  void testCenterCursorIsSkippedWhileASheetHasTheFocus();
+  void testDocumentEditStillScrollsWhenTheEditorHasFocus();
+  void testAnEdgeArrowFromASheetHandsTheFocusBack();
+  void testASheetFollowsTheEditorsInputMode();
+  void testAFocusedSheetTakesTheEditorsStatusSlot();
+  void testAFocusedModeSwitchMountsTheNewStatusWidget();
+  void testRemovingAFocusedSheetReturnsTheEditorsMode();
+  void testRemovingASheetWhoseCommandBarHasFocus();
+
+  // The cursor line follows a preview widget which takes the focus.
+  void testFocusingASheetMovesTheCursorLine();
+  void testFocusingASheetDoesNotScrollTheViewport();
+
+  void testFocusingASheetResyncsAClampedScrollRestore();
+  void testFocusingASheetKeepsACaretAlreadyInTheSource();
+  void testCursorLineSyncIsDeferredDuringWidgetCallback();
+  void testFocusingASheetWithAHiddenFirstBlockKeepsTheCaret();
+  void testFocusingASheetOnlyMovesItsOwnEditorsCursor();
+
+  // A preview selection is dropped when the focus goes back to the editor.
+  void testFocusReturningToTheEditorClearsTheSheetSelection();
+  void testFocusEscapeClearsTheSelectionAndKeepsTheCaret();
+  void testASecondPreviewKeepsTheSelectionUntilTheEditor();
+  void testFocusLeavingTheApplicationKeepsTheSelection();
+  void testAReadOnlyEditorClearsTheSelectionToo();
+  void testTheClearSelectionHookIsDispatchedGenerically();
+
+  // A document mutation requested from inside a layout pass or a geometry
+  // application.
+  void testDeferredCommitDuringLayoutDrivenHide();
+  void testCustomWidgetReplacementDuringGeometryContextIsDeferred();
+  void testRemovalAndRebuildDuringADeferredFlushKeepTheEdit();
+  void testConcurrentFlushTriggersSendOneRequest();
+  void testReconcileDuringAReplacementCompletionIsPostponed();
+  void testOwedWorkDrainsOnceUnderANestedEventLoop();
+};
+} // namespace tests
+
+#endif

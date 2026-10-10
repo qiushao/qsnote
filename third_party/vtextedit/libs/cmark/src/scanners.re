@@ -1,0 +1,443 @@
+#include <stdlib.h>
+#include "chunk.h"
+#include "scanners.h"
+
+bufsize_t _scan_at(bufsize_t (*scanner)(const unsigned char *), cmark_chunk *c, bufsize_t offset)
+{
+	bufsize_t res;
+	unsigned char *ptr = (unsigned char *)c->data;
+
+        if (ptr == NULL || offset > c->len) {
+          return 0;
+        } else {
+	  unsigned char lim = ptr[c->len];
+
+	  // The re2c scanners are built with yyfill:enable = 0, so they
+	  // require a NUL sentinel at ptr[c->len].  In the common case the
+	  // chunk is backed by a cmark_strbuf which is already NUL-terminated
+	  // at that position, so we avoid the transient write entirely (it
+	  // would otherwise mutate shared backing storage and break both
+	  // const-correctness and reentrancy).  Only when the sentinel is
+	  // missing do we fall back to patching the byte around the call.
+	  if (lim == '\0') {
+	    res = scanner(ptr + offset);
+	  } else {
+	    ptr[c->len] = '\0';
+	    res = scanner(ptr + offset);
+	    ptr[c->len] = lim;
+	  }
+        }
+
+	return res;
+}
+
+bufsize_t _scan_at_ext(bufsize_t (*scanner)(const unsigned char *, void *),
+                       cmark_chunk *c, bufsize_t offset, void *d)
+{
+	bufsize_t res;
+	unsigned char *ptr = (unsigned char *)c->data;
+
+        if (ptr == NULL || offset > c->len) {
+          return 0;
+        } else {
+	  unsigned char lim = ptr[c->len];
+
+	  ptr[c->len] = '\0';
+	  res = scanner(ptr + offset, d);
+	  ptr[c->len] = lim;
+        }
+
+	return res;
+}
+
+static int natoi(const char *buf, size_t len) {
+  char pb[48];
+  assert(len < 48U);
+  for (size_t i = 0; i < len; ++i) {
+    pb[i] = buf[i];
+  }
+  pb[len] = '\0';
+  return atoi(pb);
+}
+
+/*!re2c
+  re2c:define:YYCTYPE  = "unsigned char";
+  re2c:define:YYCURSOR = p;
+  re2c:define:YYMARKER = marker;
+  re2c:define:YYCTXMARKER = marker;
+  re2c:yyfill:enable = 0;
+
+  spacechar = [ \t\v\f\r\n];
+
+  reg_char     = [^\\()\x00-\x20];
+
+  escaped_char = [\\][!"#$%&'()*+,./:;<=>?@[\\\]^_`{|}~-];
+
+  tagname = [A-Za-z][A-Za-z0-9-]*;
+
+  blocktagname = 'address'|'article'|'aside'|'base'|'basefont'|'blockquote'|'body'|'caption'|'center'|'col'|'colgroup'|'dd'|'details'|'dialog'|'dir'|'div'|'dl'|'dt'|'fieldset'|'figcaption'|'figure'|'footer'|'form'|'frame'|'frameset'|'h1'|'h2'|'h3'|'h4'|'h5'|'h6'|'head'|'header'|'hr'|'html'|'iframe'|'legend'|'li'|'link'|'main'|'menu'|'menuitem'|'nav'|'noframes'|'ol'|'optgroup'|'option'|'p'|'param'|'section'|'search'|'title'|'summary'|'table'|'tbody'|'td'|'tfoot'|'th'|'thead'|'title'|'tr'|'track'|'ul';
+
+  attributename = [a-zA-Z_:][a-zA-Z0-9:._-]*;
+
+  unquotedvalue = [^ \t\r\n\v\f"'=<>`\x00]+;
+  singlequotedvalue = ['][^'\x00]*['];
+  doublequotedvalue = ["][^"\x00]*["];
+
+  attributevalue = unquotedvalue | singlequotedvalue | doublequotedvalue;
+
+  attributevaluespec = spacechar* [=] spacechar* attributevalue;
+
+  attribute = spacechar+ attributename attributevaluespec?;
+
+  opentag = tagname attribute* spacechar* [/]? [>];
+  closetag = [/] tagname spacechar* [>];
+
+  htmlcomment = "--" ([^\x00-]+ | "-" [^\x00-] | "--" [^\x00>])* "-->";
+
+  processinginstruction = ([^?>\x00]+ | [?][^>\x00] | [>])+;
+
+  declaration = [A-Za-z]+ [^>\x00]*;
+
+  cdata = "CDATA[" ([^\]\x00]+ | "]" [^\]\x00] | "]]" [^>\x00])*;
+
+  htmltag = opentag | closetag;
+
+  in_parens_nosp   = [(] (reg_char|escaped_char|[\\])* [)];
+
+  in_double_quotes = ["] (escaped_char|[^"\x00])* ["];
+  in_single_quotes = ['] (escaped_char|[^'\x00])* ['];
+  in_parens        = [(] (escaped_char|[^)\x00])* [)];
+
+  scheme           = [A-Za-z][A-Za-z0-9.+-]{1,31};
+*/
+
+// Try to match a scheme including colon.
+bufsize_t _scan_scheme(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+/*!re2c
+  scheme [:] { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+// Try to match URI autolink after first <, returning number of chars matched.
+bufsize_t _scan_autolink_uri(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+/*!re2c
+  scheme [:][^\x00-\x20<>]*[>]  { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+// Try to match email autolink after first <, returning num of chars matched.
+bufsize_t _scan_autolink_email(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+/*!re2c
+  [a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+
+    [@]
+    [a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?
+    ([.][a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*
+    [>] { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+// Try to match an HTML tag after first <, returning num of chars matched.
+bufsize_t _scan_html_tag(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+/*!re2c
+  htmltag { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+bufsize_t _scan_html_comment(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+/*!re2c
+  htmlcomment { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+bufsize_t _scan_html_pi(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+/*!re2c
+  processinginstruction { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+bufsize_t _scan_html_declaration(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+  (void) marker;
+/*!re2c
+  declaration { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+bufsize_t _scan_html_cdata(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+/*!re2c
+  cdata { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+// Try to match an HTML block tag start line, returning
+// an integer code for the type of block (1-6, matching the spec).
+// #7 is handled by a separate function, below.
+bufsize_t _scan_html_block_start(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+/*!re2c
+  [<] ('script'|'pre'|'textarea'|'style') (spacechar | [>]) { return 1; }
+  '<!--' { return 2; }
+  '<?' { return 3; }
+  '<!' [A-Za-z] { return 4; }
+  '<![CDATA[' { return 5; }
+  [<] [/]? blocktagname (spacechar | [/]? [>])  { return 6; }
+  * { return 0; }
+*/
+}
+
+// Try to match an HTML block tag start line of type 7, returning
+// 7 if successful, 0 if not.
+bufsize_t _scan_html_block_start_7(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+/*!re2c
+  [<] (opentag | closetag) [\t\n\f ]* [\r\n] { return 7; }
+  * { return 0; }
+*/
+}
+
+// Try to match an HTML block end line of type 1
+bufsize_t _scan_html_block_end_1(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+/*!re2c
+  [^\n\x00]* [<] [/] ('script'|'pre'|'textarea'|'style') [>] { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+// Try to match an HTML block end line of type 2
+bufsize_t _scan_html_block_end_2(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+/*!re2c
+  [^\n\x00]* '-->' { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+// Try to match an HTML block end line of type 3
+bufsize_t _scan_html_block_end_3(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+/*!re2c
+  [^\n\x00]* '?>' { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+// Try to match an HTML block end line of type 4
+bufsize_t _scan_html_block_end_4(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+/*!re2c
+  [^\n\x00]* '>' { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+// Try to match an HTML block end line of type 5
+bufsize_t _scan_html_block_end_5(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+/*!re2c
+  [^\n\x00]* ']]>' { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+// Try to match a link title (in single quotes, in double quotes, or
+// in parentheses), returning number of chars matched.  Allow one
+// level of internal nesting (quotes within quotes).
+bufsize_t _scan_link_title(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+/*!re2c
+  ["] (escaped_char|[^"\x00])* ["]   { return (bufsize_t)(p - start); }
+  ['] (escaped_char|[^'\x00])* ['] { return (bufsize_t)(p - start); }
+  [(] (escaped_char|[^()\x00])* [)]  { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+// Try to match an image size (=WxH, =Wx, =xH), returning number of chars matched.
+// Extract the width and height to @d.
+bufsize_t _scan_image_size(const unsigned char *p, void *d)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+  pair *data = (pair *)d;
+  int *pwidth = (int *)(data->first);
+  int *pheight = (int *)(data->second);
+  *pwidth = 0;
+  *pheight = 0;
+
+/*!re2c
+  [=] [0-9]+ 'x' {
+    *pwidth = natoi((const char *)start + 1, p - start - 2);
+    return (bufsize_t)(p - start);
+  }
+  [=] [0-9]+ 'x' [0-9]+ {
+    const unsigned char *x_pos = (unsigned char *)memchr(start, 'x', p - start);
+    *pwidth = natoi((const char *)start + 1, x_pos - start - 1);
+    *pheight = natoi((const char *)x_pos + 1, p - x_pos - 1);
+    return (bufsize_t)(p - start);
+  }
+  [=] 'x' [0-9]+ {
+    *pheight = natoi((const char *)start + 2, p - start - 2);
+    return (bufsize_t)(p - start);
+  }
+  * { return 0; }
+*/
+}
+
+// Match space characters, including newlines.
+bufsize_t _scan_spacechars(const unsigned char *p)
+{
+  const unsigned char *start = p; \
+/*!re2c
+  [ \t\v\f\r\n]+ { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+// Match ATX heading start.
+bufsize_t _scan_atx_heading_start(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+/*!re2c
+  [#]{1,6} ([ \t]+|[\r\n])  { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+// Match setext heading line.  Return 1 for level-1 heading,
+// 2 for level-2, 0 for no match.
+bufsize_t _scan_setext_heading_line(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+/*!re2c
+  [=]+ [ \t]* [\r\n] { return 1; }
+  [-]+ [ \t]* [\r\n] { return 2; }
+  * { return 0; }
+*/
+}
+
+// Scan an opening code fence.
+bufsize_t _scan_open_code_fence(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+/*!re2c
+  [`]{3,} / [^`\r\n\x00]*[\r\n] { return (bufsize_t)(p - start); }
+  [~]{3,} / [^\r\n\x00]*[\r\n] { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+// Scan a closing code fence with length at least len.
+bufsize_t _scan_close_code_fence(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+/*!re2c
+  [`]{3,} / [ \t]*[\r\n] { return (bufsize_t)(p - start); }
+  [~]{3,} / [ \t]*[\r\n] { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+bufsize_t _scan_formula_block_start(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+/*!re2c
+  '$$' [\r]?[\n] { return (bufsize_t)(p - start); }
+  '\\begin{' [^}\r\n\x00]+ '}' [\r]?[\n] { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+bufsize_t _scan_formula_block_end(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+/*!re2c
+  '$$' [\r]?[\n] { return (bufsize_t)(p - start); }
+  '\\end{' [^}\r\n\x00]+ '}' [\r]?[\n] { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+bufsize_t _scan_frontmatter_start(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+/*!re2c
+  "---" [ \t]* [\r]?[\n] { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+bufsize_t _scan_frontmatter_end(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+/*!re2c
+  ("---" | "...") [ \t]* [\r]?[\n] { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
+// Returns positive value if a URL begins in a way that is potentially
+// dangerous, with javascript:, vbscript:, file:, or data:, otherwise 0.
+bufsize_t _scan_dangerous_url(const unsigned char *p)
+{
+  const unsigned char *marker = NULL;
+  const unsigned char *start = p;
+/*!re2c
+  'data:image/' ('png'|'gif'|'jpeg'|'webp') { return 0; }
+  'javascript:' | 'vbscript:' | 'file:' | 'data:' { return (bufsize_t)(p - start); }
+  * { return 0; }
+*/
+}
+
