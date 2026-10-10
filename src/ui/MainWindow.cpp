@@ -6,12 +6,14 @@
 #include <QScrollBar>
 #include <QApplication>
 #include <QButtonGroup>
+#include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDate>
 #include <QDateEdit>
 #include <QDesktopServices>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QDropEvent>
 #include <QFileDialog>
@@ -1282,12 +1284,55 @@ void MainWindow::closeNotebook() {
     refreshEditor();
 }
 
+QStringList MainWindow::siteCategories(const Notebook &book) {
+    // 分类来源：站点配置中显式新建的分类 + 文章元数据中已使用的分类；default 始终存在且排最前。
+    QStringList categories{QStringLiteral("default")};
+    for (const auto &value: book.config["categories"].toArray()) categories << value.toString();
+    for (const auto &note: book.notes) categories << note.metadata["category"].toString();
+    categories.removeAll({});
+    categories.removeDuplicates();
+    return categories;
+}
+
 void MainWindow::createNote(const QString &parentId, bool folder) {
     auto *book = store_.notebook(currentNotebookId_);
     if (!book) return;
-    const auto kind = folder ? QStringLiteral("文件夹") : book->type == "site" ? QStringLiteral("文章")
-                                                  : book->type == "ebook"      ? QStringLiteral("章节")
-                                                                               : QStringLiteral("笔记");
+    if (book->type == "site") {
+        QDialog dialog(this);
+        dialog.setWindowTitle("新建文章");
+        auto *layout = new QFormLayout(&dialog);
+        auto *titleInput = new QLineEdit(&dialog);
+        layout->addRow("名称：", titleInput);
+        auto *categoryInput = new QComboBox(&dialog);
+        categoryInput->addItems(siteCategories(*book));
+        layout->addRow("分类：", categoryInput);
+        auto *tagsInput = new QLineEdit(&dialog);
+        tagsInput->setPlaceholderText("逗号分隔");
+        layout->addRow("标签：", tagsInput);
+        auto *draftInput = new QCheckBox("保存为草稿", &dialog);
+        layout->addRow(draftInput);
+        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        layout->addRow(buttons);
+        if (dialog.exec() != QDialog::Accepted || titleInput->text().trimmed().isEmpty()) return;
+        Note note;
+        note.id = NotebookStore::newId();
+        note.parentId = parentId;
+        note.title = titleInput->text().trimmed();
+        note.metadata = {{"date", QDate::currentDate().toString(Qt::ISODate)},
+                         {"slug", "post-" + note.id.left(8)},
+                         {"category", categoryInput->currentText()},
+                         {"tags", tagsInput->text().trimmed()},
+                         {"draft", draftInput->isChecked()}};
+        book->notes.append(note);
+        save();
+        refreshTree();
+        openNote(note.id);
+        return;
+    }
+    const auto kind = folder ? QStringLiteral("文件夹") : book->type == "ebook" ? QStringLiteral("章节")
+                                                                                : QStringLiteral("笔记");
     bool accepted = false;
     auto title = QInputDialog::getText(this, "新建" + kind, kind + "名称：", QLineEdit::Normal, {}, &accepted).trimmed();
     if (!accepted || title.isEmpty()) return;
@@ -1297,7 +1342,6 @@ void MainWindow::createNote(const QString &parentId, bool folder) {
     note.parentId = parentId;
     note.title = title;
     note.folder = folder;
-    if (book->type == "site") note.metadata = {{"date", QDate::currentDate().toString(Qt::ISODate)}, {"slug", "post-" + note.id.left(8)}};
     book->notes.append(note);
     save();
     refreshTree();
@@ -1315,7 +1359,21 @@ void MainWindow::showTreeMenu(const QPoint &position) {
                                                                                  : "新建笔记",
                        this, [this, id, note] { createNote(note ? id : QString(), false); });
         if (book->type == "normal") menu.addAction("新建文件夹", this, [this, id, note] { createNote(note ? id : QString(), true); });
-        if (book->type == "site") menu.addAction("站点配置", this, &MainWindow::showSiteConfig);
+        if (book->type == "site") {
+            menu.addAction("新建分类", this, [this, book] {
+                bool accepted = false;
+                const auto name = QInputDialog::getText(this, "新建分类", "分类名称：", QLineEdit::Normal, {}, &accepted).trimmed();
+                if (!accepted || name.isEmpty()) return;
+                auto categories = book->config["categories"].toArray();
+                for (const auto &value: categories) {
+                    if (value.toString() == name) return;
+                }
+                categories.append(name);
+                book->config["categories"] = categories;
+                save();
+            });
+            menu.addAction("站点配置", this, &MainWindow::showSiteConfig);
+        }
     }
     if (book && note && book->type == "ebook") {
         menu.addAction("添加子章节", this, [this, id] { createNote(id, false); });
@@ -1366,7 +1424,39 @@ void MainWindow::showTreeMenu(const QPoint &position) {
     }
     if (book && note) {
         if (!menu.actions().isEmpty()) menu.addSeparator();
-        menu.addAction("重命名", this, [this, id] {
+        if (book->type == "site") {
+            menu.addAction("属性更改", this, [this, book, id] {
+                auto *target = store_.note(id);
+                QDialog dialog(this);
+                dialog.setWindowTitle("文章属性");
+                auto *layout = new QFormLayout(&dialog);
+                auto *titleInput = new QLineEdit(target->title, &dialog);
+                layout->addRow("名称：", titleInput);
+                auto *categoryInput = new QComboBox(&dialog);
+                categoryInput->addItems(siteCategories(*book));
+                const auto currentCategory = target->metadata["category"].toString();
+                categoryInput->setCurrentIndex(qMax(0, categoryInput->findText(currentCategory)));
+                layout->addRow("分类：", categoryInput);
+                auto *tagsInput = new QLineEdit(target->metadata["tags"].toString(), &dialog);
+                tagsInput->setPlaceholderText("逗号分隔");
+                layout->addRow("标签：", tagsInput);
+                auto *draftInput = new QCheckBox("保存为草稿", &dialog);
+                draftInput->setChecked(target->metadata["draft"].toBool());
+                layout->addRow(draftInput);
+                auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+                connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+                connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+                layout->addRow(buttons);
+                if (dialog.exec() != QDialog::Accepted || titleInput->text().trimmed().isEmpty()) return;
+                target->title = titleInput->text().trimmed();
+                target->metadata["category"] = categoryInput->currentText();
+                target->metadata["tags"] = tagsInput->text().trimmed();
+                target->metadata["draft"] = draftInput->isChecked();
+                save();
+                refreshTree();
+            });
+        } else {
+            menu.addAction("重命名", this, [this, id] {
             auto *target = store_.note(id);
             bool accepted = false;
             const auto title = QInputDialog::getText(this, "重命名", "名称：", QLineEdit::Normal, target->title, &accepted).trimmed();
@@ -1375,6 +1465,7 @@ void MainWindow::showTreeMenu(const QPoint &position) {
             save();
             refreshTree();
         });
+        }
         menu.addAction("删除", this, [this, id] {
             if (QMessageBox::question(this, "删除", "确认删除此内容及其子项？该操作不可恢复。", QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
             auto *owner = store_.owner(id);

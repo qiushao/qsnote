@@ -6,6 +6,7 @@
 #include <QHash>
 #include <QSet>
 #include <QSharedPointer>
+#include <QStringList>
 
 class MarkdownEditor;
 class MarkdownPreview;
@@ -52,6 +53,7 @@ private:
     void openNotebook();
     void closeNotebook();
     void createNote(const QString &parentId, bool folder);
+    static QStringList siteCategories(const Notebook &book);
     void showTreeMenu(const QPoint &position);
     void openNote(const QString &id);
     void closeTab(int index);
