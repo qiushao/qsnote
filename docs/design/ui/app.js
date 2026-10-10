@@ -1,5 +1,5 @@
 /* ============================================================
- * MDNote 原型 —— 三列式 Markdown 笔记软件
+ * qsnote 原型 —— 三列式 Markdown 笔记软件
  * 左：笔记本管理（普通 / 静态站点 / 电子书）
  * 中：Tab 多开 + 编辑/预览切换 + Markdown 工具栏
  * 右：自动生成大纲
@@ -32,7 +32,7 @@ const chapterNode = (title, file, extra = {}) => ({ id: nid(), title, file, chil
 
 const defaultSiteConfig = title => ({
   title, description: '', author: '', domain: 'https://example.com',
-  theme: 'minimal', footer: 'Powered by MDNote',
+  theme: 'minimal', footer: 'Powered by qsnote',
   menu: [{ name: '首页', url: '/' }, { name: '归档', url: '/archives' }, { name: '关于', url: '/about' }],
   about: '# 关于\n',
   comment: { platform: 'none', owner: '', repo: '', clientId: '', clientSecret: '' },
@@ -58,7 +58,7 @@ function defaultData() {
         ...defaultSiteConfig('我的博客'),
         description: '记录技术与生活', author: 'qiushao',
         about: '# 关于我\n\n一名开发者，喜欢写作与开源。',
-        links: [{ name: 'MDNote', url: 'https://example.com' }],
+        links: [{ name: 'qsnote', url: 'https://example.com' }],
       },
       posts: [
         postNode('Hello World', { slug: 'hello-world', category: '随笔', tags: ['开始'],
@@ -83,7 +83,7 @@ function defaultData() {
 
 /* ---------------- 状态 ---------------- */
 const NB_TYPE_LABEL = { normal: '普通笔记本', site: '静态站点', ebook: '电子书' };
-const STORE_KEY = 'mdnote-data-v2';
+const STORE_KEY = 'qsnote-data-v2';
 
 const state = {
   notebooks: load() || defaultData(),
