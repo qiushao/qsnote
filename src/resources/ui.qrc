@@ -1,1 +1,1 @@
-<RCC><qresource prefix="/"><file>style.qss</file><file>icons/caret.xpm</file><file>icons/close.xpm</file><file>icons/right.xpm</file><file>web/preview.html</file><file>web/preview.css</file><file>web/preview.js</file></qresource></RCC>
+<RCC><qresource prefix="/"><file>style.qss</file><file>icons/qsnote.png</file><file>icons/caret.xpm</file><file>icons/close.xpm</file><file>icons/right.xpm</file><file>web/preview.html</file><file>web/preview.css</file><file>web/preview.js</file></qresource></RCC>

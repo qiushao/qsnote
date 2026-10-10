@@ -1,6 +1,7 @@
 #include "ui/MainWindow.h"
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QIcon>
 #include <QTranslator>
 
 int main(int argc, char *argv[]) {
@@ -9,6 +10,7 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setApplicationName("qsnote");
     QCoreApplication::setApplicationVersion(APP_VERSION);
     QCoreApplication::setOrganizationName("qiushao");
+    QApplication::setWindowIcon(QIcon(":/icons/qsnote.png"));
 
     QCommandLineParser parser;
     parser.setApplicationDescription("QSNote");
