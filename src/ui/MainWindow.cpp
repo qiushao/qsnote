@@ -602,7 +602,7 @@ void MainWindow::buildToolbar() {
     };
     const QList<Tool> tools = {
         {"H1", Type::TypeHeading, 1}, {"H2", Type::TypeHeading, 2}, {"H3", Type::TypeHeading, 3}, {},
-        {"B", Type::TypeBold}, {"I", Type::TypeItalic}, {"S", Type::TypeStrikethrough}, {"高亮", Type::TypeMark}, {},
+        {"B", Type::TypeBold}, {"高亮", Type::TypeMark}, {},
         {"链接", Type::TypeLink}, {"图片", Type::TypeImage}, {},
         {"列表", Type::TypeUnorderedList}, {"有序", Type::TypeOrderedList},
         {"任务", Type::TypeTodoList, false}, {"引用", Type::TypeQuote}, {},
@@ -623,8 +623,6 @@ void MainWindow::buildToolbar() {
         action->setFocusPolicy(Qt::NoFocus);
         auto font = action->font();
         font.setBold(tool.title == "B");
-        font.setItalic(tool.title == "I");
-        font.setStrikeOut(tool.title == "S");
         action->setFont(font);
         layout->addWidget(action);
         connect(action, &QPushButton::clicked, this, [this, tool] {
@@ -633,14 +631,6 @@ void MainWindow::buildToolbar() {
             markdownEditor_->type(tool.action, tool.data);
         });
     }
-    auto *rule = button("分割线", "tool分割线", toolbar_);
-    rule->setFocusPolicy(Qt::NoFocus);
-    connect(rule, &QPushButton::clicked, this, [this] {
-        if (!store_.note(currentNoteId())) return;
-        setPreview(false);
-        markdownEditor_->insertText("\n\n---\n\n");
-    });
-    layout->addWidget(rule);
     auto *more = button("更多", "editorOptions", toolbar_);
     layout->addWidget(more);
     auto *modes = new QWidget(toolbar_);
