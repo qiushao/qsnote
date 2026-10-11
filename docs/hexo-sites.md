@@ -31,6 +31,8 @@ Pure 的模板、脚本、字体、图片、语言文件及许可证编译在 Qt
 
 ## 预览和发布
 
+在站点配置的「评论」中可选择 Valine、Gitalk、Disqus 或关闭评论。新建及未设置评论平台的站点默认使用 Valine，已有明确选择的站点保留原设置。使用 Valine 时，填写对应 LeanCloud 应用的 App ID 和 App Key；其他 Valine 选项沿用 `themes/pure/_config.yml` 中的设置。
+
 预览与导出调用相同的 Hexo API：`init` → `clean` → `generate`。EJS 页面、Markdown、首页分页、归档、分类、标签和搜索索引由站点安装的 Hexo 插件生成。每次生成会清理 `public` 中的旧产物，请将需要发布的自定义文件放在 `source` 中。
 
 预览使用只监听本机回环地址的临时 HTTP 服务和 Qt WebEngine，关闭预览即停止服务。站点域名支持子路径，例如 `https://example.com/blog/`；预览会使用同样的 `/blog/` 路径。

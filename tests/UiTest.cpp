@@ -696,6 +696,7 @@ st->e
         QString error;
         QVERIFY2(reloaded.load(&error), qPrintable(error));
         QCOMPARE(reloaded.notebooks.size(), 3);
+        QCOMPARE(reloaded.notebooks.at(1).config["commentPlatform"].toString(), QString("valine"));
         for (const auto &book: reloaded.notebooks) QVERIFY(book.notes.isEmpty());
     }
 
@@ -1212,9 +1213,34 @@ st->e
             auto *title = dialog->findChild<QLineEdit *>("config_title");
             title->setText("Edited title");
             emit title->textEdited(title->text());
+            auto *comments = dialog->findChild<QComboBox *>("config_commentPlatform");
+            QVERIFY(comments);
+            QVERIFY(comments->findData("valine") >= 0);
+            QCOMPARE(comments->currentData().toString(), QString("valine"));
+            comments->setCurrentIndex(comments->findData("valine"));
+            for (const auto &key: {"valineAppId", "valineAppKey"}) {
+                auto *input = dialog->findChild<QLineEdit *>(QString("config_") + key);
+                QVERIFY(input);
+                QTest::keyClicks(input, QString("test-") + key);
+            }
             QVERIFY(!dialog->findChild<QComboBox *>("config_theme"));
             QVERIFY(!dialog->findChild<QLineEdit *>("config_token"));
             dialog->grab().save("site-config.png");
+            QTest::mouseClick(dialog->findChild<QPushButton *>("closeSiteConfig"), Qt::LeftButton);
+        });
+        QTest::mouseClick(window.findChild<QPushButton *>("siteConfig"), Qt::LeftButton);
+        QTimer::singleShot(30, &window, [] {
+            auto *dialog = QApplication::activeModalWidget();
+            QVERIFY(dialog);
+            auto *comments = dialog->findChild<QComboBox *>("config_commentPlatform");
+            QVERIFY(comments);
+            QCOMPARE(comments->currentData().toString(), QString("valine"));
+            for (const auto &key: {"valineAppId", "valineAppKey"}) {
+                auto *input = dialog->findChild<QLineEdit *>(QString("config_") + key);
+                QVERIFY(input);
+                QCOMPARE(input->text(), QString("test-") + key);
+            }
+            comments->setCurrentIndex(comments->findData("none"));
             QTest::mouseClick(dialog->findChild<QPushButton *>("closeSiteConfig"), Qt::LeftButton);
         });
         QTest::mouseClick(window.findChild<QPushButton *>("siteConfig"), Qt::LeftButton);
@@ -1251,6 +1277,8 @@ st->e
         NotebookStore reloaded;
         QVERIFY2(reloaded.load(&error), qPrintable(error));
         QCOMPARE(reloaded.notebooks.first().config["title"].toString(), QString("Edited title"));
+        QCOMPARE(reloaded.notebooks.first().config["valineAppId"].toString(), QString("test-valineAppId"));
+        QCOMPARE(reloaded.notebooks.first().config["valineAppKey"].toString(), QString("test-valineAppKey"));
         QCOMPARE(reloaded.note("post-a")->metadata["category"].toString(), QString("Updated"));
     }
 };

@@ -1237,7 +1237,7 @@ void MainWindow::createNotebook() {
         return;
     }
     if (book.type == "site") {
-        book.config = {{"title", book.name}, {"theme", "pure"}, {"footer", "Powered by Hexo"}, {"commentPlatform", "none"}};
+        book.config = {{"title", book.name}, {"theme", "pure"}, {"footer", "Powered by Hexo"}, {"commentPlatform", "valine"}};
     }
     currentNotebookId_ = book.id;
     store_.notebooks.append(book);
@@ -1602,12 +1602,14 @@ void MainWindow::showSiteConfig() {
     field("author", "作者");
     field("domain", "域名");
     heading("评论");
-    field("commentPlatform", "评论平台", {"关闭", "Gitalk", "Disqus"}, {"none", "gitalk", "disqus"});
+    field("commentPlatform", "评论平台", {"Valine", "关闭", "Gitalk", "Disqus"}, {"valine", "none", "gitalk", "disqus"});
     field("commentOwner", "GitHub 用户");
     field("commentRepo", "评论仓库");
     field("clientId", "Client ID");
     field("clientSecret", "Client Secret");
     field("disqus", "Disqus Shortname");
+    field("valineAppId", "Valine App ID");
+    field("valineAppKey", "Valine App Key");
     heading("友链");
     auto *links = new QWidget(body);
     auto *linksLayout = column(links, 0, 6);

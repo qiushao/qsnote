@@ -76,6 +76,7 @@ QString HexoSite::rootPath(const Notebook &book) {
 
 bool HexoSite::prepare(Notebook &book, QString *error) {
     book.config["theme"] = "pure";
+    if (!book.config.contains("commentPlatform")) book.config["commentPlatform"] = "valine";
     if (!copyDirectory(":/hexo", book.path, error)) return false;
     for (const auto &directory: {"source/_posts", "source/_drafts", "source/_data", "public"}) {
         if (!QDir().mkpath(book.path + "/" + directory)) {
@@ -92,7 +93,8 @@ bool HexoSite::prepare(Notebook &book, QString *error) {
         {"comment", QJsonObject{{"type", c["commentPlatform"].toString() == "none" ? QString() : c["commentPlatform"].toString()},
                                 {"disqus", c["disqus"].toString()},
                                 {"gitalk", QJsonObject{{"owner", c["commentOwner"].toString()}, {"admin", c["commentOwner"].toString()},
-                                                       {"repo", c["commentRepo"].toString()}, {"ClientID", c["clientId"].toString()}, {"ClientSecret", c["clientSecret"].toString()}}}}}
+                                                       {"repo", c["commentRepo"].toString()}, {"ClientID", c["clientId"].toString()}, {"ClientSecret", c["clientSecret"].toString()}}},
+                                {"valine", QJsonObject{{"appid", c["valineAppId"].toString()}, {"appkey", c["valineAppKey"].toString()}}}}}
     };
     // JSON is valid YAML; quote all user text without hand-written YAML escaping.
     const QJsonObject config{{"title", c["title"].toString(book.name)}, {"description", c["description"].toString()},

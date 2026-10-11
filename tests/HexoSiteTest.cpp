@@ -25,6 +25,7 @@ private slots:
         NotebookStore store;
         Notebook site{"site", "站点", "site", {}, {{"theme", "tech"}, {"title", "测试站点"}, {"author", "测试作者"},
                       {"domain", "https://example.com/blog/"}, {"footer", "测试页脚"}, {"token", "PRIVATE-DEPLOY-TOKEN"},
+                      {"valineAppId", "test-valine-app-id"}, {"valineAppKey", "test-valine-app-key"},
                       {"links", QJsonArray{QJsonObject{{"name", "示例友链"}, {"url", "https://example.org"}}}}}, directory.path()};
         Note post{"post", {}, "文章标题", "# 正文标题\n\n真实文章内容 **加粗**", false,
                   {{"date", "2026-10-09"}, {"slug", "article"}, {"category", "分类"}, {"tags", "标签一, 标签二"}}, "旧分类/文章.md"};
@@ -52,6 +53,9 @@ private slots:
         Notebook restored;
         QVERIFY2(NotebookStore::readNotebook(directory.path(), restored, &error), qPrintable(error));
         QCOMPARE(restored.notes.first().content, post.content);
+        QCOMPARE(restored.config["commentPlatform"].toString(), QString("valine"));
+        QCOMPARE(restored.config["valineAppId"].toString(), QString("test-valine-app-id"));
+        QCOMPARE(restored.config["valineAppKey"].toString(), QString("test-valine-app-key"));
         // Metadata-only edits must reach front matter, and repeated saves must not duplicate it.
         store.notebooks.first().notes.first().metadata["tags"] = "修改标签";
         QVERIFY2(store.save(&error), qPrintable(error));
@@ -67,6 +71,11 @@ private slots:
         QVERIFY(article.contains("/blog/css/style.css"));
         QVERIFY(article.contains("/blog/js/jquery.min.js"));
         QVERIFY(article.contains("article-title"));
+        QVERIFY(article.contains("id=\"vcomments\""));
+        QVERIFY(article.contains("new Valine({"));
+        QVERIFY(article.contains("appId: 'test-valine-app-id'"));
+        QVERIFY(article.contains("appKey: 'test-valine-app-key'"));
+        QVERIFY(article.contains("visitor: false"));
         QVERIFY(read(directory.path() + "/public/links/index.html").contains("https://example.org"));
         QVERIFY(read(directory.path() + "/public/content.json").contains("article"));
         QVERIFY(!QFile::exists(directory.path() + "/public/config.json"));
@@ -98,8 +107,11 @@ private slots:
         // Deleting/renaming posts must not leave obsolete public routes on a subsequent build.
         NotebookStore::removeNoteFiles(saved, saved.notes.first());
         store.notebooks.first().notes.clear();
+        store.notebooks.first().config["commentPlatform"] = "none";
         QVERIFY2(store.save(&error), qPrintable(error));
+        QCOMPARE(saved.config["commentPlatform"].toString(), QString("none"));
         QVERIFY2(HexoSite::generate(saved, &error), qPrintable(error));
+        QVERIFY(!read(directory.path() + "/public/index.html").contains("new Valine({"));
         QVERIFY(!QFile::exists(directory.path() + "/public/article/index.html"));
     }
 };
