@@ -507,6 +507,43 @@ st->e
         QCOMPARE(window.childAt(QPoint(0, 0)), corner);
     }
 
+    void sessionRestoreRepro() {
+        NotebookStore fixture;
+        Notebook normal{"normal", "测试笔记本", "normal", {}, {}, fixturePath("normal")};
+        normal.notes.append({"note-a", {}, "笔记 A", "内容 A", false, {}});
+        normal.notes.append({"note-b", {}, "笔记 B", "内容 B", false, {}});
+        fixture.notebooks.append(normal);
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        {
+            MainWindow window;
+            window.showMaximized();
+            QVERIFY(QTest::qWaitForWindowExposed(&window));
+            auto *tree = window.findChild<QTreeWidget *>("noteTree");
+            openTreeNote(tree, tree->topLevelItem(0));
+            openTreeNote(tree, tree->topLevelItem(1));
+            QCOMPARE(window.findChild<QTabBar *>("noteTabs")->count(), 2);
+            QTest::qWait(2000);
+            QVERIFY(window.grab().save("/tmp/qsnote-opened.png"));
+            auto *tabs1 = window.findChild<QTabBar *>("noteTabs");
+            qDebug("opened: tabs=%d visible=%d geo=%dx%d@%d,%d sizeHint=%dx%d", tabs1->count(), tabs1->isVisible(),
+                   tabs1->width(), tabs1->height(), tabs1->x(), tabs1->y(), tabs1->sizeHint().width(), tabs1->sizeHint().height());
+            window.close();
+        }
+        {
+            MainWindow window;
+            window.showMaximized();
+            QVERIFY(QTest::qWaitForWindowExposed(&window));
+            auto *tabs = window.findChild<QTabBar *>("noteTabs");
+            QCOMPARE(tabs->count(), 2);
+            QVERIFY(tabs->isVisible());
+            qDebug("restored: tabs=%d visible=%d geo=%dx%d@%d,%d sizeHint=%dx%d", tabs->count(), tabs->isVisible(),
+                   tabs->width(), tabs->height(), tabs->x(), tabs->y(), tabs->sizeHint().width(), tabs->sizeHint().height());
+            QVERIFY(window.grab().save("/tmp/qsnote-restored.png"));
+            window.close();
+        }
+    }
+
     void emptyAndResponsive() {
         MainWindow window;
         window.resize(1440, 900);

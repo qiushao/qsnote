@@ -299,9 +299,39 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     if (!storageReady_) {
         QTimer::singleShot(0, this, [this, error] { QMessageBox::warning(this, "无法读取笔记", error); });
     }
-    if (!store_.notebooks.isEmpty()) currentNotebookId_ = store_.notebooks.first().id;
+    // 恢复上次会话的笔记本与全部标签页；笔记存在时优先以笔记所属笔记本为准。
+    QSettings session;
+    const auto savedNoteId = session.value("session/noteId").toString();
+    const auto savedNotebookId = session.value("session/notebookId").toString();
+    const auto savedOpenNotes = session.value("session/openNotes").toStringList();
+    QString firstValidNoteId;
+    for (const auto &id: savedOpenNotes) {
+        if (store_.note(id)) {
+            firstValidNoteId = id;
+            break;
+        }
+    }
+    const auto *savedNote = store_.note(savedNoteId);
+    const auto notebookNoteId = savedNote ? savedNoteId : firstValidNoteId;
+    if (!notebookNoteId.isEmpty()) {
+        if (const auto *owner = store_.owner(notebookNoteId)) currentNotebookId_ = owner->id;
+    } else if (store_.notebook(savedNotebookId)) {
+        currentNotebookId_ = savedNotebookId;
+    } else if (!store_.notebooks.isEmpty()) {
+        currentNotebookId_ = store_.notebooks.first().id;
+    }
     refreshNotebooks();
     refreshEditor();
+    // 标签页延迟到窗口显示后恢复：构造期间加入的标签不会触发父布局重算，标签栏会保持 0 高度不可见。
+    QTimer::singleShot(0, this, [this, savedOpenNotes, savedNoteId] {
+        for (const auto &id: savedOpenNotes) openNote(id);
+        for (int index = 0; index < tabs_->count(); ++index) {
+            if (tabs_->tabData(index).toString() == savedNoteId) {
+                tabs_->setCurrentIndex(index);
+                break;
+            }
+        }
+    });
     saveTimer_ = new QTimer(this);
     saveTimer_->setSingleShot(true);
     saveTimer_->setInterval(5000);
@@ -1104,9 +1134,18 @@ bool MainWindow::save() {
 }
 
 void MainWindow::closeEvent(QCloseEvent *event) {
-    if (!storageReady_ || save()) event->accept();
-    else
+    if (!storageReady_ || save()) {
+        // 记住当前笔记本与全部标签页，供下次启动时恢复。
+        QSettings session;
+        session.setValue("session/notebookId", currentNotebookId_);
+        session.setValue("session/noteId", currentNoteId());
+        QStringList openNotes;
+        for (int index = 0; index < tabs_->count(); ++index) openNotes << tabs_->tabData(index).toString();
+        session.setValue("session/openNotes", openNotes);
+        event->accept();
+    } else {
         event->ignore();
+    }
 }
 
 void MainWindow::createNotebook() {
