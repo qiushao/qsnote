@@ -33,6 +33,7 @@
 - Qt WebEngine 阅读和编辑 / 预览分屏，修改后合并更新，按源码行号双向同步滚动。
 - 使用 VNote 本地 markdown-it 及扩展：脚注、任务、上下标、Emoji、高亮、目录、标题锚点、元数据、告警容器和图片说明。
 - KaTeX 数学公式（单行 `$$…$$` 保持行内放置）、Mermaid、Flowchart、Graphviz / Viz.js、JSON 格式 WaveDrom、Prism 代码高亮。
+- PlantUML 通过本地 `plantuml` 命令异步渲染为 PNG，阅读 / 分屏预览和 EPUB、PDF、CHM、HTML 导出共用渲染器；安装方式见 [电子书导出](ebook-export.md)。
 - 阅读区任务勾选写回源码，支持撤销；图片点击放大；外部网页链接交由系统浏览器打开。
 - 渲染带有文档版本标识，旧渲染结果不能覆盖新内容；写回前核对笔记和完整源文本。
 - 所有 Web 库资源保存在 `third_party/vnote-web` 并编入 Qt 资源，无 CDN 加载。
@@ -43,7 +44,7 @@
 ## 尚未完成，不能据此宣布全部功能迁移完成
 
 - 阅读器完整行为对照：演示与导出，以及其余 Markdown 扩展边界；已实现的查找、折叠、标题跳转和阅读样式仍需与完整 VNote 行为对照。
-- MathJax 切换、PlantUML、WaveDrom 的 JavaScript 对象写法，以及所有公式和图表在编辑区的就地预览。
+- MathJax 切换、WaveDrom 的 JavaScript 对象写法，以及所有公式和图表在编辑区的就地预览。
 - 图片附件生命周期、本地与远程图片、拖放与剪贴板、图片缩放和编辑、图床、HTML 转 Markdown。
 - 其余设置持久化、编辑器与应用主题切换、自定义 Vim 快捷键、聚焦模式和 VNote 打字机模式的完整行为对照（光标居中、阅读区配色已接入）。
 - HTML / PDF / 图片 / 演示导出及与阅读器一致的离线资源打包。

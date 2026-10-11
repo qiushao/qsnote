@@ -60,6 +60,7 @@ if (QSNOTE_BUILD_TESTS)
     add_executable(qsnote_ebook_tests
             tests/EbookExporterTest.cpp
             src/core/EbookExporter.cpp
+            src/core/PlantUmlRenderer.cpp
             src/core/NotebookStore.cpp
             src/core/HexoSite.cpp
             src/resources/hexo.qrc
@@ -72,6 +73,7 @@ if (QSNOTE_BUILD_TESTS)
     add_executable(qsnote_ui_tests
             tests/UiTest.cpp
             src/core/EbookExporter.cpp
+            src/core/PlantUmlRenderer.cpp
             src/ui/MainWindow.cpp
             src/ui/MarkdownEditor.cpp
             src/ui/MarkdownPreview.cpp

@@ -1,4 +1,5 @@
 #include "EbookExporter.h"
+#include "PlantUmlRenderer.h"
 #include <QBuffer>
 #include <QDateTime>
 #include <QDir>
@@ -414,13 +415,14 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
         const std::unique_ptr<cmark_node, decltype(&cmark_node_free)> root(cmark_parse_document(utf8.constData(), size_t(utf8.size()), CMARK_OPT_DEFAULT), cmark_node_free);
         const std::unique_ptr<cmark_iter, decltype(&cmark_iter_free)> iter(cmark_iter_new(root.get()), cmark_iter_free);
         QList<cmark_node *> excludedLinks;
-        QList<cmark_node *> mermaidBlocks;
+        QList<cmark_node *> diagramBlocks;
         while (cmark_iter_next(iter.get()) != CMARK_EVENT_DONE) {
             if (cmark_iter_get_event_type(iter.get()) != CMARK_EVENT_ENTER) continue;
             auto *node = cmark_iter_get_node(iter.get());
             const auto type = cmark_node_get_type(node);
-            if (type == CMARK_NODE_CODE_BLOCK && QString::fromUtf8(cmark_node_get_fence_info(node)).trimmed().section(QRegularExpression("\\s+"), 0, 0).compare("mermaid", Qt::CaseInsensitive) == 0) {
-                mermaidBlocks.append(node);
+            if (type == CMARK_NODE_CODE_BLOCK) {
+                const auto language = QString::fromUtf8(cmark_node_get_fence_info(node)).trimmed().section(QRegularExpression("\\s+"), 0, 0).toLower();
+                if (language == "mermaid" || language == "plantuml") diagramBlocks.append(node);
             }
             if (type != CMARK_NODE_IMAGE && type != CMARK_NODE_LINK) continue;
             const QUrl original(QString::fromUtf8(cmark_node_get_url(node)));
@@ -460,13 +462,37 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
             cmark_node_unlink(link);
             cmark_node_free(link);
         }
-        for (auto *block: mermaidBlocks) {
-            mermaidDiagrams.append(QJsonObject{{"source", QString::fromUtf8(cmark_node_get_literal(block))}, {"chapter", note.title}});
+        for (auto *block: diagramBlocks) {
+            const auto source = QString::fromUtf8(cmark_node_get_literal(block));
+            const bool plantUml = QString::fromUtf8(cmark_node_get_fence_info(block)).trimmed().section(QRegularExpression("\\s+"), 0, 0).compare("plantuml", Qt::CaseInsensitive) == 0;
+            QString name;
+            if (plantUml) {
+                PlantUmlRenderer renderer;
+                QEventLoop loop;
+                QByteArray png;
+                QString renderError;
+                QObject::connect(&renderer, &PlantUmlRenderer::finished, &loop, [&](const QByteArray &data, const QString &message) {
+                    png = data;
+                    renderError = message;
+                    loop.quit();
+                });
+                QTimer::singleShot(0, &renderer, [&] { renderer.render(source); });
+                loop.exec(QEventLoop::ExcludeUserInputEvents);
+                if (!renderError.isEmpty()) {
+                    *error = "无法渲染 PlantUML 图表（" + note.title + "）：" + renderError;
+                    return {};
+                }
+                name = "plantuml-" + QString::number(assets.size() + 1) + ".png";
+                assets[name] = png;
+            } else {
+                mermaidDiagrams.append(QJsonObject{{"source", source}, {"chapter", note.title}});
+                name = "mermaid-" + QString::number(mermaidDiagrams.size()) + ".png";
+            }
             auto *paragraph = cmark_node_new(CMARK_NODE_PARAGRAPH);
             auto *image = cmark_node_new(CMARK_NODE_IMAGE);
             auto *alt = cmark_node_new(CMARK_NODE_TEXT);
-            cmark_node_set_literal(alt, "Mermaid 图表");
-            cmark_node_set_url(image, ("mermaid-" + QString::number(mermaidDiagrams.size()) + ".png").toUtf8().constData());
+            cmark_node_set_literal(alt, plantUml ? "PlantUML 图表" : "Mermaid 图表");
+            cmark_node_set_url(image, name.toUtf8().constData());
             cmark_node_append_child(image, alt);
             cmark_node_append_child(paragraph, image);
             cmark_node_replace(block, paragraph);

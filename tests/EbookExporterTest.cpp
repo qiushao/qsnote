@@ -4,6 +4,7 @@
 #include <QImage>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QScopeGuard>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTcpServer>
@@ -236,37 +237,49 @@ private slots:
         QVERIFY(!zip.fileData("book.xhtml").contains("127.0.0.1"));
     }
 
-    void mermaidDiagramsAreImages_data() { // NOLINT(readability-identifier-naming): Qt Test data-provider convention.
+    void diagramBlocksAreImages_data() { // NOLINT(readability-identifier-naming): Qt Test data-provider convention.
         QTest::addColumn<int>("format");
         QTest::addColumn<QString>("noteId");
-        for (const auto format: {EbookExporter::Format::Html, EbookExporter::Format::Epub,
+        QTest::addColumn<QString>("diagram");
+        for (const auto &diagram: {QString("Mermaid"), QString("PlantUML")}) {
+            for (const auto format: {EbookExporter::Format::Html, EbookExporter::Format::Epub,
                                 EbookExporter::Format::Pdf, EbookExporter::Format::Chm}) {
-            for (const auto &id: {QString(), QString("one")}) {
-                QTest::newRow(qPrintable(QString::number(int(format)) + (id.isEmpty() ? "-book" : "-single")))
-                        << int(format) << id;
+                for (const auto &id: {QString(), QString("one")}) {
+                    QTest::newRow(qPrintable(diagram + "-" + QString::number(int(format)) + (id.isEmpty() ? "-book" : "-single")))
+                            << int(format) << id << diagram;
+                }
             }
         }
     }
 
-    void mermaidDiagramsAreImages() {
+    void diagramBlocksAreImages() {
         QFETCH(int, format);
         QFETCH(QString, noteId);
+        QFETCH(QString, diagram);
+        if (diagram == "PlantUML" && QStandardPaths::findExecutable("plantuml").isEmpty()) QSKIP("Install PlantUML to run diagram integration test");
         const auto exportFormat = EbookExporter::Format(format);
         if (exportFormat == EbookExporter::Format::Chm && EbookExporter::chmCompiler().isEmpty()) QSKIP("Install chmcmd or hhc to run CHM integration test");
         QTemporaryDir source;
         QTemporaryDir destination;
         auto book = fixture(source.path());
-        book.notes[0].content += "\n\n```MeRmAiD title\ngraph TD\nA[\"开始 & 检查\"] --> B[完成]\n```"
+        if (diagram == "Mermaid") {
+            book.notes[0].content += "\n\n```MeRmAiD title\ngraph TD\nA[\"开始 & 检查\"] --> B[完成]\n```"
                                 "\n\n> ```mermaid\n> sequenceDiagram\n> participant A as 用户\n> participant B as 系统\n> A->>B: 你好\n> ```"
                                 "\n\n```text\nordinary-code-preserved\n```";
-        book.notes[2].content += "\n\n```mermaid\ngraph LR\nC[子章节] --> D[结束]\n```";
+            book.notes[2].content += "\n\n```mermaid\ngraph LR\nC[子章节] --> D[结束]\n```";
+        } else {
+            book.notes[0].content += "\n\n```PlAnTuMl title\n@startuml\nAlice -> Bob: 你好\n@enduml\n```"
+                                    "\n\n> ```plantuml\n> Alice -> Bob: body-only\n> ```"
+                                    "\n\n```text\nordinary-code-preserved\n```";
+            book.notes[2].content += "\n\n```plantuml\n@startmindmap\n* 中文\n** 子章节\n@endmindmap\n```";
+        }
         QString error;
         const auto output = EbookExporter::exportBook(book, noteId, exportFormat, destination.path(), &error);
         QVERIFY2(!output.isEmpty(), qPrintable(error));
         if (qEnvironmentVariableIsSet("QSNOTE_EXPORT_ARTIFACTS")) {
             const auto directory = qEnvironmentVariable("QSNOTE_EXPORT_ARTIFACTS");
             QDir().mkpath(directory);
-            QVERIFY(QFile::copy(output, directory + "/mermaid-" + (noteId.isEmpty() ? "book." : "single.") + QFileInfo(output).suffix()));
+            QVERIFY(QFile::copy(output, directory + "/" + diagram.toLower() + "-" + (noteId.isEmpty() ? "book." : "single.") + QFileInfo(output).suffix()));
         }
         const int count = noteId.isEmpty() ? 3 : 2;
         if (exportFormat == EbookExporter::Format::Pdf) {
@@ -289,6 +302,8 @@ private slots:
                 const auto text = process.readAllStandardOutput();
                 QVERIFY(!text.contains("graph TD"));
                 QVERIFY(!text.contains("sequenceDiagram"));
+                QVERIFY(!text.contains("@startuml"));
+                QVERIFY(!text.contains("body-only"));
                 QVERIFY(text.contains("ordinary-code-preserved"));
             }
             return;
@@ -305,12 +320,14 @@ private slots:
                         : exportedFile(exportFormat == EbookExporter::Format::Epub ? "book.xhtml" : "book.html");
         QVERIFY(!html.contains("graph TD"));
         QVERIFY(!html.contains("sequenceDiagram"));
+        QVERIFY(!html.contains("@startuml"));
+        QVERIFY(!html.contains("body-only"));
         QVERIFY(html.contains("ordinary-code-preserved"));
         QXmlStreamReader xml(html);
         QList<QByteArray> diagrams;
         while (!xml.atEnd()) {
             xml.readNext();
-            if (!xml.isStartElement() || xml.name() != u"img" || xml.attributes().value("alt") != u"Mermaid 图表") continue;
+            if (!xml.isStartElement() || xml.name() != u"img" || xml.attributes().value("alt") != diagram + " 图表") continue;
             const auto src = xml.attributes().value("src").toString();
             diagrams.append(exportFormat == EbookExporter::Format::Html ? QByteArray::fromBase64(src.section(',', 1).toLatin1()) : exportedFile(src));
             if (exportFormat == EbookExporter::Format::Epub) QVERIFY(exportedFile("content.opf").contains(("href=\"" + src + "\" media-type=\"image/png\"").toUtf8()));
@@ -336,6 +353,34 @@ private slots:
         QString error;
         QVERIFY(EbookExporter::exportBook(book, "one", EbookExporter::Format::Html, destination.path(), &error).isEmpty());
         QVERIFY(error.contains("Mermaid"));
+        QVERIFY(error.contains("第一章"));
+        QVERIFY(QDir(destination.path()).entryList(QDir::Files).isEmpty());
+    }
+
+    void invalidPlantUmlReportsChapter() {
+        if (QStandardPaths::findExecutable("plantuml").isEmpty()) QSKIP("Install PlantUML to run diagram integration test");
+        QTemporaryDir source;
+        QTemporaryDir destination;
+        auto book = fixture(source.path());
+        book.notes[0].content = "```plantuml\n@startuml\nthis is not a diagram\n@enduml\n```";
+        QString error;
+        QVERIFY(EbookExporter::exportBook(book, "one", EbookExporter::Format::Html, destination.path(), &error).isEmpty());
+        QVERIFY(error.contains("PlantUML"));
+        QVERIFY(error.contains("第一章"));
+        QVERIFY(QDir(destination.path()).entryList(QDir::Files).isEmpty());
+    }
+
+    void missingPlantUmlReportsChapter() {
+        const auto path = qgetenv("PATH");
+        const auto restorePath = qScopeGuard([&] { qputenv("PATH", path); });
+        qputenv("PATH", QByteArray());
+        QTemporaryDir source;
+        QTemporaryDir destination;
+        auto book = fixture(source.path());
+        book.notes[0].content = "```plantuml\nAlice -> Bob\n```";
+        QString error;
+        QVERIFY(EbookExporter::exportBook(book, "one", EbookExporter::Format::Html, destination.path(), &error).isEmpty());
+        QVERIFY(error.contains("未找到 PlantUML"));
         QVERIFY(error.contains("第一章"));
         QVERIFY(QDir(destination.path()).entryList(QDir::Files).isEmpty());
     }

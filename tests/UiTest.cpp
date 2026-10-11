@@ -394,6 +394,41 @@ st->e
         dialog->close();
     }
 
+    void webPreviewRendersPlantUml() {
+        if (QStandardPaths::findExecutable("plantuml").isEmpty()) QSKIP("Install PlantUML to run diagram integration test");
+        MarkdownPreview preview;
+        preview.resize(900, 700);
+        preview.show();
+        preview.setMarkdown("# PlantUML\n\n```PlAnTuMl title\n@startuml\nAlice -> Bob: 你好\n@enduml\n```"
+                            "\n\n> ```plantuml\n> Alice -> Bob: body-only\n> ```"
+                            "\n\n```text\nordinary-code-preserved\n```", "plantuml");
+        QTRY_COMPARE_WITH_TIMEOUT(preview.renderedRevision(), preview.revision(), 60000);
+        QCOMPARE(javascript(preview, "document.querySelectorAll('.diagram img').length").toInt(), 2);
+        QVERIFY(javascript(preview, "[...document.querySelectorAll('.diagram img')].every(image => image.complete && image.naturalWidth > 20 && image.naturalHeight > 20)").toBool());
+        QCOMPARE(javascript(preview, "document.querySelectorAll('.render-error').length").toInt(), 0);
+        QVERIFY(!javascript(preview, "!!document.querySelector('code.language-plantuml,code.language-PlAnTuMl')").toBool());
+        QVERIFY(javascript(preview, "document.querySelector('code.language-text').textContent.includes('ordinary-code-preserved')").toBool());
+        preview.grab().save("plantuml-preview.png");
+        preview.setMarkdown("```plantuml\nAlice -> Bob: stale\n```", "old-plantuml");
+        QTRY_VERIFY(javascript(preview, "!!document.querySelector('code.language-plantuml')").toBool() || preview.renderedRevision() == preview.revision());
+        preview.setMarkdown("# Latest document", "new-plantuml");
+        QTRY_COMPARE_WITH_TIMEOUT(preview.renderedRevision(), preview.revision(), 60000);
+        QCOMPARE(javascript(preview, "document.querySelector('h1').textContent").toString(), QString("Latest document"));
+        QCOMPARE(javascript(preview, "document.querySelectorAll('.diagram,.render-error').length").toInt(), 0);
+    }
+
+    void webPreviewReportsMissingPlantUml() {
+        const auto path = qgetenv("PATH");
+        const auto restorePath = qScopeGuard([&] { qputenv("PATH", path); });
+        qputenv("PATH", QByteArray());
+        MarkdownPreview preview;
+        preview.show();
+        preview.setMarkdown("```plantuml\nAlice -> Bob\n```", "missing-plantuml");
+        QTRY_COMPARE_WITH_TIMEOUT(preview.renderedRevision(), preview.revision(), 30000);
+        QVERIFY(javascript(preview, "document.querySelector('.render-error').textContent.includes('未找到 PlantUML')").toBool());
+        QVERIFY(javascript(preview, "!!document.querySelector('code.language-plantuml')").toBool());
+    }
+
     void webPreviewLatestDocumentAndScroll() {
         MarkdownPreview preview;
         preview.resize(700, 400);

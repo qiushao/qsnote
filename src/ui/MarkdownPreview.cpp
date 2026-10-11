@@ -1,4 +1,5 @@
 #include "MarkdownPreview.h"
+#include "core/PlantUmlRenderer.h"
 #include <QDesktopServices>
 #include <QCheckBox>
 #include <QContextMenuEvent>
@@ -42,6 +43,15 @@ protected:
     }
 };
 }// namespace
+
+void PreviewBridge::renderPlantUml(const QString &source, int revision, int id) {
+    auto *renderer = new PlantUmlRenderer(this);
+    connect(renderer, &PlantUmlRenderer::finished, this, [this, renderer, revision, id](const QByteArray &png, const QString &error) {
+        emit plantUmlRendered(revision, id, QString::fromLatin1(png.toBase64()), error);
+        renderer->deleteLater();
+    });
+    renderer->render(source);
+}
 
 MarkdownPreview::MarkdownPreview(QWidget *parent) : QWebEngineView(parent), bridge_(new PreviewBridge(this)) {
     setObjectName("preview");

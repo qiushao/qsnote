@@ -19,6 +19,10 @@ PDF 书签按左侧笔记列表的顺序与层级生成，保留分组和嵌套�
 
 Markdown 的标题、列表、表格、代码块和链接由项目内置 cmark 解析器转换。章节间的 Markdown 文件链接及标题锚点会映射到导出内容；指向导出范围以外的本地文档或附件的链接保留文字。外部网页链接保留原地址。原始 HTML 使用 cmark 的安全模式处理；公式等扩展保留源码。Mermaid 代码块使用内置渲染器转换为 PNG 图片，支持全部导出格式，离线阅读无需执行脚本；语法错误时报告所在章节，渲染失败时停止导出。
 
+`plantuml` 代码块在阅读 / 分屏预览及全部电子书导出格式中使用本地 PlantUML 转换为 PNG。支持完整的 `@startuml` / `@enduml`（以及 `@startmindmap` 等标记），也可只填写 UML 正文，由应用补齐起止标记。代码块语言名不区分大小写，引用和列表中的代码块也会转换。导出的图片随电子书打包，阅读时无需 PlantUML 或网络；语法错误、缺少引擎或渲染超时会显示错误，导出时同时报告章节并停止生成文件。
+
+渲染需要将 `plantuml` 命令加入启动 QSNote 时的 `PATH`。Ubuntu / Debian 可执行 `sudo apt install plantuml graphviz`，macOS 可执行 `brew install plantuml graphviz`。Windows 安装 Java、Graphviz 和 [PlantUML](https://plantuml.com/command-line)，通过 PATH 中的 `plantuml.bat` 调用 `java -jar C:\path\to\plantuml.jar %*`。Graphviz 的 `dot` 命令也需位于 PATH 中。
+
 本地图片相对于文档所在目录解析，也支持编辑器插入的 data URI 图片。HTTP/HTTPS 图片会在导出时下载；所有图片转为 PNG 随文件打包。图片无法读取或下载时报告失败，避免生成缺图的电子书。
 
 ## CHM 编译器

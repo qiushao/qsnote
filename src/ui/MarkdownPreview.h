@@ -18,6 +18,7 @@ public slots:
     void rendered(int revision) { emit renderedReceived(revision); }
     void sourceLine(int revision, int line) { emit sourceLineReceived(revision, line); }
     void taskChanged(int revision, int line, bool checked) { emit taskChangedReceived(revision, line, checked); }
+    void renderPlantUml(const QString &source, int revision, int id);
 signals:
     void readyReceived();
     void renderedReceived(int revision);
@@ -25,6 +26,7 @@ signals:
     void taskChangedReceived(int revision, int line, bool checked);
     void documentChanged(const QString &markdown, int revision, bool resetScroll);
     void scrollRequested(int revision, int line);
+    void plantUmlRendered(int revision, int id, const QString &data, const QString &error);
 };
 
 class MarkdownPreview : public QWebEngineView {

@@ -11,6 +11,8 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         core/NotebookStore.cpp
         core/EbookExporter.cpp
         core/EbookExporter.h
+        core/PlantUmlRenderer.cpp
+        core/PlantUmlRenderer.h
         core/HexoSite.cpp
         core/HexoSite.h
         core/NotebookStore.h

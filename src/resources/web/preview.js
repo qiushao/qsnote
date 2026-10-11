@@ -143,7 +143,7 @@
         let waveIndex = 0;
         for (const code of root.querySelectorAll('pre > code')) {
             if (generation !== requestedRevision) return;
-            const language = [...code.classList].find(name => name.startsWith('language-'))?.slice(9) || '';
+            const language = ([...code.classList].find(name => name.startsWith('language-'))?.slice(9) || '').toLowerCase();
             const graph = document.createElement('div');
             graph.className = 'diagram';
             graph.id = `diagram-${++graphId}`;
@@ -155,6 +155,27 @@
                     const result = await mermaid.render(`mermaid-${graphId}`, source);
                     if (generation !== requestedRevision) return;
                     graph.innerHTML = result.svg;
+                } else if (language === 'plantuml') {
+                    const id = graphId;
+                    const result = await new Promise(resolve => {
+                        const receive = (renderedRevision, renderedId, data, error) => {
+                            if (renderedRevision !== generation || renderedId !== id) return;
+                            bridge.plantUmlRendered.disconnect(receive);
+                            resolve({data, error});
+                        };
+                        bridge.plantUmlRendered.connect(receive);
+                        bridge.renderPlantUml(source, generation, id);
+                    });
+                    if (generation !== requestedRevision) return;
+                    if (result.error) throw new Error(result.error);
+                    const image = new Image();
+                    image.alt = 'PlantUML 图表';
+                    await new Promise((resolve, reject) => {
+                        image.onload = resolve;
+                        image.onerror = () => reject(new Error('无法读取 PlantUML 图片'));
+                        image.src = `data:image/png;base64,${result.data}`;
+                    });
+                    graph.appendChild(image);
                 } else if (['dot', 'graphviz', 'neato', 'twopi', 'circo', 'fdp', 'sfdp', 'osage', 'patchwork'].includes(language)) {
                     try {
                         graph.appendChild(await viz.renderSVGElement(source, {engine: language === 'graphviz' ? 'dot' : language}));
