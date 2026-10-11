@@ -236,6 +236,110 @@ private slots:
         QVERIFY(!zip.fileData("book.xhtml").contains("127.0.0.1"));
     }
 
+    void mermaidDiagramsAreImages_data() { // NOLINT(readability-identifier-naming): Qt Test data-provider convention.
+        QTest::addColumn<int>("format");
+        QTest::addColumn<QString>("noteId");
+        for (const auto format: {EbookExporter::Format::Html, EbookExporter::Format::Epub,
+                                EbookExporter::Format::Pdf, EbookExporter::Format::Chm}) {
+            for (const auto &id: {QString(), QString("one")}) {
+                QTest::newRow(qPrintable(QString::number(int(format)) + (id.isEmpty() ? "-book" : "-single")))
+                        << int(format) << id;
+            }
+        }
+    }
+
+    void mermaidDiagramsAreImages() {
+        QFETCH(int, format);
+        QFETCH(QString, noteId);
+        const auto exportFormat = EbookExporter::Format(format);
+        if (exportFormat == EbookExporter::Format::Chm && EbookExporter::chmCompiler().isEmpty()) QSKIP("Install chmcmd or hhc to run CHM integration test");
+        QTemporaryDir source;
+        QTemporaryDir destination;
+        auto book = fixture(source.path());
+        book.notes[0].content += "\n\n```MeRmAiD title\ngraph TD\nA[\"开始 & 检查\"] --> B[完成]\n```"
+                                "\n\n> ```mermaid\n> sequenceDiagram\n> participant A as 用户\n> participant B as 系统\n> A->>B: 你好\n> ```"
+                                "\n\n```text\nordinary-code-preserved\n```";
+        book.notes[2].content += "\n\n```mermaid\ngraph LR\nC[子章节] --> D[结束]\n```";
+        QString error;
+        const auto output = EbookExporter::exportBook(book, noteId, exportFormat, destination.path(), &error);
+        QVERIFY2(!output.isEmpty(), qPrintable(error));
+        if (qEnvironmentVariableIsSet("QSNOTE_EXPORT_ARTIFACTS")) {
+            const auto directory = qEnvironmentVariable("QSNOTE_EXPORT_ARTIFACTS");
+            QDir().mkpath(directory);
+            QVERIFY(QFile::copy(output, directory + "/mermaid-" + (noteId.isEmpty() ? "book." : "single.") + QFileInfo(output).suffix()));
+        }
+        const int count = noteId.isEmpty() ? 3 : 2;
+        if (exportFormat == EbookExporter::Format::Pdf) {
+            QVERIFY(readFile(output).startsWith("%PDF-"));
+            if (!QStandardPaths::findExecutable("pdfimages").isEmpty()) {
+                QProcess process;
+                process.start("pdfimages", {"-list", output});
+                QVERIFY(process.waitForFinished());
+                QCOMPARE(process.exitCode(), 0);
+                auto images = QRegularExpression(R"((?m)^\s*\d+\s+\d+\s+image\s)").globalMatch(QString::fromUtf8(process.readAllStandardOutput()));
+                int imageCount = 0;
+                while (images.hasNext()) { images.next(); ++imageCount; }
+                QCOMPARE(imageCount, count + 1);
+            }
+            if (!QStandardPaths::findExecutable("pdftotext").isEmpty()) {
+                QProcess process;
+                process.start("pdftotext", {output, "-"});
+                QVERIFY(process.waitForFinished());
+                QCOMPARE(process.exitCode(), 0);
+                const auto text = process.readAllStandardOutput();
+                QVERIFY(!text.contains("graph TD"));
+                QVERIFY(!text.contains("sequenceDiagram"));
+                QVERIFY(text.contains("ordinary-code-preserved"));
+            }
+            return;
+        }
+        if (exportFormat == EbookExporter::Format::Chm && QStandardPaths::findExecutable("7z").isEmpty()) QSKIP("Install 7z to inspect CHM diagrams");
+        auto exportedFile = [&](const QString &name) {
+            if (exportFormat == EbookExporter::Format::Epub) return QZipReader(output).fileData(name);
+            QProcess process;
+            process.start("7z", {"x", "-so", output, name});
+            if (!process.waitForFinished() || process.exitCode() != 0) return QByteArray();
+            return process.readAllStandardOutput();
+        };
+        const auto html = exportFormat == EbookExporter::Format::Html ? readFile(output)
+                        : exportedFile(exportFormat == EbookExporter::Format::Epub ? "book.xhtml" : "book.html");
+        QVERIFY(!html.contains("graph TD"));
+        QVERIFY(!html.contains("sequenceDiagram"));
+        QVERIFY(html.contains("ordinary-code-preserved"));
+        QXmlStreamReader xml(html);
+        QList<QByteArray> diagrams;
+        while (!xml.atEnd()) {
+            xml.readNext();
+            if (!xml.isStartElement() || xml.name() != u"img" || xml.attributes().value("alt") != u"Mermaid 图表") continue;
+            const auto src = xml.attributes().value("src").toString();
+            diagrams.append(exportFormat == EbookExporter::Format::Html ? QByteArray::fromBase64(src.section(',', 1).toLatin1()) : exportedFile(src));
+            if (exportFormat == EbookExporter::Format::Epub) QVERIFY(exportedFile("content.opf").contains(("href=\"" + src + "\" media-type=\"image/png\"").toUtf8()));
+        }
+        QVERIFY2(!xml.hasError(), qPrintable(xml.errorString()));
+        QCOMPARE(diagrams.size(), count);
+        for (const auto &png: diagrams) {
+            const auto image = QImage::fromData(png, "PNG");
+            QVERIFY(image.width() > 20 && image.height() > 20);
+            bool varied = false;
+            for (int y = 0; y < image.height() && !varied; ++y) {
+                for (int x = 0; x < image.width() && !varied; ++x) varied = image.pixel(x, y) != image.pixel(0, 0);
+            }
+            QVERIFY(varied);
+        }
+    }
+
+    void invalidMermaidReportsChapter() {
+        QTemporaryDir source;
+        QTemporaryDir destination;
+        auto book = fixture(source.path());
+        book.notes[0].content = "```mermaid\nthis is not a diagram\n```";
+        QString error;
+        QVERIFY(EbookExporter::exportBook(book, "one", EbookExporter::Format::Html, destination.path(), &error).isEmpty());
+        QVERIFY(error.contains("Mermaid"));
+        QVERIFY(error.contains("第一章"));
+        QVERIFY(QDir(destination.path()).entryList(QDir::Files).isEmpty());
+    }
+
     void invalidInputAndMissingAssets() {
         QTemporaryDir source;
         QTemporaryDir destination;

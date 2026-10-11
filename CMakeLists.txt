@@ -63,6 +63,7 @@ if (QSNOTE_BUILD_TESTS)
             src/core/NotebookStore.cpp
             src/core/HexoSite.cpp
             src/resources/hexo.qrc
+            third_party/vnote-web.qrc
     )
     target_include_directories(qsnote_ebook_tests PRIVATE src)
     target_link_libraries(qsnote_ebook_tests PRIVATE Qt6::Widgets Qt6::GuiPrivate Qt6::Test Qt6::WebEngineWidgets Qt6::Network cmark)

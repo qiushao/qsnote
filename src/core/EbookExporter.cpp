@@ -5,6 +5,9 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QImage>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QPageLayout>
@@ -140,6 +143,87 @@ QByteArray imageData(const QUrl &url, QString *error) {
         return {};
     }
     return reply->readAll();
+}
+
+bool renderMermaid(const QJsonArray &diagrams, QMap<QString, QByteArray> &assets, QString *error) {
+    if (diagrams.isEmpty()) return true;
+    QVariantMap result;
+    QEventLoop loop;
+    QTimer timeout;
+    QWebEnginePage browser;
+    browser.settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, false);
+    browser.settings()->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows, false);
+    QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+    QObject::connect(&browser, &QWebEnginePage::titleChanged, &loop, [&](const QString &title) {
+        if (title != "mermaid-export-ready") return;
+        browser.runJavaScript("window.mermaidExport", [&](const QVariant &value) {
+            result = value.toMap();
+            loop.quit();
+        });
+    });
+    QObject::connect(&browser, &QWebEnginePage::loadFinished, &loop, [&](bool ok) {
+        if (!ok) { loop.quit(); return; }
+        browser.runJavaScript(QStringLiteral(R"JS(
+(async function(diagrams) {
+    const output = window.mermaidExport = {images: []};
+    let index = 0;
+    try {
+        // SVG text labels avoid foreignObject, which prevents canvas PNG export.
+        mermaid.initialize({startOnLoad: false, securityLevel: 'strict', suppressErrorRendering: true,
+                            theme: 'default', htmlLabels: false, flowchart: {htmlLabels: false}});
+        for (; index < diagrams.length; ++index) {
+            const rendered = await mermaid.render('mermaid-export-' + index, diagrams[index].source);
+            const host = document.createElement('div');
+            host.innerHTML = rendered.svg;
+            document.body.appendChild(host);
+            await document.fonts.ready;
+            const svg = host.querySelector('svg');
+            const width = Math.ceil(svg.viewBox.baseVal.width);
+            const height = Math.ceil(svg.viewBox.baseVal.height);
+            svg.setAttribute('width', width);
+            svg.setAttribute('height', height);
+            svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+            const image = new Image();
+            await new Promise((resolve, reject) => {
+                image.onload = resolve;
+                image.onerror = () => reject(new Error('无法转换 Mermaid 图片'));
+                image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(svg));
+            });
+            const canvas = document.createElement('canvas');
+            canvas.width = width * 2;
+            canvas.height = height * 2;
+            const context = canvas.getContext('2d');
+            context.fillStyle = 'white';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            context.drawImage(image, 0, 0, canvas.width, canvas.height);
+            output.images.push(canvas.toDataURL('image/png').split(',')[1]);
+            host.remove();
+        }
+    } catch (error) {
+        output.error = String(error.message || error);
+        output.index = index;
+    }
+    document.title = 'mermaid-export-ready';
+})(
+)JS") + QString::fromUtf8(QJsonDocument(diagrams).toJson(QJsonDocument::Compact)) + ");");
+    });
+    timeout.start(60000);
+    browser.setHtml("<!DOCTYPE html><html><head><meta charset=\"utf-8\"/>"
+                    "<script src=\"qrc:/web/vendor/mermaid/mermaid.min.js\"></script></head><body></body></html>", QUrl("qrc:/web/"));
+    loop.exec(QEventLoop::ExcludeUserInputEvents);
+    if (result.isEmpty()) { *error = "Mermaid 渲染失败或超时。"; return false; }
+    if (result.contains("error")) {
+        *error = "无法渲染 Mermaid 图表（" + diagrams[result.value("index").toInt()].toObject().value("chapter").toString()
+                + "）：" + result.value("error").toString();
+        return false;
+    }
+    const auto images = result.value("images").toList();
+    for (int i = 0; i < images.size(); ++i) {
+        const auto png = QByteArray::fromBase64(images[i].toString().toLatin1());
+        if (QImage::fromData(png, "PNG").isNull()) { *error = "无法转换 Mermaid 图片。"; return false; }
+        assets["mermaid-" + QString::number(i + 1) + ".png"] = png;
+    }
+    return true;
 }
 
 bool addPdfBookmarks(const QString &path, const QList<Chapter> &chapters, QString *error) {
@@ -319,6 +403,7 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
     }
     QMap<QString, QByteArray> assets;
     QMap<QString, QString> imagePaths;
+    QJsonArray mermaidDiagrams;
     QString body = "<h1>" + title.toHtmlEscaped() + "</h1><nav epub:type=\"toc\"><h2>目录</h2>" + contents(chapters, false) + "</nav>";
     body.replace("book.html#", "#");
     for (const auto &chapter: chapters) {
@@ -329,10 +414,14 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
         const std::unique_ptr<cmark_node, decltype(&cmark_node_free)> root(cmark_parse_document(utf8.constData(), size_t(utf8.size()), CMARK_OPT_DEFAULT), cmark_node_free);
         const std::unique_ptr<cmark_iter, decltype(&cmark_iter_free)> iter(cmark_iter_new(root.get()), cmark_iter_free);
         QList<cmark_node *> excludedLinks;
+        QList<cmark_node *> mermaidBlocks;
         while (cmark_iter_next(iter.get()) != CMARK_EVENT_DONE) {
             if (cmark_iter_get_event_type(iter.get()) != CMARK_EVENT_ENTER) continue;
             auto *node = cmark_iter_get_node(iter.get());
             const auto type = cmark_node_get_type(node);
+            if (type == CMARK_NODE_CODE_BLOCK && QString::fromUtf8(cmark_node_get_fence_info(node)).trimmed().section(QRegularExpression("\\s+"), 0, 0).compare("mermaid", Qt::CaseInsensitive) == 0) {
+                mermaidBlocks.append(node);
+            }
             if (type != CMARK_NODE_IMAGE && type != CMARK_NODE_LINK) continue;
             const QUrl original(QString::fromUtf8(cmark_node_get_url(node)));
             const auto resolved = base.resolved(original);
@@ -371,6 +460,18 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
             cmark_node_unlink(link);
             cmark_node_free(link);
         }
+        for (auto *block: mermaidBlocks) {
+            mermaidDiagrams.append(QJsonObject{{"source", QString::fromUtf8(cmark_node_get_literal(block))}, {"chapter", note.title}});
+            auto *paragraph = cmark_node_new(CMARK_NODE_PARAGRAPH);
+            auto *image = cmark_node_new(CMARK_NODE_IMAGE);
+            auto *alt = cmark_node_new(CMARK_NODE_TEXT);
+            cmark_node_set_literal(alt, "Mermaid 图表");
+            cmark_node_set_url(image, ("mermaid-" + QString::number(mermaidDiagrams.size()) + ".png").toUtf8().constData());
+            cmark_node_append_child(image, alt);
+            cmark_node_append_child(paragraph, image);
+            cmark_node_replace(block, paragraph);
+            cmark_node_free(block);
+        }
         auto *rendered = cmark_render_html(root.get(), CMARK_OPT_DEFAULT);
         QString html = QString::fromUtf8(rendered);
         std::free(rendered);
@@ -398,6 +499,7 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
         html.replace("href=\"#fn", "href=\"#" + chapter.anchor + "-fn");
         body += R"(<div class="chapter" id=")" + chapter.anchor + "\"><h1>" + note.title.toHtmlEscaped() + "</h1>" + html + "</div>";
     }
+    if (!renderMermaid(mermaidDiagrams, assets, error)) return {};
     auto html = page(title, body);
     QString extension;
     switch (format) {
