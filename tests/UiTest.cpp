@@ -457,6 +457,65 @@ st->e
         QVERIFY(!javascript(preview, "document.querySelector('article a').getAttribute('href').startsWith('javascript:')").toBool());
     }
 
+    void viewModeKeepsScrollPosition_data() { // NOLINT(readability-identifier-naming): Qt Test data-provider convention.
+        QTest::addColumn<QString>("fromMode");
+        QTest::addColumn<QString>("toMode");
+        QTest::newRow("edit-to-preview") << QString("editMode") << QString("previewMode");
+        QTest::newRow("preview-to-edit") << QString("previewMode") << QString("editMode");
+        QTest::newRow("edit-to-split") << QString("editMode") << QString("splitMode");
+        QTest::newRow("split-to-edit") << QString("splitMode") << QString("editMode");
+        QTest::newRow("preview-to-split") << QString("previewMode") << QString("splitMode");
+        QTest::newRow("split-to-preview") << QString("splitMode") << QString("previewMode");
+    }
+
+    void viewModeKeepsScrollPosition() {
+        QFETCH(QString, fromMode);
+        QFETCH(QString, toMode);
+        NotebookStore fixture;
+        Notebook book{"mode-scroll-book", "Scroll", "normal", {}, {}, fixturePath("mode-scroll-book")};
+        QString text;
+        for (int i = 0; i < 80; ++i) text += QStringLiteral("## Heading %1\n\nParagraph %1\n\n").arg(i);
+        book.notes.append({"mode-scroll-note", {}, "Scroll.md", text, false, {}});
+        fixture.notebooks.append(book);
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.resize(1400, 700);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *tree = window.findChild<QTreeWidget *>("noteTree");
+        openTreeNote(tree, tree->topLevelItem(0));
+        auto *preview = window.findChild<MarkdownPreview *>("preview");
+        auto *editor = window.findChild<MarkdownEditor *>("markdownEditor");
+        QTest::mouseClick(window.findChild<QPushButton *>(fromMode), Qt::LeftButton);
+        if (fromMode != "editMode") {
+            QTRY_COMPARE_WITH_TIMEOUT(preview->renderedRevision(), preview->revision(), 30000);
+        }
+        QTest::qWait(100);
+        QTextCursor selection(editor->document()->findBlockByNumber(fromMode == "previewMode" ? 2 : 160));
+        selection.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor, 3);
+        editor->getTextEdit()->setTextCursor(selection);
+        if (fromMode == "previewMode") {
+            QSignalSpy lines(preview, &MarkdownPreview::sourceLineChanged);
+            javascript(*preview, "window.scrollTo(0, Math.ceil(document.querySelector('h2[data-source-line=\"160\"]').getBoundingClientRect().top + scrollY))");
+            QTRY_VERIFY(!lines.isEmpty());
+            QCOMPARE(lines.last().first().toInt(), 160);
+        } else {
+            editor->scrollToLine(160, false);
+            QTRY_COMPARE(editor->getTopLine(), 160);
+        }
+        const auto cursor = editor->getTextEdit()->textCursor();
+        QVERIFY(cursor.hasSelection());
+        QTest::mouseClick(window.findChild<QPushButton *>(toMode), Qt::LeftButton);
+        if (toMode != "editMode") {
+            QTRY_COMPARE_WITH_TIMEOUT(preview->renderedRevision(), preview->revision(), 30000);
+            QTRY_VERIFY(javascript(*preview, "Math.abs(document.querySelector('h2[data-source-line=\"160\"]').getBoundingClientRect().top) < 2").toBool());
+        }
+        if (toMode != "previewMode") QTRY_COMPARE(editor->getTopLine(), 160);
+        QCOMPARE(editor->getTextEdit()->textCursor().position(), cursor.position());
+        QCOMPARE(editor->getTextEdit()->textCursor().anchor(), cursor.anchor());
+    }
+
     void splitPreviewScrollsBothWays() {
         NotebookStore fixture;
         Notebook book{"scroll-book", "Scroll", "normal", {}, {}, fixturePath("scroll-book")};

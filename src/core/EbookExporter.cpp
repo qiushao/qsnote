@@ -405,7 +405,7 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
     QMap<QString, QByteArray> assets;
     QMap<QString, QString> imagePaths;
     QJsonArray mermaidDiagrams;
-    QString body = "<h1>" + title.toHtmlEscaped() + "</h1><nav epub:type=\"toc\"><h2>目录</h2>" + contents(chapters, false) + "</nav>";
+    QString body = "<nav epub:type=\"toc\"><h2>目录</h2>" + contents(chapters, false) + "</nav>";
     body.replace("book.html#", "#");
     for (const auto &chapter: chapters) {
         const auto &note = *chapter.note;

@@ -46,6 +46,7 @@ private slots:
         const auto output = EbookExporter::exportBook(book, {}, EbookExporter::Format::Html, destination.path(), &error);
         QVERIFY2(!output.isEmpty(), qPrintable(error));
         const auto html = QString::fromUtf8(readFile(output));
+        QVERIFY(html.contains("<body><nav epub:type=\"toc\">"));
         QVERIFY(html.contains("第一章内容"));
         QVERIFY(html.contains("data:image/png;base64,"));
         QVERIFY(html.contains("href=\"#chapter-2-%E5%BC%80%E5%A7%8B\""));
@@ -58,6 +59,7 @@ private slots:
         QVERIFY2(!xml.hasError(), qPrintable(xml.errorString()));
         const auto single = EbookExporter::exportBook(book, "one", EbookExporter::Format::Html, destination.path(), &error);
         QVERIFY2(!single.isEmpty(), qPrintable(error));
+        QVERIFY(readFile(single).contains("<body><nav epub:type=\"toc\">"));
         QVERIFY(readFile(single).contains(QString("第一章内容").toUtf8()));
         QVERIFY(!readFile(single).contains(QString("第二章内容").toUtf8()));
         const auto second = EbookExporter::exportBook(book, "one", EbookExporter::Format::Html, destination.path(), &error);
@@ -89,10 +91,12 @@ private slots:
             }
             QVERIFY(!QImage::fromData(zip.fileData("image-1.png")).isNull());
             const auto content = zip.fileData("book.xhtml");
+            QVERIFY(content.contains("<body><nav epub:type=\"toc\">"));
             QVERIFY(content.contains(QString("第一章内容").toUtf8()));
             QCOMPARE(content.contains(QString("第二章内容").toUtf8()), id.isEmpty());
             const auto nav = zip.fileData("nav.xhtml");
             QVERIFY(nav.contains("book.xhtml#chapter-1"));
+            QVERIFY(zip.fileData("toc.ncx").contains("<navMap><navPoint id=\"chapter-1\""));
             if (id.isEmpty()) {
                 QVERIFY(nav.contains(QString("第一章</a><ol><li><a href=\"book.xhtml#chapter-2\">第二章").toUtf8()));
                 QVERIFY(nav.contains(QString("分组</a><ol><li><a href=\"book.xhtml#chapter-5\">第三章").toUtf8()));
@@ -119,6 +123,7 @@ private slots:
                 QVERIFY(process.waitForFinished());
                 QCOMPARE(process.exitCode(), 0);
                 const auto text = QString::fromUtf8(process.readAllStandardOutput());
+                QVERIFY(text.trimmed().startsWith("目录"));
                 QVERIFY(text.contains("第一章内容"));
                 QCOMPARE(text.contains("第二章内容"), id.isEmpty());
                 QVERIFY(!text.contains(QChar::ReplacementCharacter));
@@ -198,6 +203,7 @@ private slots:
                 QVERIFY(process.waitForFinished());
                 QCOMPARE(process.exitCode(), 0);
                 const auto html = QString::fromUtf8(process.readAllStandardOutput());
+                QVERIFY(html.contains("<body><nav epub:type=\"toc\">"));
                 QVERIFY(html.contains("第一章内容"));
                 QCOMPARE(html.contains("第二章内容"), id.isEmpty());
             }

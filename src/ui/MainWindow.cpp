@@ -38,6 +38,7 @@
 #include <QPainterPath>
 #include <vtextedit/vtextedit.h>
 #include <vtextedit/vmarkdowneditor.h>
+#include <vtextedit/texteditutils.h>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScreen>
@@ -999,6 +1000,9 @@ void MainWindow::setViewMode(ViewMode mode) {
     const auto *note = store_.note(currentNoteId());
     if (!note) return;
     const auto oldMode = viewMode_;
+    const auto sessionMode = editorSessions_[activeEditorId_].mode;
+    const int line = sessionMode == ViewMode::Preview ? editorSessions_[activeEditorId_].previewLine : markdownEditor_->getTopLine();
+    const QScopedValueRollback<bool> guard(syncingPreviewScroll_, true);
     viewMode_ = mode;
     previewModeEnabled_ = mode == ViewMode::Preview;
     editMode_->setChecked(mode == ViewMode::Edit);
@@ -1012,7 +1016,19 @@ void MainWindow::setViewMode(ViewMode mode) {
     else previewTimer_->stop();
     if (mode == ViewMode::Split && oldMode != ViewMode::Split) {
         editorSplitter_->setSizes({editorSplitter_->width() / 2, editorSplitter_->width() / 2});
-        preview_->scrollToLine(markdownEditor_->getTopLine());
+    }
+    if (mode != sessionMode) {
+        editorSessions_[activeEditorId_].previewLine = line;
+        // Showing or resizing the editor may scroll to its caret. Restore the
+        // source line after layout without changing the retained selection.
+        QTimer::singleShot(0, markdownEditor_, [this, id = activeEditorId_, mode, line] {
+            if (activeEditorId_ != id || viewMode_ != mode) return;
+            const QScopedValueRollback<bool> guard(syncingPreviewScroll_, true);
+            if (mode != ViewMode::Preview) {
+                vte::TextEditUtils::scrollBlockInPage(editor_, line, vte::TextEditUtils::PagePosition::Top);
+            }
+            if (mode != ViewMode::Edit) preview_->scrollToLine(line);
+        });
     }
     editorStatuses_->setVisible(mode != ViewMode::Preview);
     updateStatus();
