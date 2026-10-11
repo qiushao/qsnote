@@ -3,6 +3,9 @@
 #include "MarkdownEditor.h"
 #include "MarkdownPreview.h"
 #include "core/HexoSite.h"
+#include "core/EbookExporter.h"
+#include <QSettings>
+#include <QStandardPaths>
 #include <QWebEngineView>
 #include <QProgressDialog>
 #include <QTcpServer>
@@ -35,11 +38,8 @@
 #include <QPainterPath>
 #include <vtextedit/vtextedit.h>
 #include <vtextedit/vmarkdowneditor.h>
-#include <cmark.h>
-#include <cstdlib>
 #include <QPushButton>
 #include <QRegularExpression>
-#include <QSaveFile>
 #include <QScreen>
 #include <QScrollArea>
 #include <QShortcut>
@@ -267,23 +267,6 @@ private:
     QWidget *scrim_;
 };
 
-QString markdownHtml(const QString &markdown) {
-    const auto utf8 = markdown.toUtf8();
-    auto *html = cmark_markdown_to_html(utf8.constData(), static_cast<size_t>(utf8.size()), CMARK_OPT_DEFAULT);
-    const auto result = QString::fromUtf8(html);
-    std::free(html);
-    return result;
-}
-const QString markdownStyle = QStringLiteral(
-        "body { color: #24292f; font-size: 14px; line-height: 1.75; }"
-        "h1 { font-size: 24px; } h2 { font-size: 20px; } h3 { font-size: 17px; }"
-        "h1,h2,h3,h4,h5,h6 { margin-top: 20px; margin-bottom: 8px; }"
-        "p { margin-top: 8px; margin-bottom: 8px; }"
-        "pre { background-color: #f6f8fa; padding: 12px; }"
-        "code { background-color: #f6f7f9; font-family: monospace; }"
-        "blockquote { color: #8a8f98; background-color: #f6f7f9; margin-left: 14px; }"
-        "th { background-color: #f6f7f9; } td,th { padding: 6px; }"
-        "a { color: #3b6fd4; text-decoration: none; }");
 }// namespace
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
@@ -1139,7 +1122,7 @@ void MainWindow::createNotebook() {
     type->setObjectName("notebookType");
     type->addItem("普通笔记本（目录 + 元数据文件）", "normal");
     type->addItem("静态站点（Hexo · Pure）", "site");
-    type->addItem("电子书（GitBook 式 SUMMARY.md）", "ebook");
+    type->addItem("电子书（章节目录 · 多格式导出）", "ebook");
     QString locationRoot = NotebookStore::defaultRoot();
     auto *location = new QLineEdit(&dialog);
     location->setObjectName("notebookLocation");
@@ -1670,12 +1653,10 @@ void MainWindow::showSitePreview() {
 void MainWindow::exportNotebook() {
     const auto *book = store_.notebook(currentNotebookId_);
     if (!book || book->type == "normal") return;
-    const auto directory = QFileDialog::getExistingDirectory(this, "选择导出目录");
-    if (directory.isEmpty()) return;
-    // Export into a new directory; never overwrite a user's existing files.
-    const QString destination = directory + "/qsnote-" + book->id.left(8) + "-" + QString::number(QDateTime::currentMSecsSinceEpoch());
-    QMap<QString, QByteArray> files;
     if (book->type == "site") {
+        const auto directory = QFileDialog::getExistingDirectory(this, "选择导出目录");
+        if (directory.isEmpty()) return;
+        const QString destination = directory + "/qsnote-" + book->id.left(8) + "-" + QString::number(QDateTime::currentMSecsSinceEpoch());
         if (!generateSite(*book)) return;
         QString error;
         if (!HexoSite::copyDirectory(book->path + "/public", destination, &error)) {
@@ -1684,36 +1665,76 @@ void MainWindow::exportNotebook() {
         }
         status_->setText("已导出至 " + destination);
         return;
-    } else {
-        QString summary = "# Summary\n\n";
-        QString html = R"(<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><style>)" + markdownStyle + "</style></head><body><h1>" + book->name.toHtmlEscaped() + "</h1>";
-        QList<QPair<QString, int>> pending{{QString(), -1}};
-        while (!pending.isEmpty()) {
-            const auto entry = pending.takeLast();
-            if (!entry.first.isEmpty()) {
-                const auto *note = store_.note(entry.first);
-                const auto filename = "chapter-" + note->id + ".md";
-                summary += QString(entry.second * 2, ' ') + "* [" + note->title + "](" + filename + ")\n";
-                files[filename] = note->content.toUtf8();
-                html += markdownHtml(note->content);
-            }
-            for (auto it = book->notes.crbegin(); it != book->notes.crend(); ++it) {
-                if (it->parentId == entry.first) pending.append({it->id, entry.second + 1});
-            }
-        }
-        files["SUMMARY.md"] = summary.toUtf8();
-        files["book.html"] = (html + "</body></html>").toUtf8();
     }
-    if (!QDir().mkpath(destination)) {
-        QMessageBox::warning(this, "导出失败", "无法创建导出目录。");
-        return;
-    }
-    for (auto entry = files.cbegin(); entry != files.cend(); ++entry) {
-        QSaveFile file(destination + "/" + entry.key());
-        if (!file.open(QIODevice::WriteOnly) || file.write(entry.value()) != entry.value().size() || !file.commit()) {
-            QMessageBox::warning(this, "导出失败", file.errorString());
-            return;
-        }
-    }
-    status_->setText("已导出至 " + destination);
+    QDialog dialog(this);
+    dialog.setObjectName("ebookExportDialog");
+    dialog.setWindowTitle("导出电子书");
+    dialog.resize(540, 300);
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *form = new QFormLayout;
+    auto *scope = new QComboBox(&dialog);
+    scope->setObjectName("exportScope");
+    scope->addItem("整本电子书 · " + book->name, QString());
+    const auto *note = store_.note(currentNoteId());
+    if (note && !note->folder && store_.owner(note->id) == book) scope->addItem("当前文档 · " + note->title, note->id);
+    auto *format = new QComboBox(&dialog);
+    format->setObjectName("exportFormat");
+    format->addItem("EPUB · 电子书", int(EbookExporter::Format::Epub));
+    format->addItem("PDF · 打印文档", int(EbookExporter::Format::Pdf));
+    format->addItem("CHM · 帮助文档", int(EbookExporter::Format::Chm));
+    format->addItem("HTML · 网页", int(EbookExporter::Format::Html));
+    auto *directoryRow = new QWidget(&dialog);
+    auto *directoryLayout = row(directoryRow, 0, 0);
+    auto *directory = new QLineEdit(QSettings().value("ebookExport/directory", QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).toString(), directoryRow);
+    directory->setObjectName("exportDirectory");
+    auto *browse = button("浏览…", "browseExportDirectory", directoryRow);
+    directoryLayout->addWidget(directory, 1);
+    directoryLayout->addWidget(browse);
+    connect(browse, &QPushButton::clicked, &dialog, [&] {
+        const auto selected = QFileDialog::getExistingDirectory(&dialog, "选择保存目录", directory->text());
+        if (!selected.isEmpty()) directory->setText(selected);
+    });
+    form->addRow("导出范围", scope);
+    form->addRow("导出格式", format);
+    form->addRow("保存目录", directoryRow);
+    layout->addLayout(form);
+    layout->addWidget(label("整本导出保留章节层级和顺序；当前文档仅导出该文档。已有同名文件时自动添加序号。", &dialog, true));
+    auto *hint = label({}, &dialog, true);
+    hint->setObjectName("exportHint");
+    layout->addWidget(hint);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
+    auto *confirm = buttons->button(QDialogButtonBox::Save);
+    confirm->setObjectName("confirmExport");
+    confirm->setText("导出");
+    buttons->button(QDialogButtonBox::Cancel)->setText("取消");
+    const auto validate = [&] {
+        const bool missingCompiler = format->currentData().toInt() == int(EbookExporter::Format::Chm) && EbookExporter::chmCompiler().isEmpty();
+        const bool validDirectory = QFileInfo(directory->text().trimmed()).isDir();
+        hint->setText(missingCompiler ? "CHM 需要安装 Free Pascal 的 chmcmd（Linux：fp-utils）；Windows 也可将 HTML Help Workshop 的 hhc 加入 PATH。"
+                                    : !validDirectory ? "请选择已有的保存目录。" : book->notes.isEmpty() ? "电子书中还没有章节。" : QString());
+        confirm->setEnabled(!missingCompiler && validDirectory && !book->notes.isEmpty());
+    };
+    connect(format, &QComboBox::currentIndexChanged, &dialog, validate);
+    connect(directory, &QLineEdit::textChanged, &dialog, validate);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+    validate();
+    if (dialog.exec() != QDialog::Accepted) return;
+    const auto destination = directory->text().trimmed();
+    QSettings().setValue("ebookExport/directory", destination);
+    // Editor changes already update store_ synchronously; export that snapshot, including unsaved edits.
+    const auto snapshot = *book;
+    QProgressDialog progress("正在导出电子书…", QString(), 0, 0, this);
+    progress.setWindowTitle("导出电子书");
+    progress.setWindowModality(Qt::ApplicationModal);
+    progress.setCancelButton(nullptr);
+    progress.setMinimumDuration(0);
+    progress.show();
+    QString error;
+    const auto path = EbookExporter::exportBook(snapshot, scope->currentData().toString(),
+        static_cast<EbookExporter::Format>(format->currentData().toInt()), destination, &error);
+    progress.close();
+    if (path.isEmpty()) QMessageBox::warning(this, "导出失败", error);
+    else status_->setText("已导出至 " + path);
 }

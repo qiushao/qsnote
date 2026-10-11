@@ -1,4 +1,5 @@
 #include "core/NotebookStore.h"
+#include "core/EbookExporter.h"
 #include "ui/MainWindow.h"
 #include "ui/MarkdownEditor.h"
 #include "ui/MarkdownPreview.h"
@@ -925,6 +926,71 @@ st->e
         QCOMPARE(tree->topLevelItem(0)->text(0), QString("笔记X.md"));
     }
 
+    void ebookExportOptionsAndUnsavedDocument() {
+        NotebookStore fixture;
+        fixture.notebooks.append({"ebook-options", "整本书", "ebook", {
+            {"parent", {}, "父章节", "原始内容", false, {}},
+            {"child", "parent", "子章节", "子章节正文", false, {}}
+        }, {}, fixturePath("ebook-options")});
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        QTemporaryDir destination;
+        MainWindow window;
+        window.resize(1100, 800);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *tree = window.findChild<QTreeWidget *>("noteTree");
+        QVERIFY(tree);
+        openTreeNote(tree, tree->topLevelItem(0));
+        auto *editor = window.findChild<MarkdownEditor *>("markdownEditor");
+        QVERIFY(editor);
+        editor->setText("尚未等待自动保存的新内容");
+        for (int format = 0; format < 4; ++format) {
+            QTimer::singleShot(30, &window, [&destination, format] {
+                auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                QVERIFY(dialog);
+                QCOMPARE(dialog->objectName(), QString("ebookExportDialog"));
+                auto *scope = dialog->findChild<QComboBox *>("exportScope");
+                QCOMPARE(scope->count(), 2);
+                scope->setCurrentIndex(1);
+                auto *formats = dialog->findChild<QComboBox *>("exportFormat");
+                QCOMPARE(formats->count(), 4);
+                formats->setCurrentIndex(format);
+                auto *directory = dialog->findChild<QLineEdit *>("exportDirectory");
+                auto *confirm = dialog->findChild<QPushButton *>("confirmExport");
+                directory->setText(destination.path() + "/missing");
+                QVERIFY(!confirm->isEnabled());
+                directory->setText(destination.path());
+                if (format == 2 && EbookExporter::chmCompiler().isEmpty()) {
+                    QVERIFY(!confirm->isEnabled());
+                    dialog->reject();
+                    return;
+                }
+                QVERIFY(confirm->isEnabled());
+                dialog->grab().save("ebook-export-dialog.png");
+                confirm->click();
+            });
+            window.findChild<QPushButton *>("exportNotebook")->click();
+        }
+        QFile html(destination.filePath("父章节.html"));
+        QVERIFY(html.open(QIODevice::ReadOnly));
+        const auto content = QString::fromUtf8(html.readAll());
+        QVERIFY(content.contains("尚未等待自动保存的新内容"));
+        QVERIFY(!content.contains("子章节正文"));
+        QVERIFY(QFileInfo::exists(destination.filePath("父章节.epub")));
+        QVERIFY(QFileInfo::exists(destination.filePath("父章节.pdf")));
+        if (!EbookExporter::chmCompiler().isEmpty()) QVERIFY(QFileInfo::exists(destination.filePath("父章节.chm")));
+        const auto files = QDir(destination.path()).entryList(QDir::Files);
+        QTimer::singleShot(30, &window, [&destination] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            QCOMPARE(dialog->findChild<QLineEdit *>("exportDirectory")->text(), destination.path());
+            dialog->reject();
+        });
+        window.findChild<QPushButton *>("exportNotebook")->click();
+        QCOMPARE(QDir(destination.path()).entryList(QDir::Files), files);
+    }
+
     void exportsContainUserContent() {
         NotebookStore fixture;
         fixture.notebooks.append({"site", "导出站点", "site", {{"post", {}, "文章", "# 用户文章\n\n正文", false, {}}}, {{"title", "用户站点"}}, fixturePath("site-export")});
@@ -939,7 +1005,15 @@ st->e
         QVERIFY(QTest::qWaitForWindowExposed(&window));
         for (int index = 0; index < 2; ++index) {
             window.findChild<QComboBox *>("notebooks")->setCurrentIndex(index);
-            QTimer::singleShot(30, &window, [&destination] {
+            QTimer::singleShot(30, &window, [&destination, index] {
+                if (index == 1) {
+                    auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                    QVERIFY(dialog);
+                    dialog->findChild<QLineEdit *>("exportDirectory")->setText(destination.path());
+                    dialog->findChild<QComboBox *>("exportFormat")->setCurrentIndex(3);
+                    dialog->findChild<QPushButton *>("confirmExport")->click();
+                    return;
+                }
                 auto *dialog = qobject_cast<QFileDialog *>(QApplication::activeModalWidget());
                 QVERIFY(dialog);
                 dialog->setDirectory(destination.path());
@@ -952,18 +1026,13 @@ st->e
         }
         const QDir output(destination.path());
         const auto sites = output.entryList({"qsnote-site-*"}, QDir::Dirs);
-        const auto books = output.entryList({"qsnote-ebook-*"}, QDir::Dirs);
         QCOMPARE(sites.size(), 1);
-        QCOMPARE(books.size(), 1);
         QFile article(output.filePath(sites.first() + "/文章/index.html"));
         QVERIFY(article.open(QIODevice::ReadOnly));
         QVERIFY(QString::fromUtf8(article.readAll()).contains("用户文章"));
-        QFile summary(output.filePath(books.first() + "/SUMMARY.md"));
-        QVERIFY(summary.open(QIODevice::ReadOnly));
-        QVERIFY(QString::fromUtf8(summary.readAll()).contains("[章节](chapter-chapter.md)"));
-        QFile chapter(output.filePath(books.first() + "/chapter-chapter.md"));
-        QVERIFY(chapter.open(QIODevice::ReadOnly));
-        QCOMPARE(QString::fromUtf8(chapter.readAll()), QString("# 用户章节\n\n章节正文"));
+        QFile book(output.filePath("导出书籍.html"));
+        QVERIFY(book.open(QIODevice::ReadOnly));
+        QVERIFY(QString::fromUtf8(book.readAll()).contains("章节正文"));
     }
 
     void siteMetadataConfigAndPreview() {

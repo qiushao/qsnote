@@ -57,8 +57,20 @@ if (QSNOTE_BUILD_TESTS)
     target_include_directories(qsnote_hexo_tests PRIVATE src)
     target_link_libraries(qsnote_hexo_tests PRIVATE Qt6::Core Qt6::Test)
     add_test(NAME qsnote_hexo COMMAND qsnote_hexo_tests)
+    add_executable(qsnote_ebook_tests
+            tests/EbookExporterTest.cpp
+            src/core/EbookExporter.cpp
+            src/core/NotebookStore.cpp
+            src/core/HexoSite.cpp
+            src/resources/hexo.qrc
+    )
+    target_include_directories(qsnote_ebook_tests PRIVATE src)
+    target_link_libraries(qsnote_ebook_tests PRIVATE Qt6::Widgets Qt6::GuiPrivate Qt6::Test Qt6::WebEngineWidgets Qt6::Network cmark)
+    add_test(NAME qsnote_ebook COMMAND qsnote_ebook_tests)
+    set_tests_properties(qsnote_ebook PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu")
     add_executable(qsnote_ui_tests
             tests/UiTest.cpp
+            src/core/EbookExporter.cpp
             src/ui/MainWindow.cpp
             src/ui/MarkdownEditor.cpp
             src/ui/MarkdownPreview.cpp
@@ -71,7 +83,7 @@ if (QSNOTE_BUILD_TESTS)
             third_party/vnote-web.qrc
     )
     target_include_directories(qsnote_ui_tests PRIVATE src)
-    target_link_libraries(qsnote_ui_tests PRIVATE Qt6::Widgets Qt6::Test Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Network VTextEdit)
+    target_link_libraries(qsnote_ui_tests PRIVATE Qt6::Widgets Qt6::GuiPrivate Qt6::Test Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Network VTextEdit)
     add_test(NAME qsnote_ui COMMAND qsnote_ui_tests)
     set_tests_properties(qsnote_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu;XDG_DATA_HOME=${CMAKE_BINARY_DIR}/test-data")
 endif ()
