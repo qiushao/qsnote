@@ -80,6 +80,11 @@ QPushButton *button(const QString &text, const QString &name, QWidget *parent) {
     result->setCursor(Qt::PointingHandCursor);
     return result;
 }
+QString defaultExportDirectory() {
+    auto documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (documents.isEmpty()) documents = QDir::homePath();
+    return documents + "/qsnote_exports";
+}
 QIcon icon(const QString &kind) {
     QPixmap pixmap(32, 32);
     pixmap.fill(Qt::transparent);
@@ -1693,7 +1698,9 @@ void MainWindow::exportNotebook() {
     const auto *book = store_.notebook(currentNotebookId_);
     if (!book || book->type == "normal") return;
     if (book->type == "site") {
-        const auto directory = QFileDialog::getExistingDirectory(this, "选择导出目录");
+        const auto defaultDirectory = defaultExportDirectory();
+        QDir().mkpath(defaultDirectory);
+        const auto directory = QFileDialog::getExistingDirectory(this, "选择导出目录", defaultDirectory);
         if (directory.isEmpty()) return;
         const QString destination = directory + "/qsnote-" + book->id.left(8) + "-" + QString::number(QDateTime::currentMSecsSinceEpoch());
         if (!generateSite(*book)) return;
@@ -1724,7 +1731,9 @@ void MainWindow::exportNotebook() {
     format->addItem("HTML · 网页", int(EbookExporter::Format::Html));
     auto *directoryRow = new QWidget(&dialog);
     auto *directoryLayout = row(directoryRow, 0, 0);
-    auto *directory = new QLineEdit(QSettings().value("ebookExport/directory", QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).toString(), directoryRow);
+    const auto defaultDirectory = defaultExportDirectory();
+    QDir().mkpath(defaultDirectory);
+    auto *directory = new QLineEdit(QSettings().value("ebookExport/directory", defaultDirectory).toString(), directoryRow);
     directory->setObjectName("exportDirectory");
     auto *browse = button("浏览…", "browseExportDirectory", directoryRow);
     directoryLayout->addWidget(directory, 1);
