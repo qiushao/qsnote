@@ -1,0 +1,12 @@
+<% if (page.cmt_rendered) { %>
+<script>
+utils.js('https://cdn.jsdelivr.net/npm/valine@1.5.1/dist/Valine.min.js').then(() => {
+  new Valine(Object.assign(<%- JSON.stringify(theme.comment.valine).replace(/</g, '\\u003c') %>, {
+    el: '#vcomments',
+    appId: <%- JSON.stringify(theme.comment.valine.appid).replace(/</g, '\\u003c') %>,
+    appKey: <%- JSON.stringify(theme.comment.valine.appkey).replace(/</g, '\\u003c') %>,
+    visitor: false
+  }));
+});
+</script>
+<% } %>

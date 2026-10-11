@@ -1,6 +1,6 @@
 # Hexo 静态站点
 
-QSNote 静态站点默认使用 Pure 主题。创建和保存站点不需要 Node.js；预览和导出需要 PATH 中的 Node.js 18+ 和 npm。首次生成在站点目录执行 `npm ci --no-audit --no-fund` 安装锁定的依赖，之后可离线生成默认站点。启用第三方评论服务时仍需联网。
+QSNote 静态站点默认使用 Pure 主题，可在「站点配置 → 主题与页脚 → 站点主题」中切换到 Stellar；保存后保留选择。创建和保存站点不需要 Node.js；预览和导出需要 PATH 中的 Node.js 18+ 和 npm。首次生成在站点目录执行 `npm ci --no-audit --no-fund` 安装锁定的依赖，之后可离线生成默认站点。首次使用 Stellar 时还会在 `themes/stellar` 中执行 `npm ci --no-audit --no-fund` 安装主题依赖，不修改站点根目录的依赖文件。启用第三方评论服务或使用主题的远程资源时仍需联网。
 
 ## 文件结构
 
@@ -21,17 +21,18 @@ QSNote 静态站点默认使用 Pure 主题。创建和保存站点不需要 Nod
 │   ├── links/index.md
 │   └── about/index.md
 ├── themes/pure/
+├── themes/stellar/         # 含独立的 package.json 和锁文件
 ├── node_modules/           # 首次生成时安装
 └── public/                 # Hexo 生成结果
 ```
 
-Pure 的模板、脚本、字体、图片、语言文件及许可证编译在 Qt 资源 `src/resources/hexo.qrc` 中，创建站点时释放。重新保存不会覆盖已存在的主题、页面或 scaffold 文件。`_config.yml` 使用 YAML 支持的 JSON 写法，包含配置界面中的站点信息、评论和页脚设置；友链写入 `source/_data/links.json`。这两个文件由 QSNote 维护，请在界面中修改对应设置。可在 `themes/pure/_config.yml` 中修改其他主题选项。
+Pure 与 Stellar 的模板、脚本、字体、图片、语言文件及许可证编译在 Qt 资源 `src/resources/hexo.qrc` 中，创建站点时释放。重新保存不会覆盖已存在的主题、页面或 scaffold 文件。`_config.yml` 使用 YAML 支持的 JSON 写法，包含配置界面中的站点信息、评论和页脚设置；友链写入 `source/_data/links.json`。这两个文件由 QSNote 维护，请在界面中修改对应设置。可在 `themes/<主题名>/_config.yml` 中修改其他主题选项。
 
-保存旧站点时，原有文章移到 `source/_posts/分类/标题.md` 并补充 Hexo front matter，草稿保存在 `source/_drafts`，预览和导出均不发布草稿。原来的 minimal、notes、tech 配色统一替换为 Pure。正文和索引中的元数据保留。应用管理的 front matter 包含标题、日期、slug、分类和标签，不在普通正文编辑区显示；元数据修改会同步回文章文件。如果直接在正文中编写完整的 YAML front matter，则使用作者提供的 front matter。
+保存旧站点时，原有文章移到 `source/_posts/分类/标题.md` 并补充 Hexo front matter，草稿保存在 `source/_drafts`，预览和导出均不发布草稿。原来的 minimal、notes、tech 配色统一替换为 Pure，已选择的 Stellar 保留。正文和索引中的元数据保留。应用管理的 front matter 包含标题、日期、slug、分类和标签，不在普通正文编辑区显示；元数据修改会同步回文章文件。如果直接在正文中编写完整的 YAML front matter，则使用作者提供的 front matter。
 
 ## 预览和发布
 
-在站点配置的「评论」中可选择 Valine、Gitalk、Disqus 或关闭评论。新建及未设置评论平台的站点默认使用 Valine，已有明确选择的站点保留原设置。使用 Valine 时，填写对应 LeanCloud 应用的 App ID 和 App Key；其他 Valine 选项沿用 `themes/pure/_config.yml` 中的设置。
+在站点配置的「评论」中可选择 Valine、Gitalk、Disqus 或关闭评论。新建及未设置评论平台的站点默认使用 Valine，已有明确选择的站点保留原设置。使用 Valine 时，填写对应 LeanCloud 应用的 App ID 和 App Key；Pure 的其他 Valine 选项沿用 `themes/pure/_config.yml` 中的设置。Stellar 同样支持界面中的三种评论服务及关闭评论。
 
 预览与导出调用相同的 Hexo API：`init` → `clean` → `generate`。EJS 页面、Markdown、首页分页、归档、分类、标签和搜索索引由站点安装的 Hexo 插件生成。每次生成会清理 `public` 中的旧产物，请将需要发布的自定义文件放在 `source` 中。
 
@@ -44,6 +45,8 @@ Pure 的模板、脚本、字体、图片、语言文件及许可证编译在 Qt
 ```sh
 cd 站点目录
 npm ci
+# 使用 Stellar 时额外安装主题依赖：
+# npm ci --prefix themes/stellar
 npm run build
 npm run server
 ```
@@ -56,6 +59,21 @@ Hexo 目录与配置说明：[Setup](https://hexo.io/docs/setup)、[Configuratio
 
 应用保留 Pure 的 EJS 布局和资源，仅调整默认示例信息、默认导航和第三方服务开关；jQuery 使用主题自带文件，favicon 支持站点根路径，页脚显示应用设置的文字，未设置友链头像时使用本地默认图片。
 
+## Stellar 移植
+
+来源：[xaoxuu/hexo-theme-stellar](https://github.com/xaoxuu/hexo-theme-stellar)，锁定 npm 发布版 **1.44.0**，MIT 许可证及第三方声明随主题保留。为兼容当前 Node.js 18 / Hexo 7，不采用要求升级运行环境的 Stellar 2.x。
+
+保留上游布局、样式、脚本和本地搜索，接入 QSNote 的标题、导航、分类、标签、友链、关于、页脚和评论设置。Pure 与 Stellar 共用文章和页面，切换不覆盖用户编辑的主题、页面及 scaffold 文件。旧 Pure 站点保存后会补齐 Stellar 资源，首次切换时安装主题依赖。
+
+相对上游的适配：
+
+- 主题依赖单独锁定，Cheerio 使用兼容 Node.js 18 的 1.0.0，显式声明脚本使用的 hexo-util；移除开发依赖和开发脚本。
+- 增加 `about`、`links` 布局和 Valine、Gitalk、Disqus 评论适配。
+- 修正自定义文章 slug 在搜索索引中产生双斜杠的问题，确保子路径站点中的搜索链接可访问。
+- 图片懒加载库 vanilla-lazyload 19.1.3 随主题提供，并保留许可证；基础样式、脚本和搜索可在本地预览中加载。
+- 默认关闭依赖远程脚本的 ScrollReveal 动画，避免网络不可用时正文被隐藏。
+- 关闭生成时的上游版本查询，避免每次生成依赖网络。可选远程组件和评论服务仍按主题配置联网加载。
+
 验证命令：
 
 ```sh
@@ -64,4 +82,4 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-`qsnote_hexo` 覆盖创建、旧站点迁移、front matter、真实 Hexo 生成、子路径资源、导出内容和旧页面清理；`qsnote_ui` 覆盖配置、WebEngine 站点预览和导出入口。
+`qsnote_hexo` 覆盖创建、旧站点迁移、front matter、Pure/Stellar 双向切换、真实 Hexo 生成、子路径资源、搜索、评论、导出内容和旧页面清理；`qsnote_ui` 覆盖主题选择持久化、两种主题的 WebEngine 站点预览和导出入口。

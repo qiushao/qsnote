@@ -1648,10 +1648,10 @@ void MainWindow::showSiteConfig() {
     form->addWidget(addLink, 0, Qt::AlignLeft);
     connect(addLink, &QPushButton::clicked, &dialog, [appendLink] { appendLink({}); });
     heading("主题与页脚");
-    form->addWidget(label("默认主题：Pure", body));
+    field("theme", "站点主题", {"Pure", "Stellar"}, {"pure", "stellar"});
     field("footer", "页脚文字");
     heading("生成与发布");
-    form->addWidget(label("文章保存在 source/_posts，主题位于 themes/pure。预览和导出使用 Hexo 生成 public 目录。", body, true));
+    form->addWidget(label("文章保存在 source/_posts，主题位于 themes 下。预览和导出使用 Hexo 生成 public 目录。", body, true));
     form->addWidget(label("需要 Node.js 18 或更新版本及 npm；首次生成会联网安装依赖。导出后的静态文件可上传到任意静态网站托管服务。", body, true));
     form->addStretch();
     scroll->setWidget(body);
@@ -1694,7 +1694,7 @@ void MainWindow::showSitePreview() {
     bar->setObjectName("dialogBar");
     auto *barLayout = row(bar, 14, 8, 10);
     barLayout->addWidget(label("站点预览", bar));
-    barLayout->addWidget(label("Hexo · Pure", bar, true));
+    barLayout->addWidget(label(book->config["theme"].toString() == "stellar" ? "Hexo · Stellar" : "Hexo · Pure", bar, true));
     barLayout->addStretch();
     auto *close = button("关闭", "closeSitePreview", bar);
     barLayout->addWidget(close);

@@ -1,0 +1,9 @@
+<% if (page.cmt_rendered) { %>
+<script>
+var disqus_config = function () {
+  this.page.url = <%- JSON.stringify(page.permalink || full_url_for(page.path || '')).replace(/</g, '\\u003c') %>;
+  this.page.identifier = <%- JSON.stringify(page.disqusId || page.path || '').replace(/</g, '\\u003c') %>;
+};
+utils.js('https://' + <%- JSON.stringify(theme.comment.disqus).replace(/</g, '\\u003c') %> + '.disqus.com/embed.js');
+</script>
+<% } %>

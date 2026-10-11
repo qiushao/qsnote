@@ -1,0 +1,7 @@
+<%
+page.layout = 'page';
+page.menu_id = 'links';
+const links = Object.entries(site.data.links || {}).map(([name, link]) =>
+  `<li><a href="${escape_html(link.link)}">${escape_html(name)}</a></li>`).join('');
+%>
+<%- partial('page', {page: Object.assign({}, page, {content: (page.content || '') + '<ul>' + links + '</ul>'})}) %>

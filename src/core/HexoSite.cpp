@@ -75,7 +75,8 @@ QString HexoSite::rootPath(const Notebook &book) {
 }
 
 bool HexoSite::prepare(Notebook &book, QString *error) {
-    book.config["theme"] = "pure";
+    if (book.config["theme"].toString() != "stellar") book.config["theme"] = "pure";
+    const bool stellar = book.config["theme"].toString() == "stellar";
     if (!book.config.contains("commentPlatform")) book.config["commentPlatform"] = "valine";
     if (!copyDirectory(":/hexo", book.path, error)) return false;
     for (const auto &directory: {"source/_posts", "source/_drafts", "source/_data", "public"}) {
@@ -87,7 +88,7 @@ bool HexoSite::prepare(Notebook &book, QString *error) {
     auto domain = book.config["domain"].toString().trimmed();
     if (domain.isEmpty()) domain = "http://localhost";
     const auto &c = book.config;
-    const QJsonObject theme{
+    QJsonObject theme{
         {"site", QJsonObject{{"title", c["title"].toString(book.name)}, {"footer", c["footer"].toString()}}},
         {"profile", QJsonObject{{"author", c["author"].toString()}, {"author_description", c["description"].toString()}, {"follow", domain}}},
         {"comment", QJsonObject{{"type", c["commentPlatform"].toString() == "none" ? QString() : c["commentPlatform"].toString()},
@@ -96,10 +97,23 @@ bool HexoSite::prepare(Notebook &book, QString *error) {
                                                        {"repo", c["commentRepo"].toString()}, {"ClientID", c["clientId"].toString()}, {"ClientSecret", c["clientSecret"].toString()}}},
                                 {"valine", QJsonObject{{"appid", c["valineAppId"].toString()}, {"appkey", c["valineAppKey"].toString()}}}}}
     };
+    if (stellar) {
+        QJsonArray menu;
+        for (const auto &entry: QList<QPair<QString, QString>>{{"", "首页"}, {"categories", "分类"}, {"tags", "标签"},
+                                                              {"archives", "归档"}, {"links", "友链"}, {"about", "关于"}}) {
+            menu.append(QJsonObject{{"id", entry.first.isEmpty() ? "post" : entry.first}, {"title", entry.second},
+                                    {"url", entry.first.isEmpty() ? "/" : "/" + entry.first + "/"}});
+        }
+        theme["menubar"] = QJsonObject{{"columns", 3}, {"items", menu}};
+        theme["site_tree"] = QJsonObject{{"index_blog", QJsonObject{{"base_dir", ""}}},
+                                         {"home", QJsonObject{{"leftbar", "recent"}}}};
+        theme["footer"] = QJsonObject{{"content", c["footer"].toString()}};
+        theme["comments"] = QJsonObject{{"service", c["commentPlatform"].toString() == "none" ? QString() : c["commentPlatform"].toString()}};
+    }
     // JSON is valid YAML; quote all user text without hand-written YAML escaping.
     const QJsonObject config{{"title", c["title"].toString(book.name)}, {"description", c["description"].toString()},
                              {"author", c["author"].toString()}, {"language", "zh-CN"}, {"url", domain}, {"root", rootPath(book)},
-                             {"theme", "pure"}, {"source_dir", "source"}, {"public_dir", "public"},
+                             {"theme", c["theme"]}, {"source_dir", "source"}, {"public_dir", "public"},
                              {"permalink", ":title/"}, {"pretty_urls", QJsonObject{{"trailing_index", false}}},
                              {"highlight", QJsonObject{{"enable", true}}}, {"theme_config", theme}};
     if (!writeFile(book.path + "/_config.yml", QJsonDocument(config).toJson(), error)) return false;
@@ -152,7 +166,10 @@ bool HexoSite::generate(const Notebook &book, QString *error) {
         *error = QStringLiteral("生成 Hexo 站点需要 Node.js 18 或更新版本及 npm，请安装后重启 QSNote。");
         return false;
     }
-    if (!QFileInfo::exists(book.path + "/node_modules/hexo/bin/hexo") || !QFileInfo::exists(book.path + "/node_modules/.package-lock.json")) {
+    const bool installSite = !QFileInfo::exists(book.path + "/node_modules/hexo/bin/hexo") || !QFileInfo::exists(book.path + "/node_modules/.package-lock.json");
+    const bool installStellar = book.config["theme"].toString() == "stellar" &&
+                                !QFileInfo::exists(book.path + "/themes/stellar/node_modules/.package-lock.json");
+    if (installSite || installStellar) {
 #ifdef Q_OS_WIN
         const auto npm = QStandardPaths::findExecutable("npm.cmd");
 #else
@@ -162,11 +179,16 @@ bool HexoSite::generate(const Notebook &book, QString *error) {
             *error = QStringLiteral("未找到 npm，无法安装 Hexo 站点依赖。");
             return false;
         }
+        QStringList directories;
+        if (installSite) directories.append(book.path);
+        if (installStellar) directories.append(book.path + "/themes/stellar");
+        for (const auto &directory: directories) {
 #ifdef Q_OS_WIN
-        if (!run(qEnvironmentVariable("COMSPEC", "cmd.exe"), {"/c", npm, "ci", "--no-audit", "--no-fund"}, book.path, error)) return false;
+            if (!run(qEnvironmentVariable("COMSPEC", "cmd.exe"), {"/c", npm, "ci", "--no-audit", "--no-fund"}, directory, error)) return false;
 #else
-        if (!run(npm, {"ci", "--no-audit", "--no-fund"}, book.path, error)) return false;
+            if (!run(npm, {"ci", "--no-audit", "--no-fund"}, directory, error)) return false;
 #endif
+        }
     }
     return run(node, {book.path + "/qsnote-generate.cjs"}, book.path, error);
 }

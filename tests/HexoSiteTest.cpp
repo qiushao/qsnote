@@ -18,6 +18,88 @@ QByteArray read(const QString &path) {
 class HexoSiteTest : public QObject {
     Q_OBJECT
 private slots:
+    void switchToStellarAndBack() {
+        QStandardPaths::setTestModeEnabled(true);
+        QTemporaryDir directory;
+        NotebookStore store;
+        store.notebooks.append({"stellar", "主题切换", "site", {},
+                                {{"title", "Stellar 测试"}, {"domain", "https://example.com/blog/"}, {"footer", "自定义页脚"},
+                                 {"commentPlatform", "valine"}, {"valineAppId", "stellar-app-id"}, {"valineAppKey", "stellar-app-key"},
+                                 {"links", QJsonArray{QJsonObject{{"name", "示例友链"}, {"url", "https://example.org"}}}}}, directory.path()});
+        auto &site = store.notebooks.first();
+        site.notes.append({"post", {}, "测试文章", "# 正文\n\nStellar 正文 **加粗**", false,
+                           {{"slug", "article"}, {"category", "分类"}, {"tags", "标签"}}});
+        site.notes.append({"draft", {}, "草稿", "DRAFT-MUST-NOT-BE-PUBLISHED", false, {{"draft", true}}});
+        QString error;
+        QVERIFY2(store.save(&error), qPrintable(error));
+        QCOMPARE(site.config["theme"].toString(), QString("pure"));
+        QVERIFY2(HexoSite::generate(site, &error), qPrintable(error));
+        const auto package = read(directory.path() + "/package.json");
+        const auto lock = read(directory.path() + "/package-lock.json");
+        site.config["theme"] = "stellar";
+        QVERIFY2(store.save(&error), qPrintable(error));
+        QCOMPARE(site.config["theme"].toString(), QString("stellar"));
+        QCOMPARE(read(directory.path() + "/package.json"), package);
+        QCOMPARE(read(directory.path() + "/package-lock.json"), lock);
+        QVERIFY(QFile::exists(directory.path() + "/themes/stellar/LICENSE"));
+        Notebook restored;
+        QVERIFY2(NotebookStore::readNotebook(directory.path(), restored, &error), qPrintable(error));
+        QCOMPARE(restored.config["theme"].toString(), QString("stellar"));
+        QVERIFY2(HexoSite::generate(site, &error), qPrintable(error));
+        for (const auto &file: {"index.html", "article/index.html", "archives/index.html", "categories/index.html", "tags/index.html",
+                               "links/index.html", "about/index.html", "css/main.css", "js/main.js", "js/vendor/lazyload.min.js", "search.json"})
+            QVERIFY2(QFile::exists(directory.path() + "/public/" + file), file);
+        const auto article = read(directory.path() + "/public/article/index.html");
+        QVERIFY(article.contains("Stellar 正文"));
+        QVERIFY(article.contains("<strong>加粗</strong>"));
+        QVERIFY(article.contains("自定义页脚"));
+        QVERIFY(article.contains("/blog/css/main.css"));
+        QVERIFY(article.contains("/blog/js/main.js"));
+        QVERIFY(article.contains("stellar-app-id"));
+        QVERIFY(article.contains("stellar-app-key"));
+        QVERIFY(article.contains("new Valine("));
+        const auto home = read(directory.path() + "/public/index.html");
+        for (const auto &route: {"categories", "tags", "archives", "links", "about"})
+            QVERIFY2(home.contains(QByteArray("/blog/") + route + "/"), route);
+        QVERIFY(read(directory.path() + "/public/links/index.html").contains("https:&#x2F;&#x2F;example.org"));
+        QVERIFY(read(directory.path() + "/public/search.json").contains("/blog/article/"));
+        QVERIFY(!read(directory.path() + "/public/search.json").contains("DRAFT-MUST-NOT-BE-PUBLISHED"));
+        QVERIFY(!QFile::exists(directory.path() + "/public/草稿/index.html"));
+        QTemporaryDir exported;
+        QVERIFY2(HexoSite::copyDirectory(directory.path() + "/public", exported.path(), &error), qPrintable(error));
+        QCOMPARE(read(exported.path() + "/article/index.html"), article);
+        QCOMPARE(read(exported.path() + "/css/main.css"), read(directory.path() + "/public/css/main.css"));
+        for (const auto &service: {QStringLiteral("gitalk"), QStringLiteral("disqus")}) {
+            site.config["commentPlatform"] = service;
+            site.config["disqus"] = "test-shortname";
+            QVERIFY2(store.save(&error), qPrintable(error));
+            QVERIFY2(HexoSite::generate(site, &error), qPrintable(error));
+            const auto html = read(directory.path() + "/public/article/index.html");
+            QVERIFY(html.contains(service == "gitalk" ? "gitalk-container" : "test-shortname"));
+        }
+        // Keep user edits to the theme and page files when saving or switching.
+        QFile about(directory.path() + "/source/about/index.md");
+        QVERIFY(about.open(QIODevice::Append));
+        about.write("\nCustom about page\n");
+        about.close();
+        QFile theme(directory.path() + "/themes/stellar/_config.yml");
+        QVERIFY(theme.open(QIODevice::Append));
+        theme.write("\n# Local theme customization\n");
+        theme.close();
+        site.config["commentPlatform"] = "none";
+        QVERIFY2(store.save(&error), qPrintable(error));
+        QVERIFY(read(about.fileName()).contains("Custom about page"));
+        QVERIFY(read(theme.fileName()).contains("Local theme customization"));
+        QVERIFY2(HexoSite::generate(site, &error), qPrintable(error));
+        QVERIFY(!read(directory.path() + "/public/article/index.html").contains("new Valine("));
+        QVERIFY(read(directory.path() + "/public/about/index.html").contains("Custom about page"));
+        site.config["theme"] = "pure";
+        QVERIFY2(store.save(&error), qPrintable(error));
+        QVERIFY2(HexoSite::generate(site, &error), qPrintable(error));
+        QVERIFY(read(directory.path() + "/public/article/index.html").contains("/blog/css/style.css"));
+        QVERIFY(!QFile::exists(directory.path() + "/public/css/main.css"));
+    }
+
     void createMigrateAndGenerate() {
         QStandardPaths::setTestModeEnabled(true);
         QTemporaryDir directory;

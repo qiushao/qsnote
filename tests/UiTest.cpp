@@ -1167,7 +1167,14 @@ st->e
         QVERIFY(QString::fromUtf8(book.readAll()).contains("章节正文"));
     }
 
+    void siteMetadataConfigAndPreview_data() { // NOLINT(readability-identifier-naming): Qt Test data-provider convention.
+        QTest::addColumn<QString>("theme");
+        QTest::newRow("pure") << QString("pure");
+        QTest::newRow("stellar") << QString("stellar");
+    }
+
     void siteMetadataConfigAndPreview() {
+        QFETCH(QString, theme);
         NotebookStore fixture;
         Notebook site{"site", "测试站点", "site", {}, {{"title", "用户的站点"}, {"categories", QJsonArray{"Updated"}}, {"domain", "https://example.com/blog/"}}, fixturePath("site")};
         site.notes.append({"post-a", {}, "文章标题", "# 文章标题\n\n## 内容\n\n真实输入的文字", false, {{"category", "分类一"}, {"tags", "标签一, 标签二"}, {"date", "2026-10-09"}, {"slug", "article"}}});
@@ -1206,7 +1213,7 @@ st->e
         window.findChild<QComboBox *>("groupBy")->setCurrentIndex(1);
         QCOMPARE(tree->topLevelItemCount(), 2);
         window.grab().save("site-wide.png");
-        QTimer::singleShot(30, &window, [] {
+        QTimer::singleShot(30, &window, [theme] {
             auto *dialog = QApplication::activeModalWidget();
             QVERIFY(dialog);
             QCOMPARE(dialog->objectName(), QString("siteConfigDialog"));
@@ -1223,15 +1230,20 @@ st->e
                 QVERIFY(input);
                 QTest::keyClicks(input, QString("test-") + key);
             }
-            QVERIFY(!dialog->findChild<QComboBox *>("config_theme"));
+            auto *themes = dialog->findChild<QComboBox *>("config_theme");
+            QVERIFY(themes);
+            QCOMPARE(themes->currentData().toString(), QString("pure"));
+            QVERIFY(themes->findData("stellar") >= 0);
+            themes->setCurrentIndex(themes->findData(theme));
             QVERIFY(!dialog->findChild<QLineEdit *>("config_token"));
             dialog->grab().save("site-config.png");
             QTest::mouseClick(dialog->findChild<QPushButton *>("closeSiteConfig"), Qt::LeftButton);
         });
         QTest::mouseClick(window.findChild<QPushButton *>("siteConfig"), Qt::LeftButton);
-        QTimer::singleShot(30, &window, [] {
+        QTimer::singleShot(30, &window, [theme] {
             auto *dialog = QApplication::activeModalWidget();
             QVERIFY(dialog);
+            QCOMPARE(dialog->findChild<QComboBox *>("config_theme")->currentData().toString(), theme);
             auto *comments = dialog->findChild<QComboBox *>("config_commentPlatform");
             QVERIFY(comments);
             QCOMPARE(comments->currentData().toString(), QString("valine"));
@@ -1256,12 +1268,15 @@ st->e
             QSignalSpy loaded(browser, &QWebEngineView::loadFinished);
             if (browser->title().isEmpty()) QVERIFY(loaded.wait(15000));
             QVERIFY(browser->title().contains("Edited title"));
-            QCOMPARE(javascript(*browser, "typeof window.jQuery").toString(), QString("function"));
+            if (theme == "pure") QCOMPARE(javascript(*browser, "typeof window.jQuery").toString(), QString("function"));
+            else QVERIFY(javascript(*browser, "typeof utils === 'object'").toBool());
             QCOMPARE(browser->url().path(), QString("/blog/"));
-            javascript(*browser, "fetch(window.INSIGHT_CONFIG.CONTENT_URL).then(r => window.searchIndexReady = r.ok)");
+            javascript(*browser, theme == "pure" ? "fetch(window.INSIGHT_CONFIG.CONTENT_URL).then(r => window.searchIndexReady = r.ok)"
+                                                 : "fetch('/blog/search.json').then(r => window.searchIndexReady = r.ok)");
             QTRY_VERIFY_WITH_TIMEOUT(javascript(*browser, "window.searchIndexReady === true").toBool(), 10000);
-            QVERIFY(javascript(*browser, "document.querySelector('.menu-item-archives a').getAttribute('href').includes('archives')").toBool());
-            QVERIFY(javascript(*browser, "Array.from(document.styleSheets).some(s => s.href && s.href.endsWith('/css/style.css') && s.cssRules.length > 0)").toBool());
+            QVERIFY(javascript(*browser, "!!document.querySelector('a[href=\"/blog/archives\"], a[href=\"/blog/archives/\"]')").toBool());
+            const auto css = theme == "pure" ? "style.css" : "main.css";
+            QVERIFY(javascript(*browser, QString("Array.from(document.styleSheets).some(s => s.href && s.href.includes('/css/%1') && s.cssRules.length > 0)").arg(css)).toBool());
             browser->load(browser->url().resolved(QUrl("article/")));
             QVERIFY(loaded.wait(15000));
             QString text;
@@ -1269,7 +1284,7 @@ st->e
             browser->page()->toPlainText([&](const QString &value) { text = value; loop.quit(); });
             loop.exec();
             QVERIFY(text.contains("真实输入的文字"));
-            dialog->grab().save("site-preview.png");
+            dialog->grab().save("site-preview-" + theme + ".png");
             QTest::mouseClick(dialog->findChild<QPushButton *>("closeSitePreview"), Qt::LeftButton);
         });
         previewTimer.start();
@@ -1277,6 +1292,7 @@ st->e
         NotebookStore reloaded;
         QVERIFY2(reloaded.load(&error), qPrintable(error));
         QCOMPARE(reloaded.notebooks.first().config["title"].toString(), QString("Edited title"));
+        QCOMPARE(reloaded.notebooks.first().config["theme"].toString(), theme);
         QCOMPARE(reloaded.notebooks.first().config["valineAppId"].toString(), QString("test-valineAppId"));
         QCOMPARE(reloaded.notebooks.first().config["valineAppKey"].toString(), QString("test-valineAppKey"));
         QCOMPARE(reloaded.note("post-a")->metadata["category"].toString(), QString("Updated"));
