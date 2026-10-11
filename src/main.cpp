@@ -22,7 +22,7 @@ int main(int argc, char *argv[]) {
     if (editorTranslator.load(":/translations/vtextedit_zh_CN.qm")) QCoreApplication::installTranslator(&editorTranslator);
 
     MainWindow window;
-    window.show();
+    window.showMaximized();
 
     return QApplication::exec();
 }

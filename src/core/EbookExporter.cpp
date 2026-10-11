@@ -79,6 +79,28 @@ QString contents(const QList<Chapter> &chapters, bool chm) {
     return result;
 }
 
+// EPUB 2 NCX：xreader/Evince 等阅读器的侧边索引只认它。
+QString ncx(const QString &title, const QString &uid, const QList<Chapter> &chapters) {
+    int maxDepth = 0;
+    for (const auto &chapter: chapters) maxDepth = qMax(maxDepth, chapter.depth + 1);
+    QString result = R"(<?xml version="1.0" encoding="utf-8"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content=")"
+            + uid + R"("/><meta name="dtb:depth" content=")" + QString::number(maxDepth)
+            + R"("/><meta name="dtb:totalPageCount" content="0"/><meta name="dtb:maxPageNumber" content="0"/></head><docTitle><text>)"
+            + title.toHtmlEscaped() + "</text></docTitle><navMap>";
+    int depth = -1;
+    for (int i = 0; i < chapters.size(); ++i) {
+        const auto &chapter = chapters[i];
+        const bool child = depth < chapter.depth;
+        while (depth < chapter.depth) ++depth;
+        while (depth > chapter.depth) { result += "</navPoint>"; --depth; }
+        if (!child) result += "</navPoint>";
+        result += "<navPoint id=\"" + chapter.anchor + "\" playOrder=\"" + QString::number(i + 1) + "\"><navLabel><text>"
+                + chapter.note->title.toHtmlEscaped() + "</text></navLabel><content src=\"book.xhtml#" + chapter.anchor + "\"/>";
+    }
+    while (depth-- >= 0) result += "</navPoint>";
+    return result + "</navMap></ncx>";
+}
+
 QString slug(QString text) {
     text = text.toLower().trimmed();
     text.remove(QRegularExpression(R"([^\p{L}\p{N}_\-\s])"));
@@ -398,15 +420,17 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
         auto toc = contents(chapters, false);
         toc.replace("book.html#", "book.xhtml#");
         zip.addFile("nav.xhtml", page(title, "<nav epub:type=\"toc\" id=\"toc\"><h1>目录</h1>" + toc + "</nav>").toUtf8());
-        QString manifest = R"(<item id="book" href="book.xhtml" media-type="application/xhtml+xml"/><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>)";
+        const auto uid = "urn:uuid:" + QUuid::createUuid().toString(QUuid::WithoutBraces);
+        zip.addFile("toc.ncx", ncx(title, uid, chapters).toUtf8());
+        QString manifest = R"(<item id="book" href="book.xhtml" media-type="application/xhtml+xml"/><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>)";
         for (auto it = assets.cbegin(); it != assets.cend(); ++it) {
             zip.addFile(it.key(), it.value());
             manifest += "<item id=\"" + it.key() + "\" href=\"" + it.key() + R"(" media-type="image/png"/>)";
         }
-        const auto opf = R"(<?xml version="1.0" encoding="utf-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">urn:uuid:)"
-                + QUuid::createUuid().toString(QUuid::WithoutBraces) + "</dc:identifier><dc:title>" + title.toHtmlEscaped()
+        const auto opf = R"(<?xml version="1.0" encoding="utf-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">)"
+                + uid + "</dc:identifier><dc:title>" + title.toHtmlEscaped()
                 + "</dc:title><dc:language>zh-CN</dc:language><meta property=\"dcterms:modified\">" + QDateTime::currentDateTimeUtc().toString("yyyy-MM-dd'T'HH:mm:ss'Z'")
-                + "</meta></metadata><manifest>" + manifest + "</manifest><spine><itemref idref=\"book\"/></spine></package>";
+                + "</meta></metadata><manifest>" + manifest + R"(</manifest><spine toc="ncx"><itemref idref="book"/></spine></package>)";
         zip.addFile("content.opf", opf.toUtf8());
         zip.close();
         if (zip.status() != QZipWriter::NoError) { *error = "无法写入 EPUB 文件。"; return {}; }

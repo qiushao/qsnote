@@ -79,7 +79,7 @@ private slots:
             const auto raw = readFile(output);
             QCOMPARE(raw.mid(8, 2), QByteArray(2, '\0')); // mimetype is stored, not compressed
             QCOMPARE(raw.mid(30, 8), QByteArray("mimetype"));
-            for (const auto &name: {"META-INF/container.xml", "content.opf", "book.xhtml", "nav.xhtml"}) {
+            for (const auto &name: {"META-INF/container.xml", "content.opf", "book.xhtml", "nav.xhtml", "toc.ncx"}) {
                 const auto data = zip.fileData(name);
                 QVERIFY(!data.isEmpty());
                 QXmlStreamReader xml(data);
