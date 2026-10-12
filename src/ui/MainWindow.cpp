@@ -382,10 +382,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     connect(escape, &QShortcut::activated, search_, &QLineEdit::clear);
 }
 
-MainWindow::~MainWindow() {
-    for (const auto &session: editorSessions_) session.status->setParent(nullptr);
-}
-
 void MainWindow::buildUi() {
     auto *root = new QWidget(this);
     setCentralWidget(root);
@@ -590,9 +586,6 @@ void MainWindow::buildUi() {
     status_ = label({}, center, true);
     status_->setObjectName("status");
     centerLayout->addWidget(status_);
-    editorStatuses_ = new QStackedWidget(center);
-    editorStatuses_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Maximum);
-    centerLayout->addWidget(editorStatuses_);
 
     right_ = new QWidget(splitter_);
     right_->setObjectName("rightPanel");
@@ -888,12 +881,9 @@ void MainWindow::activateEditor(const QString &id) {
         textEdit->setPlaceholderText("开始书写 Markdown...");
         textEdit->setProperty("noteId", id);
         session.editor = documentEditor;
-        session.status = documentEditor->statusWidget();
-        session.status->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         session.menu = documentEditor->createEditorMenu(documentEditor);
         connect(session.menu, &QMenu::aboutToShow, this, [this] { setPreview(false); });
         editors_->addWidget(documentEditor);
-        editorStatuses_->addWidget(session.status.data());
         editorSessions_.insert(id, session);
         connect(documentEditor, &MarkdownEditor::settingsChanged, this, [this, documentEditor] {
             for (const auto &session: editorSessions_) {
@@ -939,7 +929,6 @@ void MainWindow::activateEditor(const QString &id) {
     markdownEditor_->setObjectName("markdownEditor");
     editor_->setObjectName("editor");
     editors_->setCurrentWidget(markdownEditor_);
-    editorStatuses_->setCurrentWidget(session.status.data());
     findChild<QPushButton *>("editorOptions")->setMenu(session.menu);
     setViewMode(session.mode);
     // Layout changes on show can scroll QTextEdit to its caret. Restore the
@@ -964,9 +953,6 @@ void MainWindow::removeEditor(const QString &id) {
         editor_ = nullptr;
         findChild<QPushButton *>("editorOptions")->setMenu(nullptr);
     }
-    editorStatuses_->removeWidget(session.status.data());
-    session.status->setParent(nullptr);
-    session.status.clear();
     editors_->removeWidget(session.editor);
     disconnect(session.editor, nullptr, this, nullptr);
     disconnect(session.editor->getTextEdit(), nullptr, this, nullptr);
@@ -985,7 +971,6 @@ void MainWindow::refreshEditor() {
         pages_->setCurrentIndex(0);
         previewTimer_->stop();
         if (preview_->revision() > 0) preview_->setMarkdown({}, {});
-        editorStatuses_->hide();
         status_->clear();
     }
     refreshOutline();
@@ -1030,7 +1015,6 @@ void MainWindow::setViewMode(ViewMode mode) {
             if (mode != ViewMode::Edit) preview_->scrollToLine(line);
         });
     }
-    editorStatuses_->setVisible(mode != ViewMode::Preview);
     updateStatus();
 }
 

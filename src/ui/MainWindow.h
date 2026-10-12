@@ -5,7 +5,6 @@
 #include <QMainWindow>
 #include <QHash>
 #include <QSet>
-#include <QSharedPointer>
 #include <QStringList>
 
 class MarkdownEditor;
@@ -31,7 +30,6 @@ class MainWindow : public QMainWindow {
 
 public:
     explicit MainWindow(QWidget *parent = nullptr);
-    ~MainWindow() override;
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
@@ -65,7 +63,6 @@ private:
     };
     struct EditorSession {
         MarkdownEditor *editor = nullptr;
-        QSharedPointer<QWidget> status;
         QMenu *menu = nullptr;
         QVector<Heading> headings;
         ViewMode mode = ViewMode::Edit;
@@ -101,7 +98,6 @@ private:
     QTabBar *tabs_ = nullptr;
     QStackedWidget *pages_ = nullptr;
     QStackedWidget *editors_ = nullptr;
-    QStackedWidget *editorStatuses_ = nullptr;
     QHash<QString, EditorSession> editorSessions_;
     QString activeEditorId_;
     MarkdownEditor *markdownEditor_ = nullptr;
