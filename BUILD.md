@@ -88,7 +88,7 @@ ctest --test-dir build --output-on-failure
 
 测试使用独立的应用名与测试数据目录，不读取正式笔记；覆盖空白启动、360～1440 像素窗口布局、新建三种笔记本、右键操作、章节层级、多标签编辑、保存重载、搜索、大纲、站点元数据、配置预览和导出内容。测试运行目录生成界面 PNG，便于与原型进行视觉对照。
 
-Markdown 编辑使用 third_party 中的 VTextEdit 源码，阅读 / 分屏预览使用 Qt WebEngine 与本地 VNote 渲染资源，电子书导出使用 cmark 解析器（EPUB、PDF、CHM、HTML，详见 [电子书导出](docs/ebook-export.md)）；完整迁移仍在进行（见 docs/vtextedit-migration.md）。构建不下载依赖、不初始化子模块。静态站点使用 Hexo 生成，详见 [Hexo 站点](docs/hexo-sites.md)；导出 public 中的文件，不自动上传到托管服务。
+Markdown 编辑使用 third_party 中的 VTextEdit 源码，阅读 / 分屏预览使用 Qt WebEngine 与本地 VNote 渲染资源，电子书导出使用 cmark 解析器（EPUB、PDF、CHM、HTML，详见 [电子书导出](docs/ebook-export.md)）；完整迁移仍在进行（见 docs/vtextedit-migration.md）。构建不下载依赖、不初始化子模块。静态站点使用 Hexo 生成，详见 [Hexo 站点](docs/hexo-sites.md)；支持通过 GitHub Pages（需要 git）或 SSH SCP（需要 ssh、scp）发布 public 中的文件。
 
 PlantUML 预览与导出是运行时功能，需要 PATH 中的 `plantuml` 和 Graphviz（Linux：`sudo apt install plantuml graphviz`，macOS：`brew install plantuml graphviz`，Windows 安装方式见电子书导出文档）。构建本身不需要这两个命令；PlantUML 的实际图片测试需要安装引擎。
 

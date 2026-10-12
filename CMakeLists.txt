@@ -70,7 +70,16 @@ if (QSNOTE_BUILD_TESTS)
     target_link_libraries(qsnote_ebook_tests PRIVATE Qt6::Widgets Qt6::GuiPrivate Qt6::Test Qt6::WebEngineWidgets Qt6::Network cmark)
     add_test(NAME qsnote_ebook COMMAND qsnote_ebook_tests)
     set_tests_properties(qsnote_ebook PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu")
+    add_executable(qsnote_publish_tests
+            tests/SitePublisherTest.cpp
+            src/core/SitePublisher.cpp
+            src/core/HexoSite.cpp
+    )
+    target_include_directories(qsnote_publish_tests PRIVATE src)
+    target_link_libraries(qsnote_publish_tests PRIVATE Qt6::Core Qt6::Test)
+    add_test(NAME qsnote_publish COMMAND qsnote_publish_tests)
     add_executable(qsnote_ui_tests
+            src/core/SitePublisher.cpp
             tests/UiTest.cpp
             src/core/EbookExporter.cpp
             src/core/PlantUmlRenderer.cpp

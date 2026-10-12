@@ -3,6 +3,7 @@
 #include "MarkdownEditor.h"
 #include "MarkdownPreview.h"
 #include "core/HexoSite.h"
+#include "core/SitePublisher.h"
 #include "core/EbookExporter.h"
 #include <QSettings>
 #include <QStandardPaths>
@@ -742,7 +743,7 @@ void MainWindow::refreshNotebooks() {
     siteConfig_->setVisible(site);
     sitePreview_->setVisible(site);
     export_->setVisible(book && book->type != "normal");
-    export_->setText(site ? "导出站点" : "导出电子书");
+    export_->setText(site ? "发布站点" : "导出电子书");
     updatePanels();
     refreshTree();
 }
@@ -1049,8 +1050,8 @@ void MainWindow::updatePanels() {
     siteConfig_->setText(width() < 600 ? "配置" : "站点配置");
     sitePreview_->setText(width() < 600 ? "预览" : "站点预览");
     const auto *book = store_.notebook(currentNotebookId_);
-    export_->setText(width() < 600 ? "导出" : book && book->type == "site" ? "导出站点"
-                                                                           : "导出电子书");
+    export_->setText(book && book->type == "site" ? (width() < 600 ? "发布" : "发布站点")
+                                                             : (width() < 600 ? "导出" : "导出电子书"));
     int actionWidth = 0;
     for (auto *action: {siteConfig_, sitePreview_, export_}) {
         if (!action->isHidden()) actionWidth += action->sizeHint().width() + 6;
@@ -1643,8 +1644,35 @@ void MainWindow::showSiteConfig() {
     field("theme", "站点主题", {"Pure", "Stellar"}, {"pure", "stellar"});
     field("footer", "页脚文字");
     heading("生成与发布");
-    form->addWidget(label("文章保存在 source/_posts，主题位于 themes 下。预览和导出使用 Hexo 生成 public 目录。", body, true));
-    form->addWidget(label("需要 Node.js 18 或更新版本及 npm；首次生成会联网安装依赖。导出后的静态文件可上传到任意静态网站托管服务。", body, true));
+    auto *method = field("publishMethod", "发布方式", {"请选择", "GitHub Pages", "SSH SCP"}, {"", "github", "scp"})->findChild<QComboBox *>();
+    auto publishField = [&](const QString &key, const QString &caption, const QString &platform, const QString &placeholder) {
+        auto *container = field(key, caption);
+        container->findChild<QLineEdit *>()->setPlaceholderText(placeholder);
+        container->setVisible(method->currentData().toString() == platform);
+        connect(method, &QComboBox::currentIndexChanged, container, [container, method, platform] {
+            container->setVisible(method->currentData().toString() == platform);
+        });
+    };
+    publishField("githubRepository", "仓库地址", "github", "git@github.com:user/repo.git 或 HTTPS 地址");
+    publishField("githubBranch", "发布分支", "github", "gh-pages（默认）");
+    publishField("sshHost", "SSH 主机", "scp", "example.com / IP / SSH 配置别名");
+    publishField("sshPort", "SSH 端口", "scp", "22（默认）");
+    publishField("sshUser", "SSH 用户名", "scp", "部署用户");
+    publishField("sshDirectory", "远程目录", "scp", "/var/www/site（绝对路径，不含空格）");
+    publishField("sshIdentityFile", "私钥文件", "scp", "可选，填写本地完整路径；留空使用 SSH 默认配置");
+    auto *publishHint = label({}, body, true);
+    const auto updatePublishHint = [method, publishHint] {
+        const auto platform = method->currentData().toString();
+        publishHint->setText(platform == "github"
+            ? "使用本机 Git 凭据或 SSH 密钥。发布分支根目录将更新为站点内容；请在 GitHub 仓库 Settings → Pages 中选择该分支的 / (root)。域名请填写实际访问地址，项目站点需包含仓库子路径。"
+            : platform == "scp"
+            ? "使用 SSH 密钥或 ssh-agent；请先在终端连接主机并确认指纹。上传会覆盖同名文件，保留远端其他文件。"
+            : "选择发布方式后填写对应设置。预览无需发布设置。");
+    };
+    connect(method, &QComboBox::currentIndexChanged, publishHint, updatePublishHint);
+    updatePublishHint();
+    form->addWidget(publishHint);
+    form->addWidget(label("预览和发布使用 Hexo 生成 public 目录，需要 Node.js 18 或更新版本及 npm；首次生成会联网安装依赖。", body, true));
     form->addStretch();
     scroll->setWidget(body);
     layout->addWidget(scroll, 1);
@@ -1708,18 +1736,31 @@ void MainWindow::exportNotebook() {
     const auto *book = store_.notebook(currentNotebookId_);
     if (!book || book->type == "normal") return;
     if (book->type == "site") {
-        const auto defaultDirectory = defaultExportDirectory();
-        QDir().mkpath(defaultDirectory);
-        const auto directory = QFileDialog::getExistingDirectory(this, "选择导出目录", defaultDirectory);
-        if (directory.isEmpty()) return;
-        const QString destination = directory + "/qsnote-" + book->id.left(8) + "-" + QString::number(QDateTime::currentMSecsSinceEpoch());
-        if (!generateSite(*book)) return;
         QString error;
-        if (!HexoSite::copyDirectory(book->path + "/public", destination, &error)) {
-            QMessageBox::warning(this, "导出失败", error);
+        if (!SitePublisher::validate(*book, &error)) {
+            QMessageBox::warning(this, "发布设置不完整", error);
+            showSiteConfig();
             return;
         }
-        status_->setText("已导出至 " + destination);
+        if (!generateSite(*book)) return;
+        const auto snapshot = *book;
+        QProgressDialog progress("正在发布站点…", QString(), 0, 0, this);
+        progress.setObjectName("sitePublishDialog");
+        progress.setWindowTitle("发布站点");
+        progress.setWindowModality(Qt::ApplicationModal);
+        progress.setCancelButton(nullptr);
+        progress.setMinimumDuration(0);
+        progress.show();
+        const bool ok = SitePublisher::publish(snapshot, &error);
+        progress.close();
+        if (!ok) {
+            status_->setText("站点发布失败");
+            QMessageBox::warning(this, "站点发布失败", error);
+            return;
+        }
+        status_->setText(snapshot.config["publishMethod"].toString() == "github"
+            ? "已推送至 GitHub Pages 发布分支，等待 GitHub 部署完成"
+            : "站点已通过 SSH SCP 上传");
         return;
     }
     QDialog dialog(this);

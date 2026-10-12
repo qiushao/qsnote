@@ -7,6 +7,7 @@
 #include <QWebEngineView>
 #include <QEventLoop>
 #include <QPointer>
+#include <QProcess>
 #include <QSignalSpy>
 #include <QScopeGuard>
 #include <QScrollBar>
@@ -1124,8 +1125,11 @@ st->e
     }
 
     void exportsContainUserContent() {
+        QTemporaryDir remote;
+        QVERIFY(remote.isValid());
+        QCOMPARE(QProcess::execute("git", {"init", "--bare", remote.path()}), 0);
         NotebookStore fixture;
-        fixture.notebooks.append({"site", "导出站点", "site", {{"post", {}, "文章", "# 用户文章\n\n正文", false, {}}}, {{"title", "用户站点"}}, fixturePath("site-export")});
+        fixture.notebooks.append({"site", "导出站点", "site", {{"post", {}, "文章", "# 用户文章\n\n正文", false, {}}}, {{"title", "用户站点"}, {"publishMethod", "github"}, {"githubRepository", remote.path()}}, fixturePath("site-export")});
         fixture.notebooks.append({"ebook", "导出书籍", "ebook", {{"chapter", {}, "章节", "# 用户章节\n\n章节正文", false, {}}}, {}, fixturePath("ebook-export")});
         QString error;
         QVERIFY2(fixture.save(&error), qPrintable(error));
@@ -1137,34 +1141,81 @@ st->e
         QVERIFY(QTest::qWaitForWindowExposed(&window));
         for (int index = 0; index < 2; ++index) {
             window.findChild<QComboBox *>("notebooks")->setCurrentIndex(index);
-            QTimer::singleShot(30, &window, [&destination, index] {
-                if (index == 1) {
-                    auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
-                    QVERIFY(dialog);
-                    dialog->findChild<QLineEdit *>("exportDirectory")->setText(destination.path());
-                    dialog->findChild<QComboBox *>("exportFormat")->setCurrentIndex(3);
-                    dialog->findChild<QPushButton *>("confirmExport")->click();
-                    return;
-                }
-                auto *dialog = qobject_cast<QFileDialog *>(QApplication::activeModalWidget());
+            if (index == 1) QTimer::singleShot(30, &window, [&destination] {
+                auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
                 QVERIFY(dialog);
-                dialog->setDirectory(destination.path());
-                QTimer::singleShot(80, dialog, [dialog, &destination] {
-                    dialog->findChild<QLineEdit *>("fileNameEdit")->setText(destination.path());
-                    QMetaObject::invokeMethod(dialog, "accept");
-                });
+                dialog->findChild<QLineEdit *>("exportDirectory")->setText(destination.path());
+                dialog->findChild<QComboBox *>("exportFormat")->setCurrentIndex(3);
+                dialog->findChild<QPushButton *>("confirmExport")->click();
             });
             QTest::mouseClick(window.findChild<QPushButton *>("exportNotebook"), Qt::LeftButton);
         }
         const QDir output(destination.path());
-        const auto sites = output.entryList({"qsnote-site-*"}, QDir::Dirs);
-        QCOMPARE(sites.size(), 1);
-        QFile article(output.filePath(sites.first() + "/文章/index.html"));
-        QVERIFY(article.open(QIODevice::ReadOnly));
-        QVERIFY(QString::fromUtf8(article.readAll()).contains("用户文章"));
+        QProcess published;
+        published.start("git", {"--git-dir", remote.path(), "show", "gh-pages:文章/index.html"});
+        QVERIFY(published.waitForFinished());
+        QCOMPARE(published.exitCode(), 0);
+        QVERIFY(QString::fromUtf8(published.readAllStandardOutput()).contains("用户文章"));
         QFile book(output.filePath("导出书籍.html"));
         QVERIFY(book.open(QIODevice::ReadOnly));
         QVERIFY(QString::fromUtf8(book.readAll()).contains("章节正文"));
+    }
+
+    void sitePublishSettings() {
+        NotebookStore fixture;
+        fixture.notebooks.append({"site", "发布站点", "site", {}, {}, fixturePath("publish-settings")});
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.resize(1280, 800);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QCOMPARE(window.findChild<QPushButton *>("exportNotebook")->text(), QString("发布站点"));
+        const QList<QPair<QString, QStringList>> groups{
+            {"github", {"githubRepository", "githubBranch"}},
+            {"scp", {"sshHost", "sshPort", "sshUser", "sshDirectory", "sshIdentityFile"}}};
+        QTimer::singleShot(30, &window, [&] {
+            auto *dialog = QApplication::activeModalWidget();
+            QVERIFY(dialog);
+            auto *method = dialog->findChild<QComboBox *>("config_publishMethod");
+            QVERIFY(method);
+            QCOMPARE(method->currentData().toString(), QString());
+            for (const auto &platform: {"", "github", "scp", "github", "scp"}) {
+                method->setCurrentIndex(method->findData(platform));
+                for (const auto &group: groups) {
+                    for (const auto &key: group.second) {
+                        auto *input = dialog->findChild<QLineEdit *>("config_" + key);
+                        QVERIFY(input);
+                        QCOMPARE(input->isVisible(), group.first == platform);
+                        QCOMPARE(input->parentWidget()->findChild<QLabel *>()->isVisible(), group.first == platform);
+                        input->setText("saved-" + key);
+                        emit input->textEdited(input->text());
+                    }
+                }
+            }
+            dialog->findChild<QPushButton *>("closeSiteConfig")->click();
+        });
+        window.findChild<QPushButton *>("siteConfig")->click();
+        Notebook restored;
+        QVERIFY2(NotebookStore::readNotebook(fixturePath("publish-settings"), restored, &error), qPrintable(error));
+        QCOMPARE(restored.config["publishMethod"].toString(), QString("scp"));
+        QTimer::singleShot(30, &window, [&] {
+            auto *dialog = QApplication::activeModalWidget();
+            QVERIFY(dialog);
+            QCOMPARE(dialog->findChild<QComboBox *>("config_publishMethod")->currentData().toString(), QString("scp"));
+            for (const auto &group: groups) {
+                for (const auto &key: group.second) {
+                    auto *input = dialog->findChild<QLineEdit *>("config_" + key);
+                    QCOMPARE(input->text(), "saved-" + key);
+                    QCOMPARE(restored.config[key].toString(), "saved-" + key);
+                    QCOMPARE(input->isVisible(), group.first == "scp");
+                }
+            }
+            dialog->findChild<QPushButton *>("closeSiteConfig")->click();
+        });
+        window.findChild<QPushButton *>("siteConfig")->click();
+        window.setFixedSize(420, 800);
+        QTRY_COMPARE(window.findChild<QPushButton *>("exportNotebook")->text(), QString("发布"));
     }
 
     void siteMetadataConfigAndPreview_data() { // NOLINT(readability-identifier-naming): Qt Test data-provider convention.

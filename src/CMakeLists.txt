@@ -14,6 +14,8 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         core/PlantUmlRenderer.cpp
         core/PlantUmlRenderer.h
         core/HexoSite.cpp
+        core/SitePublisher.cpp
+        core/SitePublisher.h
         core/HexoSite.h
         core/NotebookStore.h
         resources/ui.qrc
