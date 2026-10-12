@@ -696,7 +696,7 @@ st->e
         QString error;
         QVERIFY2(reloaded.load(&error), qPrintable(error));
         QCOMPARE(reloaded.notebooks.size(), 3);
-        QCOMPARE(reloaded.notebooks.at(1).config["commentPlatform"].toString(), QString("valine"));
+        QCOMPARE(reloaded.notebooks.at(1).config["commentPlatform"].toString(), QString("none"));
         for (const auto &book: reloaded.notebooks) QVERIFY(book.notes.isEmpty());
     }
 
@@ -1223,8 +1223,21 @@ st->e
             auto *comments = dialog->findChild<QComboBox *>("config_commentPlatform");
             QVERIFY(comments);
             QVERIFY(comments->findData("valine") >= 0);
-            QCOMPARE(comments->currentData().toString(), QString("valine"));
-            comments->setCurrentIndex(comments->findData("valine"));
+            QCOMPARE(comments->currentData().toString(), QString("none"));
+            for (const auto &platform: {"none", "valine", "gitalk", "disqus", "none", "valine"}) {
+                comments->setCurrentIndex(comments->findData(platform));
+                for (const auto &group: QList<QPair<QString, QStringList>>{
+                         {"valine", {"valineAppId", "valineAppKey"}},
+                         {"gitalk", {"commentOwner", "commentRepo", "clientId", "clientSecret"}},
+                         {"disqus", {"disqus"}}}) {
+                    for (const auto &key: group.second) {
+                        auto *input = dialog->findChild<QLineEdit *>("config_" + key);
+                        QVERIFY(input);
+                        QCOMPARE(input->isVisible(), group.first == platform);
+                        QCOMPARE(input->parentWidget()->findChild<QLabel *>()->isVisible(), group.first == platform);
+                    }
+                }
+            }
             for (const auto &key: {"valineAppId", "valineAppKey"}) {
                 auto *input = dialog->findChild<QLineEdit *>(QString("config_") + key);
                 QVERIFY(input);
@@ -1250,6 +1263,7 @@ st->e
             for (const auto &key: {"valineAppId", "valineAppKey"}) {
                 auto *input = dialog->findChild<QLineEdit *>(QString("config_") + key);
                 QVERIFY(input);
+                QVERIFY(input->isVisible());
                 QCOMPARE(input->text(), QString("test-") + key);
             }
             comments->setCurrentIndex(comments->findData("none"));

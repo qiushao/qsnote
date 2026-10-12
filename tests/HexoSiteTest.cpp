@@ -121,6 +121,11 @@ private slots:
         store.notebooks.append(site);
         QString error;
         QVERIFY2(store.save(&error), qPrintable(error));
+        QCOMPARE(store.notebooks.first().config["commentPlatform"].toString(), QString("none"));
+        const auto defaultConfig = QJsonDocument::fromJson(read(directory.path() + "/_config.yml")).object();
+        QCOMPARE(defaultConfig["theme_config"].toObject()["comment"].toObject()["type"].toString(), QString());
+        store.notebooks.first().config["commentPlatform"] = "valine";
+        QVERIFY2(store.save(&error), qPrintable(error));
         const auto &saved = store.notebooks.first();
         QCOMPARE(saved.config["theme"].toString(), QString("pure"));
         QCOMPARE(saved.notes.first().path, QString("source/_posts/分类/文章标题.md"));

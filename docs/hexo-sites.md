@@ -32,7 +32,7 @@ Pure 与 Stellar 的模板、脚本、字体、图片、语言文件及许可证
 
 ## 预览和发布
 
-在站点配置的「评论」中可选择 Valine、Gitalk、Disqus 或关闭评论。新建及未设置评论平台的站点默认使用 Valine，已有明确选择的站点保留原设置。使用 Valine 时，填写对应 LeanCloud 应用的 App ID 和 App Key；Pure 的其他 Valine 选项沿用 `themes/pure/_config.yml` 中的设置。Stellar 同样支持界面中的三种评论服务及关闭评论。
+在站点配置的「评论」中可选择关闭评论、Valine、Gitalk 或 Disqus。新建及未设置评论平台的站点默认关闭评论，已有明确选择的站点保留原设置。仅显示当前选中评论系统的设置项，关闭评论时隐藏所有系统的设置项。使用 Valine 时，填写对应 LeanCloud 应用的 App ID 和 App Key；Pure 的其他 Valine 选项沿用 `themes/pure/_config.yml` 中的设置。Stellar 同样支持界面中的三种评论服务及关闭评论。
 
 预览与导出调用相同的 Hexo API：`init` → `clean` → `generate`。EJS 页面、Markdown、首页分页、归档、分类、标签和搜索索引由站点安装的 Hexo 插件生成。每次生成会清理 `public` 中的旧产物，请将需要发布的自定义文件放在 `source` 中。
 

@@ -1221,7 +1221,7 @@ void MainWindow::createNotebook() {
         return;
     }
     if (book.type == "site") {
-        book.config = {{"title", book.name}, {"theme", "pure"}, {"footer", "Powered by Hexo"}, {"commentPlatform", "valine"}};
+        book.config = {{"title", book.name}, {"theme", "pure"}, {"footer", "Powered by Hexo"}, {"commentPlatform", "none"}};
     }
     currentNotebookId_ = book.id;
     store_.notebooks.append(book);
@@ -1579,6 +1579,7 @@ void MainWindow::showSiteConfig() {
             });
         }
         form->addWidget(container);
+        return container;
     };
     heading("基本信息");
     field("title", "站点标题");
@@ -1586,14 +1587,21 @@ void MainWindow::showSiteConfig() {
     field("author", "作者");
     field("domain", "域名");
     heading("评论");
-    field("commentPlatform", "评论平台", {"Valine", "关闭", "Gitalk", "Disqus"}, {"valine", "none", "gitalk", "disqus"});
-    field("commentOwner", "GitHub 用户");
-    field("commentRepo", "评论仓库");
-    field("clientId", "Client ID");
-    field("clientSecret", "Client Secret");
-    field("disqus", "Disqus Shortname");
-    field("valineAppId", "Valine App ID");
-    field("valineAppKey", "Valine App Key");
+    auto *comments = field("commentPlatform", "评论平台", {"关闭", "Valine", "Gitalk", "Disqus"}, {"none", "valine", "gitalk", "disqus"})->findChild<QComboBox *>();
+    auto commentField = [&](const QString &key, const QString &caption, const QString &platform) {
+        auto *container = field(key, caption);
+        container->setVisible(comments->currentData().toString() == platform);
+        connect(comments, &QComboBox::currentIndexChanged, container, [container, comments, platform] {
+            container->setVisible(comments->currentData().toString() == platform);
+        });
+    };
+    commentField("commentOwner", "GitHub 用户", "gitalk");
+    commentField("commentRepo", "评论仓库", "gitalk");
+    commentField("clientId", "Client ID", "gitalk");
+    commentField("clientSecret", "Client Secret", "gitalk");
+    commentField("disqus", "Disqus Shortname", "disqus");
+    commentField("valineAppId", "Valine App ID", "valine");
+    commentField("valineAppKey", "Valine App Key", "valine");
     heading("友链");
     auto *links = new QWidget(body);
     auto *linksLayout = column(links, 0, 6);

@@ -77,7 +77,7 @@ QString HexoSite::rootPath(const Notebook &book) {
 bool HexoSite::prepare(Notebook &book, QString *error) {
     if (book.config["theme"].toString() != "stellar") book.config["theme"] = "pure";
     const bool stellar = book.config["theme"].toString() == "stellar";
-    if (!book.config.contains("commentPlatform")) book.config["commentPlatform"] = "valine";
+    if (!book.config.contains("commentPlatform")) book.config["commentPlatform"] = "none";
     if (!copyDirectory(":/hexo", book.path, error)) return false;
     for (const auto &directory: {"source/_posts", "source/_drafts", "source/_data", "public"}) {
         if (!QDir().mkpath(book.path + "/" + directory)) {
