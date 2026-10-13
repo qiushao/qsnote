@@ -1695,7 +1695,31 @@ st->e
             if (theme == "pure") javascript(*browser, "document.querySelector('.search-form-input').click(); const input=document.querySelector('.ins-search-input'); input.value='真实输入'; input.dispatchEvent(new Event('input', {bubbles:true})); input.dispatchEvent(new KeyboardEvent('keyup', {bubbles:true}));");
             else javascript(*browser, "const input=document.querySelector('#search-input'); input.focus(); input.dispatchEvent(new FocusEvent('focusin', {bubbles:true})); input.value='真实输入'; input.dispatchEvent(new Event('input', {bubbles:true}));");
             QTRY_VERIFY2_WITH_TIMEOUT(javascript(*browser, "!!document.querySelector('.ins-section-container .ins-search-item[data-url=\"/blog/article/\"], #search-result a[href^=\"/blog/article/\"]')").toBool(), qPrintable(javascript(*browser, "JSON.stringify({active:document.activeElement.id,input:document.querySelector('#search-input')?._searchInitialized,cache:typeof searchCache === 'undefined' ? null : searchCache,root:typeof ctx === 'undefined' ? null : ctx.root,result:document.querySelector('#search-result')?.innerHTML})").toString()), 10000);
-            browser->load(browser->url().resolved(QUrl("article/")));
+            const auto homeUrl = browser->url();
+            // Follow the themes' real menu links, including Pure's directory URLs without a trailing slash.
+            for (const auto &route: {QString("categories"), QString("tags"), QString("archives"), QString("links"), QString("about")}) {
+                const auto selector = QString(R"(a[href="/blog/%1"], a[href="/blog/%1/"])").arg(route);
+                QVERIFY(javascript(*browser, QString("!!document.querySelector('%1')").arg(selector)).toBool());
+                loaded.clear();
+                javascript(*browser, QString("document.querySelector('%1').click()").arg(selector));
+                if (loaded.isEmpty()) QVERIFY(loaded.wait(15000));
+                QVERIFY(loaded.last().first().toBool());
+                QCOMPARE(browser->url().path(), "/blog/" + route + "/");
+                QVERIFY(javascript(*browser, "!!document.querySelector('header.header')").toBool());
+                if (route == "categories" || route == "tags") {
+                    const auto term = route == "categories" ? QString("Updated") : QString("标签一");
+                    const auto href = QString::fromLatin1(QUrl::toPercentEncoding("/blog/" + route + "/" + term + "/", "/"));
+                    const auto termSelector = QString("a[href=\"%1\"]").arg(href);
+                    QVERIFY(javascript(*browser, QString("!!document.querySelector('%1')").arg(termSelector)).toBool());
+                    loaded.clear();
+                    javascript(*browser, QString("document.querySelector('%1').click()").arg(termSelector));
+                    if (loaded.isEmpty()) QVERIFY(loaded.wait(15000));
+                    QVERIFY(loaded.last().first().toBool());
+                    QCOMPARE(browser->url().path(), "/blog/" + route + "/" + term + "/");
+                    QVERIFY(javascript(*browser, "document.body.textContent.includes('文章标题')").toBool());
+                }
+            }
+            browser->load(homeUrl.resolved(QUrl("article/")));
             QVERIFY(loaded.wait(15000));
             QString text;
             QEventLoop loop;
