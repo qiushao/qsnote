@@ -1,5 +1,5 @@
 #include "SitePublisher.h"
-#include "HexoSite.h"
+#include "StaticSite.h"
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
@@ -146,7 +146,7 @@ bool SitePublisher::publish(const Notebook &book, QString *error) {
             }
         }
     }
-    if (!HexoSite::copyDirectory(source, checkout.path(), error)) return false;
+    if (!StaticSite::copyDirectory(source, checkout.path(), error)) return false;
     QFile nojekyll(checkout.path() + "/.nojekyll");
     if (!nojekyll.open(QIODevice::WriteOnly)) {
         *error = nojekyll.errorString();

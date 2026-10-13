@@ -2,7 +2,7 @@
 #include "FlowLayout.h"
 #include "MarkdownEditor.h"
 #include "MarkdownPreview.h"
-#include "core/HexoSite.h"
+#include "core/StaticSite.h"
 #include "core/SitePublisher.h"
 #include "core/EbookExporter.h"
 #include <QSettings>
@@ -1166,7 +1166,7 @@ void MainWindow::createNotebook() {
     auto *type = new QComboBox(&dialog);
     type->setObjectName("notebookType");
     type->addItem("普通笔记本（目录 + 元数据文件）", "normal");
-    type->addItem("静态站点（Hexo · Pure）", "site");
+    type->addItem("静态站点（Pure）", "site");
     type->addItem("电子书（章节目录 · 多格式导出）", "ebook");
     QString locationRoot = NotebookStore::defaultRoot();
     auto *location = new QLineEdit(&dialog);
@@ -1222,7 +1222,7 @@ void MainWindow::createNotebook() {
         return;
     }
     if (book.type == "site") {
-        book.config = {{"title", book.name}, {"theme", "pure"}, {"footer", "Powered by Hexo"}, {"commentPlatform", "none"}};
+        book.config = {{"title", book.name}, {"theme", "pure"}, {"footer", "Powered by QSNote"}, {"commentPlatform", "none"}};
     }
     currentNotebookId_ = book.id;
     store_.notebooks.append(book);
@@ -1672,7 +1672,7 @@ void MainWindow::showSiteConfig() {
     connect(method, &QComboBox::currentIndexChanged, publishHint, updatePublishHint);
     updatePublishHint();
     form->addWidget(publishHint);
-    form->addWidget(label("预览和发布使用 Hexo 生成 public 目录，需要 Node.js 18 或更新版本及 npm；首次生成会联网安装依赖。", body, true));
+    form->addWidget(label("内置生成器离线生成 public 目录；第三方评论服务需要联网。", body, true));
     form->addStretch();
     scroll->setWidget(body);
     layout->addWidget(scroll, 1);
@@ -1683,7 +1683,7 @@ void MainWindow::showSiteConfig() {
 
 bool MainWindow::generateSite(const Notebook &book) {
     if (!save()) return false;
-    QProgressDialog progress("正在生成 Hexo 站点（首次生成需要安装依赖）…", QString(), 0, 0, this);
+    QProgressDialog progress("正在生成静态站点…", QString(), 0, 0, this);
     progress.setObjectName("siteGenerateDialog");
     progress.setWindowTitle("生成站点");
     progress.setWindowModality(Qt::ApplicationModal);
@@ -1691,7 +1691,7 @@ bool MainWindow::generateSite(const Notebook &book) {
     progress.setMinimumDuration(0);
     progress.show();
     QString error;
-    const bool ok = HexoSite::generate(book, &error);
+    const bool ok = StaticSite::generate(book, &error);
     progress.close();
     if (!ok) QMessageBox::warning(this, "站点生成失败", error);
     return ok;
@@ -1702,7 +1702,7 @@ void MainWindow::showSitePreview() {
     if (!book || book->type != "site") return;
     if (!generateSite(*book)) return;
     OverlayDialog dialog(this, "sitePreviewDialog", true);
-    SiteServer server(book->path + "/public", HexoSite::rootPath(*book), &dialog);
+    SiteServer server(book->path + "/public", StaticSite::rootPath(*book), &dialog);
     if (!server.listen(QHostAddress::LocalHost)) {
         QMessageBox::warning(this, "预览失败", server.errorString());
         return;
@@ -1714,7 +1714,7 @@ void MainWindow::showSitePreview() {
     bar->setObjectName("dialogBar");
     auto *barLayout = row(bar, 14, 8, 10);
     barLayout->addWidget(label("站点预览", bar));
-    barLayout->addWidget(label(book->config["theme"].toString() == "stellar" ? "Hexo · Stellar" : "Hexo · Pure", bar, true));
+    barLayout->addWidget(label(book->config["theme"].toString() == "stellar" ? "Stellar" : "Pure", bar, true));
     barLayout->addStretch();
     auto *close = button("关闭", "closeSitePreview", bar);
     barLayout->addWidget(close);
@@ -1726,7 +1726,7 @@ void MainWindow::showSitePreview() {
     url.setScheme("http");
     url.setHost("127.0.0.1");
     url.setPort(server.serverPort());
-    url.setPath(HexoSite::rootPath(*book));
+    url.setPath(StaticSite::rootPath(*book));
     browser->load(url);
     connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
     dialog.exec();

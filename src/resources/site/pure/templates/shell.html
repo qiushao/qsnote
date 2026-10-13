@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+
+<html lang="zh">
+<head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1, maximum-scale=1" name="viewport"/><meta content="{{author}}" name="author"/><meta content="QSNote" name="generator"/><title>{{headTitle}}</title><meta content="{{description}}" name="description"/><link href="{{permalink}}" rel="canonical"/><link href="{{root}}css/style.css" rel="stylesheet"/><script defer="" src="{{root}}js/highlight.js"></script></head>
+<body class="main-center" itemscope="" itemtype="http://schema.org/WebPage">
+<header class="header" itemscope="" itemtype="http://schema.org/WPHeader">
+<div class="slimContent">
+<div class="navbar-header">
+<div class="profile-block text-center">
+<a href="{{domain}}" id="avatar" target="_blank">
+<img class="img-circle img-rotate" height="200" src="{{root}}images/avatar.jpg" width="200"/>
+</a>
+<h2 class="hidden-xs hidden-sm" id="name">{{author}}</h2>
+<h3 class="hidden-xs hidden-sm hidden-md" id="title"></h3>
+<small class="text-muted hidden-xs hidden-sm" id="location"><i class="icon icon-map-marker"></i> </small>
+</div>
+<div class="search" id="search-form-wrap">
+<form class="search-form sidebar-form">
+<div class="input-group">
+<input class="search-form-input form-control" placeholder="搜索" type="text"/>
+<span class="input-group-btn">
+<button class="search-form-submit btn btn-flat" onclick="return false;" type="submit"><i class="icon icon-search"></i></button>
+</span>
+</div>
+</form>
+<div class="ins-search">
+<div class="ins-search-mask"></div>
+<div class="ins-search-container">
+<div class="ins-input-wrapper">
+<input class="ins-search-input" placeholder="想要查找什么..." type="text" x-webkit-speech=""/>
+<button aria-label="Close" class="close ins-close ins-selectable" data-dismiss="modal" type="button"><span aria-hidden="true">×</span></button>
+</div>
+<div class="ins-section-wrapper">
+<div class="ins-section-container"></div>
+</div>
+</div>
+</div>
+</div>
+<button aria-controls="main-navbar" aria-expanded="false" class="navbar-toggle collapsed" data-target="#main-navbar" data-toggle="collapse" type="button">
+<span class="sr-only">Toggle navigation</span>
+<span class="icon-bar"></span>
+<span class="icon-bar"></span>
+<span class="icon-bar"></span>
+</button>
+</div>
+<nav class="collapse navbar-collapse" id="main-navbar" itemscope="" itemtype="http://schema.org/SiteNavigationElement" role="navigation">
+<ul class="nav navbar-nav main-nav">
+<li class="menu-item menu-item-home">
+<a href="{{root}}.">
+<i class="icon icon-home-fill"></i>
+<span class="menu-title">首页</span>
+</a>
+</li>
+<li class="menu-item menu-item-archives">
+<a href="{{root}}archives">
+<i class="icon icon-archives-fill"></i>
+<span class="menu-title">归档</span>
+</a>
+</li>
+<li class="menu-item menu-item-categories">
+<a href="{{root}}categories">
+<i class="icon icon-folder"></i>
+<span class="menu-title">分类</span>
+</a>
+</li>
+<li class="menu-item menu-item-tags">
+<a href="{{root}}tags">
+<i class="icon icon-tags"></i>
+<span class="menu-title">标签</span>
+</a>
+</li>
+<li class="menu-item menu-item-links">
+<a href="{{root}}links">
+<i class="icon icon-friendship"></i>
+<span class="menu-title">友链</span>
+</a>
+</li>
+<li class="menu-item menu-item-about">
+<a href="{{root}}about">
+<i class="icon icon-cup-fill"></i>
+<span class="menu-title">关于</span>
+</a>
+</li>
+</ul>
+<ul class="social-links">
+</ul>
+</nav>
+</div>
+</header>
+<aside class="sidebar" itemscope="" itemtype="http://schema.org/WPSideBar">
+<div class="slimContent">
+{{noticeWidget}}
+{{categoryWidget}}
+{{tagWidget}}
+{{cloudWidget}}
+{{archiveWidget}}
+{{recentWidget}}
+</div>
+</aside>
+{{tocSidebar}}<main class="main" role="main">{{content}}</main>
+<footer class="footer" itemscope="" itemtype="http://schema.org/WPFooter">
+<ul class="social-links">
+</ul>
+<div class="copyright">
+<p>{{footer}}</p>
+<div class="publishby">
+        	Theme by <a href="https://github.com/cofess" target="_blank"> cofess </a>base on <a href="https://github.com/cofess/hexo-theme-pure" target="_blank">pure</a>.
+        </div>
+</div>
+</footer>
+<script src="{{root}}js/jquery.min.js"></script>
+<script src="{{root}}js/plugin.min.js"></script>
+<script src="{{root}}js/application.js"></script>
+<script>
+(function (window) {
+    var INSIGHT_CONFIG = {
+        TRANSLATION: {
+            POSTS: '文章',
+            PAGES: '页面',
+            CATEGORIES: '分类',
+            TAGS: '标签',
+            UNTITLED: '(未命名)',
+        },
+        ROOT_URL: '{{root}}',
+        CONTENT_URL: '{{root}}content.json',
+    };
+    window.INSIGHT_CONFIG = INSIGHT_CONFIG;
+})(window);
+</script>
+<script src="{{root}}js/insight.js"></script>
+</body>
+</html>

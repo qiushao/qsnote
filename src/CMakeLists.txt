@@ -13,20 +13,21 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         core/EbookExporter.h
         core/PlantUmlRenderer.cpp
         core/PlantUmlRenderer.h
-        core/HexoSite.cpp
+        core/StaticSite.cpp
+        core/SiteGenerator.cpp
         core/SitePublisher.cpp
         core/SitePublisher.h
-        core/HexoSite.h
+        core/StaticSite.h
         core/NotebookStore.h
         resources/ui.qrc
-        resources/hexo.qrc
+        resources/site.qrc
         ../third_party/vtextedit/demo/data/syntax/syntax.qrc
         ../third_party/qsnote-translations.qrc
         ../third_party/vnote-web.qrc
 )
 
 target_include_directories(qsnote PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(qsnote PRIVATE Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Widgets Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Network VTextEdit)
+target_link_libraries(qsnote PRIVATE Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Widgets Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Network VTextEdit cmark)
 target_compile_definitions(qsnote PRIVATE APP_VERSION="${APP_VERSION}")
 
 set_target_properties(qsnote PROPERTIES

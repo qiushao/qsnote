@@ -1,5 +1,5 @@
 #include "NotebookStore.h"
-#include "HexoSite.h"
+#include "StaticSite.h"
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -81,7 +81,7 @@ QString NotebookStore::relativePath(const Notebook &book, const Note &note) {
     if (name.isEmpty()) name = QStringLiteral("未命名");
     if (!note.folder && !name.endsWith(QStringLiteral(".md"))) name += QStringLiteral(".md");
     if (book.type == "site") {
-        // Hexo 文章目录；分类继续用于组织源文件。
+        // 站点文章目录；分类继续用于组织源文件。
         const auto category = sanitized(note.metadata["category"].toString());
         return (note.metadata["draft"].toBool() ? "source/_drafts/" : "source/_posts/") + (category.isEmpty() ? name : category + "/" + name);
     }
@@ -131,7 +131,7 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
         *error = QStringLiteral("无法创建笔记本目录：") + book.path;
         return false;
     }
-    if (book.type == "site" && !HexoSite::prepare(book, error)) return false;
+    if (book.type == "site" && !StaticSite::prepare(book, error)) return false;
     const QDir root(book.path);
     // 父先子后处理，移动父目录后子孙路径随前缀替换保持一致。
     QList<Note *> order;
@@ -210,7 +210,7 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
                 return false;
             }
         } else if (book.type == "site" || note->contentDirty || !QFileInfo::exists(root.absoluteFilePath(expected))) {
-            if (!writeFile(root.absoluteFilePath(expected), book.type == "site" ? HexoSite::postSource(*note) : note->content.toUtf8(), error)) return false;
+            if (!writeFile(root.absoluteFilePath(expected), book.type == "site" ? StaticSite::postSource(*note) : note->content.toUtf8(), error)) return false;
             note->contentDirty = false;
         }
     }
@@ -269,7 +269,7 @@ bool NotebookStore::loadNotebook(Notebook &book, QString *error) {
             QFile content(root.absoluteFilePath(note.path));
             if (content.open(QIODevice::ReadOnly)) {
                 note.content = QString::fromUtf8(content.readAll());
-                if (book.type == "site") note.content = HexoSite::postBody(note.content);
+                if (book.type == "site") note.content = StaticSite::postBody(note.content);
             }
         }
         loaded.append(note);

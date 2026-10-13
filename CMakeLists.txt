@@ -48,22 +48,24 @@ option(QSNOTE_BUILD_TESTS "Build UI interaction tests" OFF)
 if (QSNOTE_BUILD_TESTS)
     enable_testing()
     find_package(Qt6 REQUIRED COMPONENTS Test)
-    add_executable(qsnote_hexo_tests
-            tests/HexoSiteTest.cpp
+    add_executable(qsnote_site_tests
+            tests/StaticSiteTest.cpp
             src/core/NotebookStore.cpp
-            src/core/HexoSite.cpp
-            src/resources/hexo.qrc
+            src/core/StaticSite.cpp
+            src/core/SiteGenerator.cpp
+            src/resources/site.qrc
     )
-    target_include_directories(qsnote_hexo_tests PRIVATE src)
-    target_link_libraries(qsnote_hexo_tests PRIVATE Qt6::Core Qt6::Test)
-    add_test(NAME qsnote_hexo COMMAND qsnote_hexo_tests)
+    target_include_directories(qsnote_site_tests PRIVATE src)
+    target_link_libraries(qsnote_site_tests PRIVATE Qt6::Core Qt6::Test cmark)
+    add_test(NAME qsnote_site COMMAND qsnote_site_tests)
     add_executable(qsnote_ebook_tests
             tests/EbookExporterTest.cpp
             src/core/EbookExporter.cpp
             src/core/PlantUmlRenderer.cpp
             src/core/NotebookStore.cpp
-            src/core/HexoSite.cpp
-            src/resources/hexo.qrc
+            src/core/StaticSite.cpp
+            src/core/SiteGenerator.cpp
+            src/resources/site.qrc
             third_party/vnote-web.qrc
     )
     target_include_directories(qsnote_ebook_tests PRIVATE src)
@@ -73,10 +75,11 @@ if (QSNOTE_BUILD_TESTS)
     add_executable(qsnote_publish_tests
             tests/SitePublisherTest.cpp
             src/core/SitePublisher.cpp
-            src/core/HexoSite.cpp
+            src/core/StaticSite.cpp
+            src/core/SiteGenerator.cpp
     )
     target_include_directories(qsnote_publish_tests PRIVATE src)
-    target_link_libraries(qsnote_publish_tests PRIVATE Qt6::Core Qt6::Test)
+    target_link_libraries(qsnote_publish_tests PRIVATE Qt6::Core Qt6::Test cmark)
     add_test(NAME qsnote_publish COMMAND qsnote_publish_tests)
     add_executable(qsnote_ui_tests
             src/core/SitePublisher.cpp
@@ -88,14 +91,15 @@ if (QSNOTE_BUILD_TESTS)
             src/ui/MarkdownPreview.cpp
             src/ui/FlowLayout.cpp
             src/core/NotebookStore.cpp
-            src/core/HexoSite.cpp
+            src/core/StaticSite.cpp
+            src/core/SiteGenerator.cpp
             src/resources/ui.qrc
-            src/resources/hexo.qrc
+            src/resources/site.qrc
             third_party/vtextedit/demo/data/syntax/syntax.qrc
             third_party/vnote-web.qrc
     )
     target_include_directories(qsnote_ui_tests PRIVATE src)
-    target_link_libraries(qsnote_ui_tests PRIVATE Qt6::Widgets Qt6::GuiPrivate Qt6::Test Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Network VTextEdit)
+    target_link_libraries(qsnote_ui_tests PRIVATE Qt6::Widgets Qt6::GuiPrivate Qt6::Test Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Network VTextEdit cmark)
     add_test(NAME qsnote_ui COMMAND qsnote_ui_tests)
     set_tests_properties(qsnote_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu;XDG_DATA_HOME=${CMAKE_BINARY_DIR}/test-data")
 endif ()
