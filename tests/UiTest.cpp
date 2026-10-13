@@ -3,6 +3,7 @@
 #include "ui/MainWindow.h"
 #include "ui/MarkdownEditor.h"
 #include "ui/MarkdownPreview.h"
+#include "ui/InplacePreview.h"
 #include <QWebEnginePage>
 #include <QWebEngineView>
 #include <QEventLoop>
@@ -31,6 +32,8 @@
 #include <QMessageBox>
 #include <vtextedit/vtextedit.h>
 #include <vtextedit/texteditorconfig.h>
+#include <vtextedit/previewdata.h>
+#include <vtextedit/previewmgr.h>
 #include <QPushButton>
 #include <QStackedWidget>
 #include <QStandardPaths>
@@ -67,6 +70,15 @@ class UiTest : public QObject {
         QTimer::singleShot(5000, &loop, &QEventLoop::quit);
         loop.exec();
         return result;
+    }
+    static QList<vte::PreviewImageData> previewImages(MarkdownEditor &editor, vte::PreviewData::Source source) {
+        QList<vte::PreviewImageData> images;
+        for (auto block = editor.document()->begin(); block.isValid(); block = block.next()) {
+            for (const auto data: vte::BlockPreviewData::get(block)->getPreviewData()) {
+                if (data->source() == source) images.append(*data->getImageData());
+            }
+        }
+        return images;
     }
 private slots:
     void init() {
@@ -108,6 +120,7 @@ private slots:
         QTimer::singleShot(20, &editor, [] {
             auto *dialog = QApplication::activeModalWidget();
             QVERIFY(dialog);
+            QVERIFY(!dialog->findChild<QCheckBox *>("autoFoldPreviews")->isChecked());
             dialog->findChild<QSpinBox *>("fontSize")->setValue(24);
             qobject_cast<QDialog *>(dialog)->reject();
         });
@@ -202,6 +215,203 @@ private slots:
         QTest::keyClicks(cell, "edited");
         QTRY_VERIFY(editor.getText().contains("edited"));
         QVERIFY(editor.getText().contains("End"));
+    }
+
+    void inplacePreviewRendersMathAndDiagrams() {
+        QSettings().setValue("editor/autoFoldPreviews", false);
+        MarkdownEditor editor;
+        editor.resize(1000, 1000);
+        editor.show();
+        const QString source = R"md(# In-place preview
+
+$E=mc^2$ and $$\frac{a}{b}$$
+
+$$
+\sum_{i=1}^{n} i^2
+$$
+
+| Formula | Value |
+| --- | --- |
+| $x^2$ | 2 |
+
+```MeRmAiD title
+graph TD
+A[开始] --> B[结束]
+```
+
+> ```flowchart
+> st=>start: Start
+> e=>end: End
+> st->e
+> ```
+
+```graphviz
+digraph G { a -> b }
+```
+
+```wave
+{"signal": [{"name": "clk", "wave": "p...."}]}
+```
+
+```mathjax
+\frac{1}{2}
+```
+
+```cpp
+int ordinary_code = 1;
+```
+)md";
+        editor.setText(source);
+        QTRY_COMPARE_WITH_TIMEOUT(previewImages(editor, vte::PreviewData::MathBlock).size(), 4, 30000);
+        QTRY_COMPARE_WITH_TIMEOUT(previewImages(editor, vte::PreviewData::CodeBlock).size(), 5, 30000);
+        const auto math = previewImages(editor, vte::PreviewData::MathBlock);
+        QVERIFY(math[0].m_inline);
+        QVERIFY(math[0].m_imageSize.width() > 2 * math[0].m_imageSize.height());
+        QVERIFY(math[1].m_inline); // Single-line $$ uses display typesetting, inline placement.
+        QVERIFY(!math[2].m_inline);
+        QVERIFY(math[3].m_inline); // Also delivered to the interactive table sheet.
+        for (auto type: {vte::PreviewData::MathBlock, vte::PreviewData::CodeBlock}) {
+            for (const auto &image: previewImages(editor, type)) {
+                const auto pixmap = editor.findImageFromDocumentResourceMgr(image.m_imageName);
+                QVERIFY(pixmap && !pixmap->isNull());
+                QVERIFY(image.m_imageSize.width() > 5 && image.m_imageSize.height() > 5);
+                // A successful transport must contain visible pixels, including KaTeX's embedded fonts.
+                const auto pixels = pixmap->toImage();
+                int visible = 0;
+                for (int y = 0; y < pixels.height(); ++y) {
+                    for (int x = 0; x < pixels.width(); ++x) {
+                        const auto color = pixels.pixelColor(x, y);
+                        if (color.alpha() > 0 && color.lightness() < 240) ++visible;
+                    }
+                }
+                QVERIFY(visible > 20);
+            }
+        }
+        QCOMPARE(editor.getText(), source);
+        QVERIFY(!editor.document()->isModified());
+        editor.grab().save("inplace-preview.png");
+
+        const auto oldSize = math[0].m_imageSize;
+        editor.zoom(8);
+        QTRY_COMPARE_WITH_TIMEOUT(previewImages(editor, vte::PreviewData::MathBlock).size(), 4, 30000);
+        QTRY_VERIFY(previewImages(editor, vte::PreviewData::MathBlock).size() == 4 && previewImages(editor, vte::PreviewData::MathBlock)[0].m_imageSize.height() > oldSize.height());
+        QCOMPARE(editor.getText(), source);
+    }
+
+    void inplacePreviewSettingsAndStaleResults() {
+        MarkdownEditor editor;
+        editor.resize(700, 500);
+        editor.show();
+        editor.setText("Plain text");
+        QTest::qWait(300);
+        QVERIFY(!editor.findChild<QWebEnginePage *>());
+        auto *renderer = editor.findChild<InplacePreview *>();
+        QVERIFY(renderer);
+        QSignalSpy requests(renderer, &InplacePreview::renderRequested);
+        editor.setText("```mermaid\ngraph TD\nA-->B\n```\n\n$x$");
+        QTRY_VERIFY_WITH_TIMEOUT(!requests.isEmpty(), 30000);
+        editor.setText("Latest document");
+        QTest::qWait(1000);
+        QCOMPARE(previewImages(editor, vte::PreviewData::MathBlock).size(), 0);
+        QCOMPARE(previewImages(editor, vte::PreviewData::CodeBlock).size(), 0);
+        QCOMPARE(editor.getText(), QString("Latest document"));
+
+        const QString source = "$x^2$\n\n```dot\ndigraph G { a -> b }\n```";
+        editor.setText(source);
+        QTRY_COMPARE(previewImages(editor, vte::PreviewData::MathBlock).size(), 1);
+        QTRY_COMPARE(previewImages(editor, vte::PreviewData::CodeBlock).size(), 1);
+        bool clearedUnchangedFormula = false;
+        const auto publication = connect(editor.getPreviewMgr(), &vte::PreviewMgr::previewDataUpdated, &editor,
+                [&clearedUnchangedFormula](vte::PreviewData::Source type, const QVector<QTextBlock> &blocks) {
+                    if (type == vte::PreviewData::MathBlock && blocks.isEmpty()) clearedUnchangedFormula = true;
+                });
+        editor.getTextEdit()->moveCursor(QTextCursor::End);
+        editor.insertText("\nUnrelated paragraph");
+        QTest::qWait(500);
+        QVERIFY(!clearedUnchangedFormula);
+        disconnect(publication);
+        editor.getTextEdit()->undo();
+        QCOMPARE(editor.getText(), source);
+        QSettings().setValue("editor/previewMath", false);
+        editor.reloadSettings();
+        QTRY_COMPARE(previewImages(editor, vte::PreviewData::MathBlock).size(), 0);
+        QTRY_COMPARE(previewImages(editor, vte::PreviewData::CodeBlock).size(), 1);
+        QSettings().setValue("editor/previewGraphs", false);
+        editor.reloadSettings();
+        QTRY_COMPARE(previewImages(editor, vte::PreviewData::CodeBlock).size(), 0);
+        QSettings().setValue("editor/previewGraphs", true);
+        QSettings().setValue("editor/inplacePreview", false);
+        editor.reloadSettings();
+        QTRY_COMPARE(previewImages(editor, vte::PreviewData::CodeBlock).size(), 0);
+        QSettings().setValue("editor/previewMath", true);
+        QSettings().setValue("editor/inplacePreview", true);
+        editor.reloadSettings();
+        QTRY_COMPARE(previewImages(editor, vte::PreviewData::MathBlock).size(), 1);
+        QTRY_COMPARE(previewImages(editor, vte::PreviewData::CodeBlock).size(), 1);
+        QCOMPARE(editor.getText(), source);
+        editor.getTextEdit()->moveCursor(QTextCursor::End);
+        editor.insertText("\nedit");
+        editor.getTextEdit()->undo();
+        QCOMPARE(editor.getText(), source);
+        QTRY_COMPARE(previewImages(editor, vte::PreviewData::MathBlock).size(), 1);
+    }
+
+    void inplacePreviewFailuresAndSourceFolding() {
+        QSettings().setValue("editor/autoFoldPreviews", true);
+        MarkdownEditor editor;
+        editor.resize(700, 600);
+        editor.show();
+        const QString source = "Intro\n\n```dot\ndigraph G { a -> b }\n```\n\n"
+                               "```mermaid\ninvalid diagram\n```\n\n$\\unknowncommand{x}$\n\n$y^2$";
+        editor.setText(source);
+        QTRY_COMPARE_WITH_TIMEOUT(previewImages(editor, vte::PreviewData::CodeBlock).size(), 1, 30000);
+        QTRY_COMPARE_WITH_TIMEOUT(previewImages(editor, vte::PreviewData::MathBlock).size(), 1, 30000);
+        QTRY_VERIFY(!editor.document()->findBlockByNumber(3).isVisible());
+        QVERIFY(editor.document()->findBlockByNumber(7).isVisible());
+        QCOMPARE(editor.getText(), source);
+        editor.setText("No previews");
+        QTRY_COMPARE(previewImages(editor, vte::PreviewData::CodeBlock).size(), 0);
+        QTRY_COMPARE(previewImages(editor, vte::PreviewData::MathBlock).size(), 0);
+    }
+
+    void inplacePreviewRendersPlantUml() {
+        if (QStandardPaths::findExecutable("plantuml").isEmpty()) QSKIP("Install PlantUML to run diagram integration test");
+        MarkdownEditor editor;
+        editor.resize(700, 500);
+        editor.show();
+        const QString source = "Intro\n\n```puml\nAlice -> Bob: hello\n```";
+        editor.setText(source);
+        QTRY_COMPARE_WITH_TIMEOUT(previewImages(editor, vte::PreviewData::CodeBlock).size(), 1, 60000);
+        QVERIFY(previewImages(editor, vte::PreviewData::CodeBlock)[0].m_imageSize.width() > 20);
+        QCOMPARE(editor.getText(), source);
+    }
+
+    void inplacePreviewGraphvizEngines() {
+        QSettings().setValue("editor/autoFoldPreviews", false);
+        MarkdownEditor editor;
+        editor.resize(700, 500);
+        editor.show();
+        QString source;
+        QStringList engines = {"dot", "neato", "twopi", "circo", "fdp", "osage", "patchwork"};
+        if (!QStandardPaths::findExecutable("dot").isEmpty()) engines.append("sfdp");
+        for (const auto &engine: engines) source += "```" + engine + "\ndigraph G { a -> b }\n```\n\n";
+        editor.setText(source);
+        QTRY_COMPARE_WITH_TIMEOUT(previewImages(editor, vte::PreviewData::CodeBlock).size(), engines.size(), 30000);
+        QCOMPARE(editor.getText(), source);
+    }
+
+    void inplacePreviewMissingPlantUml() {
+        const auto path = qgetenv("PATH");
+        const auto restore = qScopeGuard([path] { qputenv("PATH", path); });
+        qputenv("PATH", "");
+        MarkdownEditor editor;
+        editor.resize(700, 500);
+        editor.show();
+        const QString source = "```plantuml\nAlice -> Bob\n```\n\n```sfdp\ndigraph G { a -> b }\n```\n\n```dot\ndigraph G { a -> b }\n```";
+        editor.setText(source);
+        QTRY_COMPARE_WITH_TIMEOUT(previewImages(editor, vte::PreviewData::CodeBlock).size(), 1, 30000);
+        QVERIFY(editor.document()->findBlockByNumber(1).isVisible());
+        QCOMPARE(editor.getText(), source);
     }
 
     void webPreviewRendersExtensionsAndDiagrams() {

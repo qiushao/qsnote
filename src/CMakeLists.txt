@@ -4,6 +4,8 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         ui/MainWindow.h
         ui/MarkdownEditor.cpp
         ui/MarkdownEditor.h
+        ui/InplacePreview.cpp
+        ui/InplacePreview.h
         ui/MarkdownPreview.cpp
         ui/MarkdownPreview.h
         ui/FlowLayout.cpp

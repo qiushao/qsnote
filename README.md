@@ -4,6 +4,7 @@ C++17 / Qt 6 Widgets Markdown 笔记应用，界面参考 [UI 原型](docs/desig
 
 - 三栏布局：笔记本与搜索、多标签编辑 / Markdown 阅读与分屏预览、自动大纲。
 - 本地阅读预览支持公式、Mermaid / Flowchart / Graphviz / WaveDrom 图表、脚注和代码高亮，分屏可实时更新并同步滚动。
+- 编辑区支持 KaTeX 行内 / 块级公式及 Mermaid、Flowchart、Graphviz、JSON WaveDrom、PlantUML 和 `mathjax` 代码块的就地预览；公式、图表可分别开关，支持缩放、宽度限制与源码自动折叠。PlantUML 和 Graphviz 的 `sfdp` 布局需要本地渲染引擎。
 - 阅读区右键可查找、折叠标题、搜索跳转标题及设置配色 / 字体 / 行距 / 正文宽度；聚焦阅读区后 `Ctrl+G` 打开标题跳转，阅读设置保存后对所有笔记生效。
 - 分栏可拖动调整，也可用顶栏按钮收起；窄窗口自动收起侧栏，工具栏与文章元数据自动换行。
 - Markdown 编辑基于内置 VTextEdit，支持语法高亮、折叠、格式操作、交互表格、Vim / VS Code 输入模式；完整 VNote 功能迁移进度见 [迁移清单](docs/vtextedit-migration.md)。

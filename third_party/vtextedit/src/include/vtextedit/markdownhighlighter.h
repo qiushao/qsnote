@@ -78,6 +78,11 @@ public:
 
   const QVector<md::FencedCodeBlock> &getCodeBlocks() const;
 
+  // Request typed snapshots for an external painted renderer without a widget
+  // factory. Empty by default; takes effect on the next updateHighlight().
+  // These types are added to those requested by interactive preview factories.
+  void setPreviewSnapshotTypes(const QVector<PreviewElementType> &p_types);
+
   void updateStylesFontSize(int p_delta);
 
   // Get code block style (may not contain the font size value).

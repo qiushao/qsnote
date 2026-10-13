@@ -1,4 +1,5 @@
 #include "MarkdownEditor.h"
+#include "InplacePreview.h"
 #include <QActionGroup>
 #include <QBuffer>
 #include <QCheckBox>
@@ -50,12 +51,17 @@ QSharedPointer<vte::MarkdownEditorConfig> editorConfig() {
     config->overrideTextFontFamily(settings.value("fontFamily").toString());
     auto &font = text->m_theme->editorStyle(vte::Theme::Text);
     font.m_fontPointSize = settings.value("fontSize", font.m_fontPointSize).toInt();
+    font.m_backgroundColor = qRgb(246, 247, 249);
+    text->m_theme->editorStyle(vte::Theme::ContentMargin).m_backgroundColor = font.m_backgroundColor;
+    text->m_theme->editorStyle(vte::Theme::IndicatorsBorder).m_backgroundColor = font.m_backgroundColor;
     config->m_webCodeBlockHighlighterEnabled = false;
     config->m_inplacePreviewSources |= vte::MarkdownEditorConfig::Table;
     config->m_inplacePreviewSources.setFlag(vte::MarkdownEditorConfig::ImageLink, settings.value("previewImages", true).toBool());
     config->m_inplacePreviewSources.setFlag(vte::MarkdownEditorConfig::Table, settings.value("previewTables", true).toBool());
+    config->m_inplacePreviewSources.setFlag(vte::MarkdownEditorConfig::Math, settings.value("previewMath", true).toBool());
+    config->m_inplacePreviewSources.setFlag(vte::MarkdownEditorConfig::CodeBlock, settings.value("previewGraphs", true).toBool() || settings.value("previewMath", true).toBool());
     config->m_constrainInplacePreviewWidthEnabled = settings.value("constrainPreviewWidth", false).toBool();
-    config->m_autoFoldPreviewedBlocksEnabled = settings.value("autoFoldPreviews", true).toBool();
+    config->m_autoFoldPreviewedBlocksEnabled = settings.value("autoFoldPreviews", false).toBool();
     if (!settings.value("concealLinks", true).toBool()) config->m_concealElements = {};
     config->m_autoFormatTableSourceEnabled = settings.value("formatTables", true).toBool();
     config->m_autoNumberOrderedListsEnabled = settings.value("numberLists", true).toBool();
@@ -71,6 +77,7 @@ MarkdownEditor::MarkdownEditor(const QSharedPointer<vte::MarkdownEditorConfig> &
     setObjectName("markdownEditor");
     getTextEdit()->setObjectName("editor");
     enableInternalContextMenu();
+    inplacePreview_ = new InplacePreview(this);
     reloadSettings();
     connect(this, &VMarkdownEditor::spellCheckStateChanged, this, [this] {
         if (applyingSettings_) return;
@@ -230,6 +237,11 @@ void MarkdownEditor::reloadSettings() {
     zoom(settings.value("editor/zoom", 0).toInt());
 }
 
+void MarkdownEditor::zoom(int delta) {
+    VMarkdownEditor::zoom(delta);
+    if (inplacePreview_) inplacePreview_->refresh();
+}
+
 void MarkdownEditor::saveSetting(const QString &key, const QVariant &value) {
     QSettings settings;
     settings.setValue("editor/" + key, value);
@@ -307,6 +319,8 @@ void MarkdownEditor::showSettings() {
     check(markdown, "inplacePreview", "启用就地预览", settings.value("inplacePreview", true).toBool());
     check(markdown, "previewImages", "图片就地预览", config_->m_inplacePreviewSources.testFlag(vte::MarkdownEditorConfig::ImageLink));
     check(markdown, "previewTables", "可编辑表格就地预览", config_->m_inplacePreviewSources.testFlag(vte::MarkdownEditorConfig::Table));
+    check(markdown, "previewMath", "公式就地预览", config_->m_inplacePreviewSources.testFlag(vte::MarkdownEditorConfig::Math));
+    check(markdown, "previewGraphs", "图表就地预览", settings.value("previewGraphs", true).toBool());
     check(markdown, "constrainPreviewWidth", "限制就地预览宽度", config_->m_constrainInplacePreviewWidthEnabled);
     check(markdown, "autoFoldPreviews", "自动折叠已有预览的源码", config_->m_autoFoldPreviewedBlocksEnabled);
     check(markdown, "concealLinks", "缩短显示过长的链接地址", bool(config_->m_concealElements));

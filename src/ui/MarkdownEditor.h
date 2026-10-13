@@ -4,6 +4,7 @@
 #include <vtextedit/vmarkdowneditor.h>
 
 class QMenu;
+class InplacePreview;
 
 class MarkdownEditor : public vte::VMarkdownEditor {
     Q_OBJECT
@@ -13,6 +14,7 @@ public:
     void showFindReplace();
     void showSettings();
     void reloadSettings();
+    void zoom(int delta) override;
     QMenu *createEditorMenu(QWidget *parent);
 
 signals:
@@ -23,6 +25,7 @@ private:
     void insertImage(quint64 requestId = 0, const QString &selectedText = {});
     void saveSetting(const QString &key, const QVariant &value);
     QSharedPointer<vte::MarkdownEditorConfig> config_;
+    InplacePreview *inplacePreview_ = nullptr;
     bool applyingSettings_ = false;
 };
 

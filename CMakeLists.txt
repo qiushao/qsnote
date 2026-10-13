@@ -88,6 +88,7 @@ if (QSNOTE_BUILD_TESTS)
             src/core/PlantUmlRenderer.cpp
             src/ui/MainWindow.cpp
             src/ui/MarkdownEditor.cpp
+            src/ui/InplacePreview.cpp
             src/ui/MarkdownPreview.cpp
             src/ui/FlowLayout.cpp
             src/core/NotebookStore.cpp

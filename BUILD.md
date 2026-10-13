@@ -92,4 +92,6 @@ Markdown 编辑使用 third_party 中的 VTextEdit 源码，阅读 / 分屏预�
 
 PlantUML 预览与导出是运行时功能，需要 PATH 中的 `plantuml` 和 Graphviz（Linux：`sudo apt install plantuml graphviz`，macOS：`brew install plantuml graphviz`，Windows 安装方式见电子书导出文档）。构建本身不需要这两个命令；PlantUML 的实际图片测试需要安装引擎。
 
+编辑区 Graphviz 的 `sfdp` 就地预览同样需要 PATH 中的 `dot`；其他 Graphviz 布局使用内置 Viz.js。
+
 VTextEdit 的语法高亮、Vim、拼写检查和 cmark 依赖均已放入 `third_party/vtextedit/libs`，版本记录见 `third_party/README.md`。系统 Qt 仍由包管理器或 Qt 安装器提供；不要混用不同 Qt 版本的私有头文件。

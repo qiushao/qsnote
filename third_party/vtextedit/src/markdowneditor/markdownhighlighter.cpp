@@ -397,6 +397,14 @@ void MarkdownHighlighter::processFastParseResult(
   }
 }
 
+void MarkdownHighlighter::setPreviewSnapshotTypes(const QVector<PreviewElementType> &p_types) {
+  int mask = 0;
+  for (const auto type : p_types) {
+    mask |= (1 << static_cast<int>(type));
+  }
+  setProperty("vte_preview_external_type_mask", mask);
+}
+
 void MarkdownHighlighter::updateHighlight() {
   m_parseTimer->stop();
   if (m_result->matched(m_timeStamp)) {
@@ -854,7 +862,7 @@ void MarkdownHighlighter::completeHighlight(QSharedPointer<MarkdownHighlighterRe
   // as a dynamic property because this class is exported and must not grow a
   // data member.
   const QVariant maskValue = property(InteractivePreviewHost::c_enabledTypeMaskProperty);
-  const int typeMask = maskValue.isValid() ? maskValue.toInt() : 0;
+  const int typeMask = maskValue.toInt() | property("vte_preview_external_type_mask").toInt();
   emit previewElementsUpdated(static_cast<quint64>(p_result->m_timeStamp),
                               p_result->buildPreviews(document(), typeMask));
 }
