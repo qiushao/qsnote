@@ -1333,6 +1333,7 @@ void MainWindow::createNote(const QString &parentId, bool folder) {
         connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
         layout->addRow(buttons);
+        dialog.resize(qMin(560, screen()->availableGeometry().width() * 92 / 100), dialog.sizeHint().height());
         if (dialog.exec() != QDialog::Accepted || titleInput->text().trimmed().isEmpty()) return;
         Note note;
         note.id = noteId;
