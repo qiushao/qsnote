@@ -13,6 +13,7 @@
 #include <QScopeGuard>
 #include <QScrollBar>
 #include <QTextBlock>
+#include <QTextLayout>
 #include <QDialog>
 #include <QCheckBox>
 #include <QDoubleSpinBox>
@@ -103,6 +104,85 @@ private slots:
         editor.getTextEdit()->selectAll();
         editor.type(vte::TypeAction::TypeBold);
         QCOMPARE(editor.getText(), QString("- 第一行\n- 第二行"));
+    }
+
+    void fencedCodeSyntaxHighlighting_data() { // NOLINT(readability-identifier-naming): Qt Test data slot.
+        QTest::addColumn<QString>("language");
+        QTest::addColumn<QString>("code");
+        QTest::addColumn<int>("commentPosition");
+        const QString python = "def greet():\n    return \"hello\" # comment\n";
+        QTest::newRow("python") << QString("python") << python << 19;
+        QTest::newRow("py") << QString("py") << python << 19;
+        QTest::newRow("c") << QString("c") << QString("int greet() {\n    return \"hello\"; // comment\n}\n") << 20;
+    }
+
+    void fencedCodeSyntaxHighlighting() {
+        QFETCH(QString, language);
+        QFETCH(QString, code);
+        QFETCH(int, commentPosition);
+        QSettings().setValue("editor/inplacePreview", false);
+        MarkdownEditor editor;
+        editor.resize(700, 500);
+        editor.show();
+        const QString source = "```" + language + "\n" + code + "```\n";
+        editor.setText(source);
+        const int undoSteps = editor.document()->availableUndoSteps();
+        const auto formatAt = [&editor](int line, int position) {
+            const auto block = editor.document()->findBlockByNumber(line);
+            for (const auto &range: block.layout()->formats()) {
+                if (range.start <= position && position < range.start + range.length) {
+                    return range.format;
+                }
+            }
+            return QTextCharFormat();
+        };
+        QTRY_COMPARE_WITH_TIMEOUT(formatAt(1, 0).foreground().color(), QColor("#0077aa"), 15000);
+        QCOMPARE(formatAt(1, 4).foreground().color(), QColor("#dd4a68"));
+        QCOMPARE(formatAt(2, 11).foreground().color(), QColor("#669900"));
+        QCOMPARE(formatAt(2, commentPosition).foreground().color(), QColor("#708090"));
+        QCOMPARE(editor.getText(), source);
+        QCOMPARE(editor.document()->availableUndoSteps(), undoSteps);
+
+        MarkdownPreview preview;
+        preview.setMarkdown(source, "highlight");
+        QTRY_COMPARE_WITH_TIMEOUT(preview.renderedRevision(), preview.revision(), 15000);
+        QCOMPARE(javascript(preview, "getComputedStyle(document.querySelector('.token.keyword')).color").toString(), QString("rgb(0, 119, 170)"));
+        QCOMPARE(javascript(preview, "getComputedStyle(document.querySelector('.token.string')).color").toString(), QString("rgb(102, 153, 0)"));
+        QCOMPARE(javascript(preview, "getComputedStyle(document.querySelector('.token.comment')).color").toString(), QString("rgb(112, 128, 144)"));
+    }
+
+    void fencedCodeHighlightingMultilineAndStaleResults() {
+        QSettings().setValue("editor/inplacePreview", false);
+        MarkdownEditor editor;
+        editor.resize(700, 500);
+        editor.show();
+        editor.setText("```c\nint old = 42;\n```\n");
+        const QString source = "~~~python\nmessage = \"\"\"first <&>\nsecond <&>\n\"\"\"\ndef greet():\n    return message\n~~~\n";
+        editor.setText(source);
+        auto cursor = editor.getTextEdit()->textCursor();
+        cursor.setPosition(static_cast<int>(source.indexOf("second")));
+        cursor.setPosition(cursor.position() + 6, QTextCursor::KeepAnchor);
+        editor.getTextEdit()->setTextCursor(cursor);
+        editor.reloadSettings();
+        const int undoSteps = editor.document()->availableUndoSteps();
+        const auto colorAt = [&editor](int line, int position) {
+            for (const auto &range: editor.document()->findBlockByNumber(line).layout()->formats()) {
+                if (range.start <= position && position < range.start + range.length) return range.format.foreground().color();
+            }
+            return QColor();
+        };
+        QTRY_COMPARE_WITH_TIMEOUT(colorAt(4, 0), QColor("#0077aa"), 15000);
+        QCOMPARE(colorAt(1, 10), QColor("#669900"));
+        QCOMPARE(colorAt(2, 0), QColor("#669900"));
+        QCOMPARE(colorAt(3, 0), QColor("#669900"));
+        QCOMPARE(editor.getText(), source);
+        QCOMPARE(editor.document()->availableUndoSteps(), undoSteps);
+        QCOMPARE(editor.getTextEdit()->textCursor().anchor(), cursor.anchor());
+        QCOMPARE(editor.getTextEdit()->textCursor().position(), cursor.position());
+        editor.insertText("changed");
+        editor.getTextEdit()->undo();
+        QCOMPARE(editor.getText(), source);
+        QTRY_COMPARE(colorAt(2, 0), QColor("#669900"));
     }
 
     void persistentEditorSettings() {

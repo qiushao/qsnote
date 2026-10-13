@@ -62,6 +62,11 @@ InplacePreview::InplacePreview(MarkdownEditor *editor) : QObject(editor), editor
     auto *manager = editor_->getPreviewMgr();
     connect(manager, &vte::PreviewMgr::requestUpdateCodeBlocks, this, &InplacePreview::refresh);
     connect(manager, &vte::PreviewMgr::requestUpdateMathBlocks, this, &InplacePreview::refresh);
+    connect(editor_, &MarkdownEditor::externalCodeBlockHighlightRequested, this,
+            [this](int index, quint64 timeStamp, const QString &text) {
+                ensurePage();
+                if (ready_) emit highlightRequested(index, timeStamp, text);
+            });
 }
 
 void InplacePreview::invalidate() {
@@ -136,10 +141,25 @@ void InplacePreview::ensurePage() {
     page_->load(QUrl("qrc:/web/inplace-preview.html"));
 }
 
-void InplacePreview::ready() {
+void InplacePreview::ready(const QVariantMap &styles) {
+    MarkdownEditor::ExternalCodeBlockHighlightStyles formats;
+    for (auto it = styles.cbegin(); it != styles.cend(); ++it) {
+        const auto properties = it.value().toMap();
+        QTextCharFormat format;
+        if (properties.contains("color")) format.setForeground(QColor(properties.value("color").toString()));
+        if (properties.contains("bold")) format.setFontWeight(properties.value("bold").toBool() ? QFont::Bold : QFont::Normal);
+        if (properties.contains("italic")) format.setFontItalic(properties.value("italic").toBool());
+        formats.insert(it.key(), format);
+    }
+    MarkdownEditor::setExternalCodeBlockHighlihgtStyles(formats);
     ready_ = true;
     emit stylesheetReady(mathStylesheet());
+    editor_->getHighlighter()->updateHighlight();
     renderNext();
+}
+
+void InplacePreview::highlighted(int index, quint64 timeStamp, const QString &html) {
+    editor_->handleExternalCodeBlockHighlightData(index, timeStamp, html);
 }
 
 void InplacePreview::renderNext() {

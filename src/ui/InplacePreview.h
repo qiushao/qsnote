@@ -4,6 +4,7 @@
 #include <QCache>
 #include <QObject>
 #include <QTimer>
+#include <QVariantMap>
 #include <vtextedit/preview.h>
 #include <vtextedit/previewmgr.h>
 
@@ -17,12 +18,14 @@ public:
     void refresh();
 
 public slots:
-    void ready();
+    void ready(const QVariantMap &styles);
+    void highlighted(int index, quint64 timeStamp, const QString &html);
     void rendered(int generation, int index, const QString &png, int width, int height, const QString &error);
 
 signals:
     void renderRequested(const QString &request);
     void stylesheetReady(const QString &css);
+    void highlightRequested(int index, quint64 timeStamp, const QString &text);
 
 private:
     struct Request {

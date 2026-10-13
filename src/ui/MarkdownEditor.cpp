@@ -54,7 +54,7 @@ QSharedPointer<vte::MarkdownEditorConfig> editorConfig() {
     font.m_backgroundColor = qRgb(246, 247, 249);
     text->m_theme->editorStyle(vte::Theme::ContentMargin).m_backgroundColor = font.m_backgroundColor;
     text->m_theme->editorStyle(vte::Theme::IndicatorsBorder).m_backgroundColor = font.m_backgroundColor;
-    config->m_webCodeBlockHighlighterEnabled = false;
+    config->m_webCodeBlockHighlighterEnabled = true;
     config->m_inplacePreviewSources |= vte::MarkdownEditorConfig::Table;
     config->m_inplacePreviewSources.setFlag(vte::MarkdownEditorConfig::ImageLink, settings.value("previewImages", true).toBool());
     config->m_inplacePreviewSources.setFlag(vte::MarkdownEditorConfig::Table, settings.value("previewTables", true).toBool());

@@ -84,8 +84,48 @@
             width: Math.ceil(width * request.zoom), height: Math.ceil(height * request.zoom)};
     }
 
+    function highlightStyles() {
+        const styles = {};
+        const sheet = [...document.styleSheets].find(value => value.href && value.href.endsWith('/highlight.css'));
+        for (const rule of sheet.cssRules) {
+            const format = {};
+            if (rule.style.color) {
+                format.color = rule.style.color.replace(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/,
+                    (_, r, g, b) => '#' + [r, g, b].map(value => Number(value).toString(16).padStart(2, '0')).join(''));
+            }
+            if (rule.style.fontWeight) format.bold = rule.style.fontWeight === 'bold';
+            if (rule.style.fontStyle) format.italic = rule.style.fontStyle === 'italic';
+            for (const selector of rule.selectorText.split(',')) {
+                const name = selector.trim();
+                if (!name.startsWith('.token.')) continue;
+                for (const token of name.slice(7).split('.')) {
+                    styles[token] = Object.assign(styles[token] || {}, format);
+                }
+            }
+        }
+        return styles;
+    }
+
+    // Preserve Prism's multi-line grammar while giving the Qt line parser balanced spans.
+    function lineHtml(node) {
+        if (node.nodeType === Node.TEXT_NODE) return Prism.util.encode(node.textContent);
+        const content = [...node.childNodes].map(lineHtml).join('');
+        if (node.tagName !== 'SPAN') return content;
+        return content.split('\n').map(line => `<span class="${node.className}">${line}</span>`).join('\n');
+    }
+
     new QWebChannel(qt.webChannelTransport, channel => {
         const bridge = channel.objects.inplaceBridge;
+        bridge.highlightRequested.connect((index, timeStamp, text) => {
+            const match = /^(`{3,}|~{3,})[^\S\n]*(\S+)?[^\n]*\n([\s\S]*)\n\1\s*$/.exec(text);
+            let html = '';
+            if (match && match[2] && Prism.languages[match[2]]) {
+                const container = document.createElement('div');
+                container.innerHTML = Prism.highlight(match[3], Prism.languages[match[2]], match[2]);
+                html = lineHtml(container);
+            }
+            bridge.highlighted(index, timeStamp, html);
+        });
         bridge.stylesheetReady.connect(value => { css = value; });
         bridge.renderRequested.connect(async json => {
             const request = JSON.parse(json);
@@ -99,6 +139,6 @@
                 root.replaceChildren();
             }
         });
-        bridge.ready();
+        bridge.ready(highlightStyles());
     });
 })();

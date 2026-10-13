@@ -1,3 +1,4 @@
+@import url("highlight.css");
 :root { color-scheme: light; font: 16px/1.75 system-ui, sans-serif; color: #24292f; background: white; }
 body { margin: 0; overflow-wrap: anywhere; }
 main { padding: 16px 20px 60px; margin-inline: auto; }
@@ -22,11 +23,6 @@ eq .katex-display { display: inline-block; margin: 0; vertical-align: middle; }
 .toolbar button { border: 1px solid #d8dce2; border-radius: 4px; padding: 2px 8px; background: white; cursor: pointer; }
 .diagram { overflow: auto; margin: 16px 0; text-align: center; }
 .render-error { color: #b42318; white-space: pre-wrap; }
-.token.comment,.token.prolog,.token.doctype { color: #6e7781; }
-.token.keyword,.token.tag,.token.boolean { color: #cf222e; }
-.token.string,.token.attr-value { color: #0a3069; }
-.token.function,.token.class-name { color: #8250df; }
-.token.number,.token.operator { color: #0550ae; }
 .image-viewer { max-width: 95vw; max-height: 95vh; padding: 10px; border: none; }
 .image-viewer img { max-height: 90vh; object-fit: contain; cursor: zoom-out; }
 .image-viewer::backdrop { background: #000b; }

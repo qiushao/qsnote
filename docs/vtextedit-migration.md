@@ -16,6 +16,7 @@
 
 - VMarkdownEditor 替代 QPlainTextEdit；随库提供 cmark、语法高亮、KateVi、Sonnet、Hunspell 源码。
 - 行号、代码高亮、文本折叠、补全、普通 / Vim / VS Code 输入模式入口及输入模式状态栏。
+- 编辑区代码块与 VNote 一样使用 WebCodeBlockHighlighter：Prism 分词通过 WebChannel 回传，编辑和阅读的默认配色共用 VNote native 主题的 token 样式；多行 token 保持逐行完整的 span，不改变正文。
 - 标题、粗体、斜体、删除线、高亮、列表、任务、引用、代码、公式等走 VTextEdit 格式命令。
 - 链接、图片、指定行列数的表格插入；图片当前以 PNG data URL 内嵌。
 - 表格就地预览和单元格编辑、自动表格源码对齐、有序列表编号。
