@@ -573,9 +573,12 @@ st->e
             QCOMPARE(target->cursor().shape(), cursor);
         }
         auto *header = window.findChild<QWidget *>("header");
-        const auto point = header->mapTo(&window, QPoint(header->width() / 2, header->height() / 2));
+        auto *toggleLeft = window.findChild<QPushButton *>("toggleLeft");
+        const auto point = header->mapTo(&window, QPoint(toggleLeft->geometry().right() + 5, header->height() / 2));
         QTest::mouseMove(&window, point);
+        QCOMPARE(window.childAt(point), header);
         QCOMPARE(window.childAt(point)->cursor().shape(), Qt::ArrowCursor);
+        QCOMPARE(window.findChild<QLineEdit *>("search")->cursor().shape(), Qt::IBeamCursor);
         QCOMPARE(window.findChild<QPushButton *>("windowClose")->cursor().shape(), Qt::PointingHandCursor);
     }
 

@@ -37,13 +37,16 @@
         expandAll,
         setReaderStyle(options) {
             const line = currentLine();
+            const generation = revision;
             const root = document.documentElement;
             root.dataset.theme = options.theme;
             root.style.fontFamily = options.fontFamily ? `${JSON.stringify(options.fontFamily)}, sans-serif` : '';
             root.style.fontSize = `${options.fontSize}px`;
             root.style.lineHeight = options.lineHeight;
             content.style.maxWidth = options.contentWidth ? `${options.contentWidth}px` : '';
-            requestAnimationFrame(() => scrollToLine(line, false));
+            requestAnimationFrame(() => {
+                if (generation === revision && generation === requestedRevision) scrollToLine(line, false);
+            });
         },
         headings() {
             return [...content.querySelectorAll('h1,h2,h3,h4,h5,h6')].map(node => ({
