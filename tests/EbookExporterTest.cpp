@@ -351,6 +351,132 @@ private slots:
         }
     }
 
+    void mathIsRendered_data() { // NOLINT(readability-identifier-naming): Qt Test data-provider convention.
+        QTest::addColumn<int>("format");
+        QTest::addColumn<QString>("noteId");
+        for (const auto format: {EbookExporter::Format::Html, EbookExporter::Format::Epub,
+                                EbookExporter::Format::Pdf, EbookExporter::Format::Chm}) {
+            for (const auto &id: {QString(), QString("one")}) {
+                QTest::newRow(qPrintable(QString::number(int(format)) + (id.isEmpty() ? "-book" : "-single")))
+                        << int(format) << id;
+            }
+        }
+    }
+
+    void mathIsRendered() {
+        QFETCH(int, format);
+        QFETCH(QString, noteId);
+        const auto exportFormat = EbookExporter::Format(format);
+        if (exportFormat == EbookExporter::Format::Chm && EbookExporter::chmCompiler().isEmpty()) QSKIP("Install a CHM compiler");
+        QTemporaryDir source;
+        QTemporaryDir destination;
+        auto book = fixture(source.path());
+        book.notes[0].content = R"md(Inline $E=mc^2$ and $$\frac{a}{b}$$ end.
+
+$$
+\sum_{i=1}^{n} i^2
+$$
+
+| Formula |
+| --- |
+| $x < y$ |
+
+> $\sqrt{x}$
+
+```MaThJaX title
+\[
+\int_0^1 x\,dx
+\]
+```
+
+> ```mathjax
+> $$\frac{1}{2}$$
+> ```
+
+`$code-inline$`
+
+```text
+$code-block$
+```
+
+\$escaped-dollar
+)md";
+        book.notes[2].content = "$z^2$";
+        QString error;
+        const auto output = EbookExporter::exportBook(book, noteId, exportFormat, destination.path(), &error);
+        QVERIFY2(!output.isEmpty(), qPrintable(error));
+        if (qEnvironmentVariableIsSet("QSNOTE_EXPORT_ARTIFACTS")) {
+            const auto directory = qEnvironmentVariable("QSNOTE_EXPORT_ARTIFACTS");
+            QDir().mkpath(directory);
+            QVERIFY(QFile::copy(output, directory + "/math-" + (noteId.isEmpty() ? "book." : "single.") + QFileInfo(output).suffix()));
+        }
+        const int expected = noteId.isEmpty() ? 8 : 7;
+        if (exportFormat == EbookExporter::Format::Pdf) {
+            const auto pdf = readFile(output);
+            auto images = QRegularExpression("/Subtype /Image\\b").globalMatch(QString::fromLatin1(pdf));
+            int count = 0;
+            while (images.hasNext()) { images.next(); ++count; }
+            // Transparent PNGs also create image objects for their alpha masks.
+            auto masks = QRegularExpression("/SMask \\d+ 0 R").globalMatch(QString::fromLatin1(pdf));
+            while (masks.hasNext()) { masks.next(); --count; }
+            QCOMPARE(count, expected);
+            return;
+        }
+        if (exportFormat == EbookExporter::Format::Chm && QStandardPaths::findExecutable("7z").isEmpty()) QSKIP("Install 7z to inspect CHM");
+        auto exportedFile = [&](const QString &name) {
+            if (exportFormat == EbookExporter::Format::Epub) return QZipReader(output).fileData(name);
+            QProcess process;
+            process.start("7z", {"x", "-so", output, name});
+            if (!process.waitForFinished() || process.exitCode() != 0) return QByteArray();
+            return process.readAllStandardOutput();
+        };
+        const auto html = exportFormat == EbookExporter::Format::Html ? readFile(output)
+                        : exportedFile(exportFormat == EbookExporter::Format::Epub ? "book.xhtml" : "book.html");
+        QVERIFY(html.contains("<code>$code-inline$</code>"));
+        QVERIFY(html.contains("$code-block$"));
+        QVERIFY(html.contains("$escaped-dollar"));
+        QVERIFY(!html.contains("<script"));
+        QXmlStreamReader xml(html);
+        int count = 0;
+        int inlineCount = 0;
+        while (!xml.atEnd()) {
+            xml.readNext();
+            if (!xml.isStartElement() || xml.name() != u"img" || !xml.attributes().value("class").startsWith(u"math-")) continue;
+            ++count;
+            if (xml.attributes().value("class") == u"math-inline") ++inlineCount;
+            const auto src = xml.attributes().value("src").toString();
+            const auto png = exportFormat == EbookExporter::Format::Html ? QByteArray::fromBase64(src.section(',', 1).toLatin1()) : exportedFile(src);
+            const auto image = QImage::fromData(png, "PNG");
+            QVERIFY(image.width() > 10 && image.height() > 10);
+            QCOMPARE(image.width(), xml.attributes().value("width").toInt() * 2);
+            QCOMPARE(image.height(), xml.attributes().value("height").toInt() * 2);
+            bool ink = false;
+            for (int y = 0; y < image.height() && !ink; ++y) {
+                for (int x = 0; x < image.width() && !ink; ++x) {
+                    const auto pixel = image.pixelColor(x, y);
+                    ink = pixel.alpha() > 100 && pixel.lightness() < 200;
+                }
+            }
+            QVERIFY(ink);
+            if (exportFormat == EbookExporter::Format::Epub) QVERIFY(exportedFile("content.opf").contains(("href=\"" + src + "\" media-type=\"image/png\"").toUtf8()));
+        }
+        QVERIFY2(!xml.hasError(), qPrintable(xml.errorString()));
+        QCOMPARE(count, expected);
+        QCOMPARE(inlineCount, expected - 3);
+    }
+
+    void invalidMathReportsChapter() {
+        QTemporaryDir source;
+        QTemporaryDir destination;
+        auto book = fixture(source.path());
+        book.notes[0].content = "$\\frac{1}{$";
+        QString error;
+        QVERIFY(EbookExporter::exportBook(book, "one", EbookExporter::Format::Html, destination.path(), &error).isEmpty());
+        QVERIFY(error.contains("公式"));
+        QVERIFY(error.contains("第一章"));
+        QVERIFY(QDir(destination.path()).entryList(QDir::Files).isEmpty());
+    }
+
     void invalidMermaidReportsChapter() {
         QTemporaryDir source;
         QTemporaryDir destination;

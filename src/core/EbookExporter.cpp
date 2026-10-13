@@ -34,6 +34,7 @@ const QString style = QStringLiteral(
     "code{font-family:monospace;}img{max-width:100%;height:auto;}table{border-collapse:collapse;}"
     "td,th{border:1px solid #ccc;padding:6px 12px;}blockquote{border-left:3px solid #ccc;padding-left:16px;}"
     ".chapter{page-break-before:always;}h1,h2,h3{page-break-after:avoid;}"
+    ".math-inline{vertical-align:middle;}.math-display{display:block;margin:1em auto;}"
     "@media print{body{margin:0;max-width:none;padding:0;}a{color:inherit;text-decoration:none;}}");
 
 QString page(const QString &title, const QString &body) {
@@ -227,6 +228,112 @@ bool renderMermaid(const QJsonArray &diagrams, QMap<QString, QByteArray> &assets
     return true;
 }
 
+bool renderMath(const QJsonArray &formulas, QMap<QString, QByteArray> &assets, QString &body, QString *error) {
+    if (formulas.isEmpty()) return true;
+    QFile stylesheet(":/web/vendor/katex/katex.min.css");
+    if (!stylesheet.open(QIODevice::ReadOnly)) { *error = "无法读取公式样式。"; return false; }
+    auto css = QString::fromUtf8(stylesheet.readAll());
+    // As in the editor preview, embed fonts so SVG rasterization works offline.
+    const QRegularExpression sources(R"(src:url\(([^)]+\.woff2)\)[^}]+)");
+    auto matches = sources.globalMatch(css);
+    while (matches.hasNext()) {
+        const auto match = matches.next();
+        QFile font(":/web/vendor/katex/" + match.captured(1));
+        if (!font.open(QIODevice::ReadOnly)) { *error = "无法读取公式字体。"; return false; }
+        css.replace(match.captured(0), "src:url(data:font/woff2;base64," + QString::fromLatin1(font.readAll().toBase64()) + ") format(\"woff2\")");
+    }
+    QVariantMap result;
+    QEventLoop loop;
+    QTimer timeout;
+    QWebEnginePage browser;
+    browser.settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, false);
+    browser.settings()->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows, false);
+    QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+    QObject::connect(&browser, &QWebEnginePage::titleChanged, &loop, [&](const QString &title) {
+        if (title != "math-export-ready") return;
+        browser.runJavaScript("window.mathExport", [&](const QVariant &value) {
+            result = value.toMap();
+            loop.quit();
+        });
+    });
+    QObject::connect(&browser, &QWebEnginePage::loadFinished, &loop, [&](bool ok) {
+        if (!ok) { loop.quit(); return; }
+        browser.runJavaScript(QStringLiteral(R"JS(
+(async function(input) {
+    const output = window.mathExport = {images: []};
+    let index = 0;
+    try {
+        const style = document.createElement('style');
+        style.textContent = input.css + '\n.katex-display{margin:0}';
+        document.head.append(style);
+        const root = document.createElement('div');
+        root.style.cssText = 'display:inline-block;width:max-content;white-space:nowrap;padding:2px;font-size:16px;color:#24292f';
+        document.body.append(root);
+        for (; index < input.formulas.length; ++index) {
+            const formula = input.formulas[index];
+            let source = formula.source;
+            if (formula.fence) {
+                source = source.trim().replace(/^\$\$([\s\S]*)\$\$$/, '$1').replace(/^\\\[([\s\S]*)\\\]$/, '$1');
+            }
+            katex.render(source, root, {displayMode: formula.display, throwOnError: true, trust: false, output: 'html'});
+            root.getBoundingClientRect();
+            await document.fonts.ready;
+            const width = Math.ceil(root.getBoundingClientRect().width);
+            const height = Math.ceil(root.getBoundingClientRect().height);
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('width', width);
+            svg.setAttribute('height', height);
+            const foreign = document.createElementNS(svg.namespaceURI, 'foreignObject');
+            foreign.setAttribute('width', width);
+            foreign.setAttribute('height', height);
+            const wrapper = document.createElementNS('http://www.w3.org/1999/xhtml', 'div');
+            wrapper.append(style.cloneNode(true), root.cloneNode(true));
+            foreign.append(wrapper);
+            svg.append(foreign);
+            const image = new Image();
+            await new Promise((resolve, reject) => {
+                image.onload = resolve;
+                image.onerror = () => reject(new Error('无法转换公式图片'));
+                image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(svg));
+            });
+            const canvas = document.createElement('canvas');
+            canvas.width = width * 2;
+            canvas.height = height * 2;
+            canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+            output.images.push({png: canvas.toDataURL('image/png').split(',')[1], width, height});
+        }
+    } catch (error) {
+        output.error = String(error.message || error);
+        output.index = index;
+    }
+    document.title = 'math-export-ready';
+})(
+)JS") + QString::fromUtf8(QJsonDocument(QJsonObject{{"css", css}, {"formulas", formulas}}).toJson(QJsonDocument::Compact)) + ");");
+    });
+    timeout.start(60000);
+    browser.setHtml("<!DOCTYPE html><html><head><meta charset=\"utf-8\"/>"
+                    "<script src=\"qrc:/web/vendor/katex/katex.min.js\"></script></head><body></body></html>", QUrl("qrc:/web/"));
+    loop.exec(QEventLoop::ExcludeUserInputEvents);
+    if (result.isEmpty()) { *error = "公式渲染失败或超时。"; return false; }
+    if (result.contains("error")) {
+        *error = "无法渲染公式（" + formulas[result.value("index").toInt()].toObject().value("chapter").toString()
+                + "）：" + result.value("error").toString();
+        return false;
+    }
+    const auto images = result.value("images").toList();
+    for (int i = 0; i < images.size(); ++i) {
+        const auto image = images[i].toMap();
+        const auto png = QByteArray::fromBase64(image.value("png").toString().toLatin1());
+        if (QImage::fromData(png, "PNG").isNull()) { *error = "无法转换公式图片。"; return false; }
+        const auto name = "math-" + QString::number(i + 1) + ".png";
+        assets[name] = png;
+        const auto placement = formulas[i].toObject().value("block").toBool() ? "math-display" : "math-inline";
+        body.replace("src=\"" + name + "\"", "class=\"" + QString(placement) + "\" src=\"" + name + "\" width=\"" + image.value("width").toString()
+                     + "\" height=\"" + image.value("height").toString() + "\"");
+    }
+    return true;
+}
+
 bool addPdfBookmarks(const QString &path, const QList<Chapter> &chapters, QString *error) {
     QFile file(path);
     if (!file.open(QIODevice::ReadWrite)) { *error = file.errorString(); return false; }
@@ -405,6 +512,7 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
     QMap<QString, QByteArray> assets;
     QMap<QString, QString> imagePaths;
     QJsonArray mermaidDiagrams;
+    QJsonArray formulas;
     QString body = "<nav epub:type=\"toc\"><h2>目录</h2>" + contents(chapters, false) + "</nav>";
     body.replace("book.html#", "#");
     for (const auto &chapter: chapters) {
@@ -416,6 +524,7 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
         const std::unique_ptr<cmark_iter, decltype(&cmark_iter_free)> iter(cmark_iter_new(root.get()), cmark_iter_free);
         QList<cmark_node *> excludedLinks;
         QList<cmark_node *> diagramBlocks;
+        QList<cmark_node *> mathNodes;
         while (cmark_iter_next(iter.get()) != CMARK_EVENT_DONE) {
             if (cmark_iter_get_event_type(iter.get()) != CMARK_EVENT_ENTER) continue;
             auto *node = cmark_iter_get_node(iter.get());
@@ -423,7 +532,9 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
             if (type == CMARK_NODE_CODE_BLOCK) {
                 const auto language = QString::fromUtf8(cmark_node_get_fence_info(node)).trimmed().section(QRegularExpression("\\s+"), 0, 0).toLower();
                 if (language == "mermaid" || language == "plantuml") diagramBlocks.append(node);
+                if (language == "mathjax") mathNodes.append(node);
             }
+            if (type == CMARK_NODE_FORMULA_INLINE || type == CMARK_NODE_FORMULA_BLOCK) mathNodes.append(node);
             if (type != CMARK_NODE_IMAGE && type != CMARK_NODE_LINK) continue;
             const QUrl original(QString::fromUtf8(cmark_node_get_url(node)));
             const auto resolved = base.resolved(original);
@@ -498,6 +609,27 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
             cmark_node_replace(block, paragraph);
             cmark_node_free(block);
         }
+        for (auto *node: mathNodes) {
+            const auto type = cmark_node_get_type(node);
+            const bool block = type != CMARK_NODE_FORMULA_INLINE;
+            const auto source = QString::fromUtf8(cmark_node_get_literal(node));
+            formulas.append(QJsonObject{{"source", source}, {"chapter", note.title},
+                                        {"display", block || cmark_node_get_formula_display(node) != 0},
+                                        {"fence", type == CMARK_NODE_CODE_BLOCK}, {"block", block}});
+            const auto name = "math-" + QString::number(formulas.size()) + ".png";
+            auto *image = cmark_node_new(CMARK_NODE_IMAGE);
+            auto *alt = cmark_node_new(CMARK_NODE_TEXT);
+            cmark_node_set_literal(alt, source.toUtf8().constData());
+            cmark_node_set_url(image, name.toUtf8().constData());
+            cmark_node_append_child(image, alt);
+            auto *replacement = image;
+            if (block) {
+                replacement = cmark_node_new(CMARK_NODE_PARAGRAPH);
+                cmark_node_append_child(replacement, image);
+            }
+            cmark_node_replace(node, replacement);
+            cmark_node_free(node);
+        }
         auto *rendered = cmark_render_html(root.get(), CMARK_OPT_DEFAULT);
         QString html = QString::fromUtf8(rendered);
         std::free(rendered);
@@ -519,13 +651,11 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
             offset += start.size() - length;
         }
         html.replace(" data-footnotes>", " data-footnotes=\"\">");
-        html.replace("<eq ", "<code ").replace("</eq>", "</code>");
-        html.replace("<eqn ", "<pre ").replace("</eqn>", "</pre>");
         html.replace("id=\"fn", "id=\"" + chapter.anchor + "-fn");
         html.replace("href=\"#fn", "href=\"#" + chapter.anchor + "-fn");
         body += R"(<div class="chapter" id=")" + chapter.anchor + "\"><h1>" + note.title.toHtmlEscaped() + "</h1>" + html + "</div>";
     }
-    if (!renderMermaid(mermaidDiagrams, assets, error)) return {};
+    if (!renderMermaid(mermaidDiagrams, assets, error) || !renderMath(formulas, assets, body, error)) return {};
     auto html = page(title, body);
     QString extension;
     switch (format) {
