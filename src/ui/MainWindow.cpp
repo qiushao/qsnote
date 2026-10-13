@@ -409,7 +409,7 @@ void MainWindow::buildUi() {
     search_->setObjectName("search");
     search_->setPlaceholderText("搜索当前笔记本 (Ctrl+Shift+F)");
     search_->setAccessibleName("搜索当前笔记本");
-    search_->setMinimumWidth(0);
+    search_->setMinimumWidth(320);
     search_->setMaximumWidth(520);
     search_->setClearButtonEnabled(true);
     headerLayout->addWidget(search_);

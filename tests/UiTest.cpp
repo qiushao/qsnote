@@ -863,11 +863,14 @@ st->e
         QVERIFY(!window.findChild<QWidget *>("toolbar")->isVisible());
         QVERIFY(!window.findChild<QPushButton *>("siteConfig")->isVisible());
         QTest::qWait(30);
+        auto *search = window.findChild<QLineEdit *>("search");
+        QCOMPARE(search->minimumWidth(), 320);
         window.grab().save("empty-wide.png");
         for (const QSize size: {QSize(1024, 700), QSize(720, 540), QSize(480, 600), QSize(360, 640)}) {
             window.resize(size);
             QTest::qWait(30);
-            QCOMPARE(window.size(), size);
+            QCOMPARE(window.size(), size.expandedTo(window.minimumSize()));
+            QVERIFY(search->width() >= 320);
             auto *center = window.findChild<QWidget *>("center");
             QVERIFY(center->width() > 200);
             QVERIFY(center->height() > 200);
@@ -1000,7 +1003,7 @@ st->e
         window.grab().save("editor-wide.png");
         window.resize(480, 600);
         QTest::qWait(30);
-        QCOMPARE(window.size(), QSize(480, 600));
+        QCOMPARE(window.size(), QSize(480, 600).expandedTo(window.minimumSize()));
         QVERIFY(editor->height() > 150);
         QTest::qWait(30);
         window.grab().save("editor-narrow.png");
