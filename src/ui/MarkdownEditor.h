@@ -20,6 +20,9 @@ public:
 signals:
     void settingsChanged();
 
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
     MarkdownEditor(const QSharedPointer<vte::MarkdownEditorConfig> &config, QWidget *parent);
     void insertImage(quint64 requestId = 0, const QString &selectedText = {});

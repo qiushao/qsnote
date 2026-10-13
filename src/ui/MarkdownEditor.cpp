@@ -22,6 +22,7 @@
 #include <QSpinBox>
 #include <QTabWidget>
 #include <QVBoxLayout>
+#include <QWheelEvent>
 #include <functional>
 #include <vtextedit/markdowneditorconfig.h>
 #include <vtextedit/markdownutils.h>
@@ -76,6 +77,7 @@ MarkdownEditor::MarkdownEditor(const QSharedPointer<vte::MarkdownEditorConfig> &
     : VMarkdownEditor(config, QSharedPointer<vte::TextEditorParameters>::create(), parent), config_(config) {
     setObjectName("markdownEditor");
     getTextEdit()->setObjectName("editor");
+    getTextEdit()->viewport()->installEventFilter(this);
     enableInternalContextMenu();
     inplacePreview_ = new InplacePreview(this);
     reloadSettings();
@@ -240,6 +242,26 @@ void MarkdownEditor::reloadSettings() {
 void MarkdownEditor::zoom(int delta) {
     VMarkdownEditor::zoom(delta);
     if (inplacePreview_) inplacePreview_->refresh();
+}
+
+bool MarkdownEditor::eventFilter(QObject *watched, QEvent *event) {
+    if (watched == getTextEdit()->viewport() && event->type() == QEvent::Wheel) {
+        auto *wheel = dynamic_cast<QWheelEvent *>(event);
+        if (wheel && (wheel->modifiers() & Qt::ControlModifier)) {
+            const int steps = wheel->angleDelta().y() / 120;
+            const int delta = qMax(2 - baseEditorFontPointSize(), zoomDelta() + steps);
+            if (steps != 0 && delta != zoomDelta()) {
+                zoom(delta);
+                QSettings settings;
+                settings.setValue("editor/zoom", zoomDelta());
+                settings.sync();
+                emit settingsChanged();
+            }
+            wheel->accept();
+            return true;
+        }
+    }
+    return VMarkdownEditor::eventFilter(watched, event);
 }
 
 void MarkdownEditor::saveSetting(const QString &key, const QVariant &value) {

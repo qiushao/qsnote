@@ -44,6 +44,7 @@
 #include <QTextBrowser>
 #include <QTimer>
 #include <QTreeWidget>
+#include <QWheelEvent>
 
 namespace {
 QString fixturePath(const QString &name) {
@@ -261,6 +262,61 @@ private slots:
         QSettings().clear();
         MarkdownEditor defaults;
         QCOMPARE(defaults.baseEditorFontPointSize(), defaultSize);
+    }
+
+    void controlWheelPersistsEditorZoom() {
+        QSettings().setValue("editor/fontSize", 12);
+        MarkdownEditor editor;
+        editor.resize(700, 500);
+        editor.show();
+        editor.setText(QString("Line\n").repeated(200));
+        editor.insertText("Edited ");
+        const auto source = editor.getText();
+        const int undoSteps = editor.document()->availableUndoSteps();
+        const auto cursor = editor.getTextEdit()->textCursor();
+        auto *viewport = editor.getTextEdit()->viewport();
+        const auto wheel = [viewport](int delta, Qt::KeyboardModifiers modifiers) {
+            const auto position = viewport->rect().center();
+            QWheelEvent event(position, viewport->mapToGlobal(position), {}, QPoint(0, delta),
+                              Qt::NoButton, modifiers, Qt::NoScrollPhase, false);
+            QApplication::sendEvent(viewport, &event);
+        };
+        QSignalSpy changed(&editor, &MarkdownEditor::settingsChanged);
+        QTRY_VERIFY(editor.getTextEdit()->verticalScrollBar()->maximum() > 0);
+        editor.getTextEdit()->verticalScrollBar()->setValue(0);
+        wheel(-120, Qt::NoModifier);
+        QVERIFY(editor.getTextEdit()->verticalScrollBar()->value() > 0);
+        QCOMPARE(editor.editorFontPointSize(), 12);
+        QVERIFY(!QSettings().contains("editor/zoom"));
+
+        wheel(120, Qt::ControlModifier);
+        QCOMPARE(editor.editorFontPointSize(), 13);
+        QCOMPARE(editor.getTextEdit()->font().pointSize(), 13);
+        wheel(240, Qt::ControlModifier);
+        QCOMPARE(editor.editorFontPointSize(), 15);
+        wheel(-120, Qt::ControlModifier);
+        QCOMPARE(editor.editorFontPointSize(), 14);
+        QCOMPARE(changed.count(), 3);
+        QCOMPARE(editor.getText(), source);
+        QCOMPARE(editor.document()->availableUndoSteps(), undoSteps);
+        QCOMPARE(editor.getTextEdit()->textCursor().position(), cursor.position());
+        QCOMPARE(editor.getTextEdit()->textCursor().anchor(), cursor.anchor());
+        QSettings disk(QSettings().fileName(), QSettings::IniFormat);
+        QCOMPARE(disk.value("editor/zoom").toInt(), 2);
+        editor.reloadSettings();
+        QCOMPARE(editor.editorFontPointSize(), 14);
+        MarkdownEditor reopened;
+        QCOMPARE(reopened.editorFontPointSize(), 14);
+
+        wheel(-2400, Qt::ControlModifier);
+        QCOMPARE(editor.editorFontPointSize(), 2);
+        wheel(-120, Qt::ControlModifier);
+        QCOMPARE(editor.editorFontPointSize(), 2);
+        QCOMPARE(changed.count(), 4);
+        editor.reloadSettings();
+        QCOMPARE(editor.editorFontPointSize(), 2);
+        wheel(120, Qt::ControlModifier);
+        QCOMPARE(editor.editorFontPointSize(), 3);
     }
 
     void markdownFindReplaceDialog() {
