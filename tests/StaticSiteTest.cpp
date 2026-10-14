@@ -102,6 +102,23 @@ private slots:
         QCOMPARE(QJsonDocument::fromJson(read(directory.path() + "/public/search.json")).array().size(), 0);
     }
 
+    void invalidDiagramPreservesPublishedOutput() {
+        QTemporaryDir directory;
+        Notebook site{"site", "网站", "site", {}, {}, directory.path()};
+        QString error;
+        QVERIFY2(StaticSite::prepare(site, &error), qPrintable(error));
+        const auto source = directory.path() + "/source/_posts/article.md";
+        QVERIFY(write(source, "原有正文"));
+        QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
+        const auto previous = read(directory.path() + "/public/article/index.html");
+        QVERIFY(!previous.isEmpty());
+        QVERIFY(write(source, "```mermaid\nnot a diagram\n```"));
+        QVERIFY(!StaticSite::generate(site, &error));
+        QVERIFY(error.contains("article"));
+        QVERIFY(error.contains("Mermaid"));
+        QCOMPARE(read(directory.path() + "/public/article/index.html"), previous);
+    }
+
     void paginationLinksAndFrontMatter() {
         QTemporaryDir directory;
         Notebook site{"site", "测试", "site", {}, {{"domain", "https://example.com/中文/"}}, directory.path()};
@@ -190,5 +207,5 @@ private slots:
     }
 };
 // NOLINTEND(readability-convert-member-functions-to-static)
-QTEST_GUILESS_MAIN(StaticSiteTest)
+QTEST_MAIN(StaticSiteTest)
 #include "StaticSiteTest.moc"

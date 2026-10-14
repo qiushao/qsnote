@@ -19,7 +19,7 @@ if (WIN32 AND DEFINED ENV{Qt6_DIR})
     list(PREPEND CMAKE_PREFIX_PATH "$ENV{Qt6_DIR}")
 endif ()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network WebEngineWidgets WebChannel)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network WebEngineWidgets WebChannel Xml)
 
 option(QSNOTE_CLANG_TIDY_ENABLE "Run clang-tidy" ON)
 if (QSNOTE_CLANG_TIDY_ENABLE AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -53,11 +53,16 @@ if (QSNOTE_BUILD_TESTS)
             src/core/NotebookStore.cpp
             src/core/StaticSite.cpp
             src/core/SiteGenerator.cpp
+            src/core/ArticleRenderer.cpp
             src/resources/site.qrc
+            src/core/PlantUmlRenderer.cpp
+            src/resources/ui.qrc
+            third_party/vnote-web.qrc
     )
     target_include_directories(qsnote_site_tests PRIVATE src)
-    target_link_libraries(qsnote_site_tests PRIVATE Qt6::Core Qt6::Test cmark)
+    target_link_libraries(qsnote_site_tests PRIVATE Qt6::Core Qt6::Test Qt6::WebEngineWidgets Qt6::Xml)
     add_test(NAME qsnote_site COMMAND qsnote_site_tests)
+    set_tests_properties(qsnote_site PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu")
     add_executable(qsnote_ebook_tests
             tests/EbookExporterTest.cpp
             src/core/EbookExporter.cpp
@@ -65,11 +70,13 @@ if (QSNOTE_BUILD_TESTS)
             src/core/NotebookStore.cpp
             src/core/StaticSite.cpp
             src/core/SiteGenerator.cpp
+            src/core/ArticleRenderer.cpp
             src/resources/site.qrc
             third_party/vnote-web.qrc
+            src/resources/ui.qrc
     )
     target_include_directories(qsnote_ebook_tests PRIVATE src)
-    target_link_libraries(qsnote_ebook_tests PRIVATE Qt6::Widgets Qt6::GuiPrivate Qt6::Test Qt6::WebEngineWidgets Qt6::Network cmark)
+    target_link_libraries(qsnote_ebook_tests PRIVATE Qt6::Widgets Qt6::GuiPrivate Qt6::Test Qt6::WebEngineWidgets Qt6::Network Qt6::Xml)
     add_test(NAME qsnote_ebook COMMAND qsnote_ebook_tests)
     set_tests_properties(qsnote_ebook PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu")
     add_executable(qsnote_publish_tests
@@ -77,9 +84,13 @@ if (QSNOTE_BUILD_TESTS)
             src/core/SitePublisher.cpp
             src/core/StaticSite.cpp
             src/core/SiteGenerator.cpp
+            src/core/ArticleRenderer.cpp
+            src/core/PlantUmlRenderer.cpp
+            src/resources/ui.qrc
+            third_party/vnote-web.qrc
     )
     target_include_directories(qsnote_publish_tests PRIVATE src)
-    target_link_libraries(qsnote_publish_tests PRIVATE Qt6::Core Qt6::Test cmark)
+    target_link_libraries(qsnote_publish_tests PRIVATE Qt6::Core Qt6::Test Qt6::WebEngineWidgets Qt6::Xml)
     add_test(NAME qsnote_publish COMMAND qsnote_publish_tests)
     add_executable(qsnote_ui_tests
             src/core/SitePublisher.cpp
@@ -94,13 +105,14 @@ if (QSNOTE_BUILD_TESTS)
             src/core/NotebookStore.cpp
             src/core/StaticSite.cpp
             src/core/SiteGenerator.cpp
+            src/core/ArticleRenderer.cpp
             src/resources/ui.qrc
             src/resources/site.qrc
             third_party/vtextedit/demo/data/syntax/syntax.qrc
             third_party/vnote-web.qrc
     )
     target_include_directories(qsnote_ui_tests PRIVATE src)
-    target_link_libraries(qsnote_ui_tests PRIVATE Qt6::Widgets Qt6::GuiPrivate Qt6::Test Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Network VTextEdit cmark)
+    target_link_libraries(qsnote_ui_tests PRIVATE Qt6::Widgets Qt6::GuiPrivate Qt6::Test Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Network VTextEdit Qt6::Xml)
     add_test(NAME qsnote_ui COMMAND qsnote_ui_tests)
     set_tests_properties(qsnote_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu;XDG_DATA_HOME=${CMAKE_BINARY_DIR}/test-data")
 endif ()

@@ -11,6 +11,7 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         ui/FlowLayout.cpp
         ui/FlowLayout.h
         core/NotebookStore.cpp
+        core/ArticleRenderer.cpp
         core/EbookExporter.cpp
         core/EbookExporter.h
         core/PlantUmlRenderer.cpp
@@ -29,7 +30,7 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
 )
 
 target_include_directories(qsnote PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(qsnote PRIVATE Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Widgets Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Network VTextEdit cmark)
+target_link_libraries(qsnote PRIVATE Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Widgets Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Network Qt6::Xml VTextEdit)
 target_compile_definitions(qsnote PRIVATE APP_VERSION="${APP_VERSION}")
 
 set_target_properties(qsnote PROPERTIES

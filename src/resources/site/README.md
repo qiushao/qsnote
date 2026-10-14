@@ -5,7 +5,7 @@
 - `templates/`：从原主题页面提取的 HTML 片段，保留 DOM、类名和内联图标；`{{name}}` 由 C++ 生成器填充。
 - `assets/`：原 CSS、字体、图片和浏览器脚本。Pure 的 `style.css` 直接复制；Stellar 的 `main.css` 使用原站点配置一次性编译得到，程序构建和运行均不需要 Stylus、Hexo、Node.js 或 npm。
 - Stellar 的默认头像使用原 CDN 的同一 SVG，改为本地资源。
-- 两套主题的 `js/highlight.js` 使用原依赖 highlight.js 11.12.0 的 common 语言集，包含浏览器包装代码，使 C++ 输出的代码块沿用原主题的语法颜色和行号样式。许可证见相邻的 `highlight.LICENSE`。
+- 两套主题的 `js/highlight.js` 使用原依赖 highlight.js 11.12.0 的 common 语言集，包含浏览器包装代码，作为原主题资源保留；文章正文现在使用与预览共享的 Prism 高亮和正文样式。许可证见相邻的 `highlight.LICENSE`。
 
 上游许可证保存在各主题的 `LICENSE`，Stellar 的额外声明见 `THIRD-PARTY-NOTICES.md`，lazyload 的许可证保存在 `assets/js/vendor/`。CSS 和脚本中的原有版权声明保留。
 

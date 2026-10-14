@@ -1,9 +1,12 @@
 #include "core/NotebookStore.h"
 #include "core/EbookExporter.h"
+#include "core/StaticSite.h"
 #include "ui/MainWindow.h"
 #include "ui/MarkdownEditor.h"
 #include "ui/MarkdownPreview.h"
 #include "ui/InplacePreview.h"
+#include <QtGui/private/qzipreader_p.h>
+#include <QBuffer>
 #include <QWebEnginePage>
 #include <QWebEngineView>
 #include <QEventLoop>
@@ -27,6 +30,7 @@
 #include <QInputDialog>
 #include <QLabel>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
@@ -89,6 +93,159 @@ private slots:
         QVERIFY(QDir().mkpath(QFileInfo(NotebookStore::storagePath()).absolutePath()));
         QFile::remove(NotebookStore::storagePath());
         QDir(fixturePath({})).removeRecursively();
+    }
+
+    void exportedArticlesMatchPreview() {
+        QString source = R"md(# 一致性标题
+
+正文 **加粗** *斜体* ~~删除~~ ==标记== H~2~O x^2^ :smile:。
+
+[链接](https://example.com) `inline code`
+
+> 引用文字
+
+- 普通列表
+- [x] 完成任务
+
+| 左 | 右 |
+| :--- | ---: |
+| 一 | 二 |
+
+```cpp
+// comment
+const char *message = "hello";
+```
+
+::: alert-info
+提示内容
+:::
+
+脚注[^a]
+
+[^a]: 脚注内容
+
+公式 $E=mc^2$。
+
+```mermaid
+graph LR
+A[开始] --> B[结束]
+```
+
+```dot
+digraph { a -> b }
+```
+
+```flow
+st=>start: Start
+e=>end: End
+st->e
+```
+
+```wavedrom
+{"signal":[{"name":"clk","wave":"p..."}]}
+```
+
+<span onclick="alert(1)">安全 HTML</span>
+)md";
+        QImage sample(80, 40, QImage::Format_RGB32);
+        sample.fill(Qt::red);
+        QByteArray png;
+        QBuffer buffer(&png);
+        QVERIFY(buffer.open(QIODevice::WriteOnly));
+        QVERIFY(sample.save(&buffer, "PNG"));
+        source += "\n![尺寸图片](data:image/png;base64," + QString::fromLatin1(png.toBase64()) + " =40x20)\n";
+        MarkdownPreview preview;
+        preview.resize(900, 700);
+        preview.setMarkdown(source, "parity");
+        QTRY_COMPARE_WITH_TIMEOUT(preview.renderedRevision(), preview.revision(), 30000);
+        const QString snapshot = R"JS((() => {
+            const selectors = ['h1', 'p', 'strong', 'em', 's', 'mark', 'sub', 'sup', 'a', 'code',
+                'blockquote', 'ul', 'li', 'table', 'th', 'td', 'pre', '.token.keyword', '.token.string',
+                '.token.comment', 'aside', '.footnotes', '.diagram', 'figure img'];
+            const properties = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight', 'color',
+                'backgroundColor', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+                'marginTop', 'marginBottom', 'borderLeftWidth', 'borderLeftColor', 'display',
+                'textAlign', 'whiteSpace', 'borderCollapse'];
+            return selectors.map(selector => {
+                const node = document.querySelector('.qsnote-article ' + selector);
+                if (!node) return {selector, missing: true};
+                const style = getComputedStyle(node);
+                let background = 'transparent';
+                for (let parent = node; parent; parent = parent.parentElement) {
+                    background = getComputedStyle(parent).backgroundColor;
+                    if (background !== 'transparent' && background !== 'rgba(0, 0, 0, 0)') break;
+                }
+                return {selector, styles: properties.map(name => style[name]), background};
+            });
+        })())JS";
+        const auto expected = javascript(preview, snapshot).toList();
+        QVERIFY(!expected.isEmpty());
+        QCOMPARE(javascript(preview, "document.querySelector('figure img').getBoundingClientRect().width").toInt(), 40);
+        QCOMPARE(javascript(preview, "document.querySelector('figure img').getBoundingClientRect().height").toInt(), 20);
+        for (const auto &entry: expected) QVERIFY2(!entry.toMap().value("missing").toBool(), qPrintable(entry.toMap().value("selector").toString()));
+        QSettings().setValue("reader/theme", "dark");
+        QSettings().setValue("reader/fontSize", 32);
+        QTemporaryDir directory;
+        Notebook book{"book", "书", "ebook", {{"note", {}, "文章", source, false, {}, "note.md"}}, {}, directory.path()};
+        QString error;
+        const auto html = EbookExporter::exportBook(book, {}, EbookExporter::Format::Html, directory.path(), &error);
+        QVERIFY2(!html.isEmpty(), qPrintable(error));
+        QStringList outputs{html};
+        const auto epub = EbookExporter::exportBook(book, {}, EbookExporter::Format::Epub, directory.path(), &error);
+        QVERIFY2(!epub.isEmpty(), qPrintable(error));
+        const auto epubDirectory = directory.path() + "/epub";
+        QVERIFY(QDir().mkpath(epubDirectory));
+        QZipReader archive(epub);
+        for (const auto &entry: archive.fileInfoList()) {
+            if (!entry.isFile) continue;
+            const auto path = epubDirectory + "/" + entry.filePath;
+            QVERIFY(QDir().mkpath(QFileInfo(path).absolutePath()));
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            const auto bytes = archive.fileData(entry.filePath);
+            QCOMPARE(file.write(bytes), bytes.size());
+        }
+        outputs.append(epubDirectory + "/book.xhtml");
+        for (const auto &theme: {"pure", "stellar"}) {
+            Notebook site{"site", "网站", "site", {}, {{"theme", theme}, {"domain", "https://example.org/blog/"}}, directory.path() + "/" + theme};
+            QVERIFY2(StaticSite::prepare(site, &error), qPrintable(error));
+            QFile file(site.path + "/source/_posts/article.md");
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write(source.toUtf8());
+            file.close();
+            QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
+            // Use a local root so the test exercises each theme's actual stylesheet.
+            const auto path = site.path + "/public/article/index.html";
+            QFile page(path);
+            QVERIFY(page.open(QIODevice::ReadOnly));
+            auto bytes = page.readAll();
+            page.close();
+            bytes.replace("/blog/", QUrl::fromLocalFile(site.path + "/public/").toEncoded());
+            QVERIFY(page.open(QIODevice::WriteOnly));
+            page.write(bytes);
+            page.close();
+            outputs.append(path);
+        }
+        for (const auto &path: outputs) {
+            QWebEngineView output;
+            QSignalSpy loaded(&output, &QWebEngineView::loadFinished);
+            output.load(QUrl::fromLocalFile(path));
+            QTRY_VERIFY_WITH_TIMEOUT(!loaded.isEmpty(), 30000);
+            QVERIFY(loaded.first().first().toBool());
+            const auto actual = javascript(output, snapshot).toList();
+            QCOMPARE(actual.size(), expected.size());
+            for (int i = 0; i < expected.size(); ++i) {
+                QVERIFY2(actual[i] == expected[i], qPrintable(path + " / " + expected[i].toMap().value("selector").toString()
+                    + "\nactual: " + QJsonDocument::fromVariant(actual[i]).toJson(QJsonDocument::Compact)
+                    + "\nexpected: " + QJsonDocument::fromVariant(expected[i]).toJson(QJsonDocument::Compact)));
+            }
+            QCOMPARE(javascript(output, "document.querySelector('figure img').getBoundingClientRect().width").toInt(), 40);
+            QCOMPARE(javascript(output, "document.querySelector('figure img').getBoundingClientRect().height").toInt(), 20);
+            QCOMPARE(javascript(output, "document.querySelectorAll('.diagram img').length").toInt(), 4);
+            QCOMPARE(javascript(output, "document.querySelectorAll('.math-inline').length").toInt(), 1);
+            QVERIFY(javascript(output, "[...document.querySelectorAll('.qsnote-article img')].every(image => image.complete && image.naturalWidth > 0)").toBool());
+            QVERIFY(javascript(output, "!document.querySelector('.qsnote-article [onclick]')").toBool());
+        }
     }
 
     void markdownFormattingAndUndo() {

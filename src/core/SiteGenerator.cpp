@@ -1,4 +1,5 @@
 #include "StaticSite.h"
+#include "ArticleRenderer.h"
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
@@ -12,10 +13,7 @@
 #include <QTemporaryDir>
 #include <QUrl>
 #include <algorithm>
-#include <cstdlib>
-#include <memory>
 #include <utility>
-#include <cmark.h>
 
 namespace {
 struct Page {
@@ -108,19 +106,7 @@ bool frontMatter(QString &body, QJsonObject &metadata, QString *error) {
     return true;
 }
 
-QString nodeText(cmark_node *node) {
-    QString text;
-    const std::unique_ptr<cmark_iter, decltype(&cmark_iter_free)> iter(cmark_iter_new(node), cmark_iter_free);
-    while (cmark_iter_next(iter.get()) != CMARK_EVENT_DONE) {
-        auto *current = cmark_iter_get_node(iter.get());
-        if (cmark_iter_get_event_type(iter.get()) != CMARK_EVENT_ENTER) continue;
-        const auto type = cmark_node_get_type(current);
-        if (type == CMARK_NODE_HTML_INLINE || type == CMARK_NODE_HTML_BLOCK) continue;
-        if (const auto *literal = cmark_node_get_literal(current)) text += QString::fromUtf8(literal);
-        if (type == CMARK_NODE_PARAGRAPH || type == CMARK_NODE_HEADING || type == CMARK_NODE_SOFTBREAK || type == CMARK_NODE_LINEBREAK) text += ' ';
-    }
-    return text.trimmed();
-}
+
 
 QString comments(const Notebook &book, const Page &page) {
     if (!page.post || !page.comments) return {};
@@ -198,7 +184,7 @@ public:
             links_[QDir::cleanPath(file)] = page.route;
             pages_.append(page);
         }
-        for (auto &page: pages_) render(page);
+        for (auto &page: pages_) if (!render(page)) return false;
         QList<const Page *> posts;
         QMap<QString, QList<const Page *>> categories, tags, archives;
         for (const auto &page: pages_) if (page.post) posts.append(&page);
@@ -259,6 +245,7 @@ public:
             (page.post ? insightPosts : insightPages).append(entry);
         }
         if (!write("content.json", QJsonDocument(QJsonObject{{"posts", insightPosts}, {"pages", insightPages}}).toJson(QJsonDocument::Compact))) return false;
+        if (!write("css/qsnote-article.css", ArticleRenderer::stylesheet().toUtf8())) return false;
         const auto assets = ":/site/" + QString(stellar() ? "stellar" : "pure") + "/assets";
         QDirIterator resources(assets, QDir::Files, QDirIterator::Subdirectories);
         while (resources.hasNext()) {
@@ -296,13 +283,13 @@ private:
         return true;
     }
     [[nodiscard]] QString href(const QString &route) const { return urlPath(root_ + route); }
-    void render(Page &page) {
-        const auto data = page.body.toUtf8();
-        const std::unique_ptr<cmark_node, decltype(&cmark_node_free)> document(cmark_parse_document(data.constData(), size_t(data.size()), CMARK_OPT_DEFAULT), cmark_node_free);
-        const std::unique_ptr<cmark_iter, decltype(&cmark_iter_free)> iter(cmark_iter_new(document.get()), cmark_iter_free);
-        page.text = nodeText(document.get());
-        QMap<QString, int> headings;
-        QList<cmark_node *> codeBlocks;
+    bool render(Page &page) {
+        QDomDocument document;
+        if (!renderer_.render(page.body, document, error_)) {
+            *error_ = page.title + "：" + *error_;
+            return false;
+        }
+        page.text = document.documentElement().text();
         struct Heading { int level; QString markup; bool children = false; };
         QList<Heading> toc;
         const auto closeHeading = [&] {
@@ -315,67 +302,43 @@ private:
                 toc.last().markup += markup;
             }
         };
-        while (cmark_iter_next(iter.get()) != CMARK_EVENT_DONE) {
-            if (cmark_iter_get_event_type(iter.get()) != CMARK_EVENT_ENTER) continue;
-            auto *node = cmark_iter_get_node(iter.get());
-            const auto type = cmark_node_get_type(node);
-            if (type == CMARK_NODE_HEADING) {
-                const auto title = nodeText(node);
-                auto id = title.trimmed().replace(QRegularExpression("\\s+"), "-");
-                if (id.isEmpty()) id = "section";
-                const auto count = headings[id]++;
-                if (count) id += "-" + QString::number(count);
-                const auto level = cmark_node_get_heading_level(node);
+        const auto elements = ArticleRenderer::elements(document);
+        for (auto node: elements) {
+            const auto tag = node.tagName();
+            if (QRegularExpression("^h[1-6]$").match(tag).hasMatch()) {
+                const auto title = node.text();
+                const auto id = node.attribute("id");
+                const auto level = tag.mid(1).toInt();
                 while (!toc.isEmpty() && toc.last().level >= level) closeHeading();
                 toc.append({level, "<li class=\"toc-item toc-level-" + QString::number(level) + R"("><a class="toc-link" href="#)" + escaped(urlPath(id)) + R"("><span class="toc-text">)" + escaped(title) + "</span></a>"});
-                auto *anchor = cmark_node_new(CMARK_NODE_HTML_INLINE);
-                const auto markup = "<a id=\"" + escaped(id) + "\"></a>";
-                cmark_node_set_literal(anchor, markup.toUtf8().constData());
-                cmark_node_prepend_child(node, anchor);
             }
-            if (type == CMARK_NODE_CODE_BLOCK) {
-                const auto language = QString::fromUtf8(cmark_node_get_fence_info(node)).section(' ', 0, 0);
-                auto code = QString::fromUtf8(cmark_node_get_literal(node));
-                if (code.endsWith('\n')) code.chop(1);
-                QString gutter, lines;
-                const auto split = code.split('\n');
-                for (int line = 0; line < split.size(); ++line) {
-                    gutter += "<span class=\"line\">" + QString::number(line + 1) + "</span><br>";
-                    lines += "<span class=\"line\">" + escaped(split[line]) + "</span>" + (line + 1 < split.size() ? "\n" : "");
-                }
-                const auto markup = "<figure class=\"highlight " + escaped(language) + " language-" + escaped(language) + "\" data-language=\"" + escaped(language) + R"("><table><tbody><tr><td class="gutter"><pre>)" + gutter + "</pre></td><td class=\"code\"><pre>" + lines + "</pre></td></tr></tbody></table></figure>";
-                auto *block = cmark_node_new(CMARK_NODE_HTML_BLOCK);
-                cmark_node_set_literal(block, markup.toUtf8().constData());
-                cmark_node_insert_before(node, block);
-                cmark_node_set_literal(node, "");
-                codeBlocks.append(node);
+            if (tag != "a" && tag != "img") continue;
+            const auto attribute = tag == "img" ? "src" : "href";
+            const QUrl original(node.attribute(attribute));
+            if (tag == "img" && node.attribute(attribute).startsWith("data:image/png;base64,")) {
+                const auto encoded = original.toString(QUrl::FullyEncoded).toLatin1();
+                const auto comma = encoded.indexOf(',');
+                const auto bytes = QByteArray::fromBase64(encoded.mid(comma + 1));
+                const auto path = "assets/qsnote/" + QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()) + ".png";
+                if (!outputs_.contains(path) && !write(path, bytes)) return false;
+                node.setAttribute(attribute, href(path));
+                continue;
             }
-            if (type == CMARK_NODE_LINK || type == CMARK_NODE_IMAGE) {
-                const QUrl original(QString::fromUtf8(cmark_node_get_url(node)));
-                if (!original.isRelative() || original.path().isEmpty()) continue;
-                QString target;
-                if (original.path().startsWith('/')) target = href(original.path().mid(1));
-                else {
-                    const auto path = QDir::cleanPath(QFileInfo(page.source).dir().absoluteFilePath(original.path()));
-                    if (links_.contains(path)) target = href(links_[path]);
-                }
-                if (target.isEmpty()) continue;
-                if (original.hasQuery()) target += '?' + original.query(QUrl::FullyEncoded);
-                if (original.hasFragment()) target += '#' + original.fragment(QUrl::FullyEncoded);
-                cmark_node_set_url(node, target.toUtf8().constData());
+            if (!original.isRelative() || original.path().isEmpty()) continue;
+            QString target;
+            if (original.path().startsWith('/')) target = href(original.path().mid(1));
+            else {
+                const auto path = QDir::cleanPath(QFileInfo(page.source).dir().absoluteFilePath(original.path()));
+                if (links_.contains(path)) target = href(links_[path]);
             }
+            if (target.isEmpty()) continue;
+            if (original.hasQuery()) target += '?' + original.query(QUrl::FullyEncoded);
+            if (original.hasFragment()) target += '#' + original.fragment(QUrl::FullyEncoded);
+            node.setAttribute(attribute, target);
         }
         while (!toc.isEmpty()) closeHeading();
-        for (auto *block: codeBlocks) {
-            cmark_node_unlink(block);
-            cmark_node_free(block);
-        }
-        // Local Markdown is authored by the user; preserve its inline HTML like the editor preview.
-        auto *rendered = cmark_render_html(document.get(), CMARK_OPT_UNSAFE);
-        page.html = QString::fromUtf8(rendered);
-        std::free(rendered);
-        page.html.replace(QRegularExpression("<h([1-6])><a id=\"([^\"]*)\"></a>(.*?)</h\\1>"), R"(<h\1 id="\2"><a class="headerlink" href="#\2"></a>\3</h\1>)");
-
+        page.html = ArticleRenderer::html(document);
+        return true;
     }
     [[nodiscard]] bool stellar() const { return book_.config["theme"].toString() == "stellar"; }
     [[nodiscard]] QString themeTemplate(const QString &name, QMap<QString, QString> values = {}) const {
@@ -542,6 +505,7 @@ private:
             values["recentWidget"] = route == "about/" || allPosts_.isEmpty() ? QString() : themeTemplate("recentWidget", values);
         }
         auto markup = themeTemplate("shell", values);
+        markup.replace("</head>", R"(<link rel="stylesheet" href=")" + escaped(href("css/qsnote-article.css")) + "\"></head>");
         if (stellar()) {
             const auto menu = route.startsWith("links/") ? "links" : route.startsWith("about/") ? "about" : "post";
             markup.replace(QString("data-menu=\"") + menu + "\"", QString(R"(aria-current="page" data-menu=")") + menu + "\"");
@@ -594,6 +558,7 @@ private:
     const Notebook &book_;
     QString output_;
     QString *error_;
+    ArticleRenderer renderer_;
     QString root_;
     QList<Page> pages_;
     QMap<QString, QString> links_;

@@ -1,0 +1,23 @@
+@import url("highlight.css");
+/* Shared article typography. Repeated class specificity overrides the bundled
+   themes only inside article content, including their nested heading rules. */
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article { display: block; font: 16px/1.75 system-ui, sans-serif; color: #24292f; background: white; overflow-wrap: anywhere; text-align: left; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article :where(*):not(:where(.katex, .katex *, .diagram *, .token, .vx-heading-fold-toggle, .vx-heading-fold-content, .code-toolbar, .toolbar, .toolbar *)) { all: revert; box-sizing: content-box; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article :where(*):not(:where(.katex, .katex *, .diagram *, .token, .vx-heading-fold-toggle, .vx-heading-fold-content, .code-toolbar, .toolbar, .toolbar *))::before,.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article :where(*):not(:where(.katex, .katex *, .diagram *, .token, .vx-heading-fold-toggle, .vx-heading-fold-content, .code-toolbar, .toolbar, .toolbar *))::after { content: normal; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article h1,.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article h2,.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article h3,.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article h4,.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article h5,.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article h6 { line-height: 1.35; margin: 1.2em 0 .6em; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article h1 { font-size: 1.5em; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article h1,.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article h2 { padding-bottom: .25em; border-bottom: 1px solid #e3e5e8; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article a { color: #3567c7; }.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article img,.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article svg { max-width: 100%; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article pre { padding: 16px; overflow: auto; background: #f6f7f9; border-radius: 6px; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article code { font-family: monospace; background: #f6f7f9; }.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article pre code { overflow-wrap: normal; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article blockquote { margin-left: 0; padding-left: 16px; border-left: 4px solid #d8dce2; color: #656d76; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article table { border-collapse: collapse; display: block; overflow-x: auto; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article td,.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article th { padding: 6px 12px; border: 1px solid #d8dce2; }.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article th { background: #f6f7f9; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .task-list-item { list-style: none; }.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article input[type=checkbox] { margin-right: .6em; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article figure { margin: 1em 0; }.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article figcaption { text-align: center; color: #656d76; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article eqn { display: block; overflow-x: auto; }.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article aside { padding: 12px; background: #eef4ff; border-left: 4px solid #3b6fd4; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article eq .katex-display { display: inline-block; margin: 0; vertical-align: middle; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .diagram { overflow: auto; margin: 16px 0; text-align: center; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .render-error { color: #b42318; white-space: pre-wrap; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .math-inline { vertical-align: middle; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .math-display { display: block; margin: 1em auto; }
