@@ -18,7 +18,7 @@
 #include <QUuid>
 #include <QWebEnginePage>
 #include <QWebEngineSettings>
-#include <QtGui/private/qzipwriter_p.h>
+#include <private/qzipwriter_p.h>
 
 namespace {
 QString bookStyle() {

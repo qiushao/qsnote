@@ -33,6 +33,13 @@ target_include_directories(qsnote PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(qsnote PRIVATE Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Widgets Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Network Qt6::Xml VTextEdit)
 target_compile_definitions(qsnote PRIVATE APP_VERSION="${APP_VERSION}")
 
+if (WIN32)
+    add_custom_command(TARGET qsnote POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_FILE:VTextEdit> $<TARGET_FILE_DIR:qsnote>
+            VERBATIM)
+endif ()
+
 set_target_properties(qsnote PROPERTIES
         MACOSX_BUNDLE_BUNDLE_NAME "qsnote"
         MACOSX_BUNDLE_GUI_IDENTIFIER "com.qiushao.qsnote"

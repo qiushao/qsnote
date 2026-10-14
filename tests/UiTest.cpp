@@ -5,7 +5,7 @@
 #include "ui/MarkdownEditor.h"
 #include "ui/MarkdownPreview.h"
 #include "ui/InplacePreview.h"
-#include <QtGui/private/qzipreader_p.h>
+#include <private/qzipreader_p.h>
 #include <QBuffer>
 #include <QWebEnginePage>
 #include <QWebEngineView>

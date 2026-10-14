@@ -20,6 +20,9 @@ if (WIN32 AND DEFINED ENV{Qt6_DIR})
 endif ()
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network WebEngineWidgets WebChannel Xml)
+if (NOT TARGET Qt6::GuiPrivate)
+    find_package(Qt6GuiPrivate REQUIRED)
+endif ()
 
 option(QSNOTE_CLANG_TIDY_ENABLE "Run clang-tidy" ON)
 if (QSNOTE_CLANG_TIDY_ENABLE AND CMAKE_SYSTEM_NAME STREQUAL "Linux")

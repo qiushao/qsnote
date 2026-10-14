@@ -11,7 +11,7 @@
 #include <QTcpSocket>
 #include <QTest>
 #include <QXmlStreamReader>
-#include <QtGui/private/qzipreader_p.h>
+#include <private/qzipreader_p.h>
 
 namespace {
 QByteArray readFile(const QString &path) {

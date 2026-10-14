@@ -37,7 +37,7 @@ open build/src/qsnote.app
 
 ## Windows
 
-安装 CMake、Visual Studio 2022 C++ 工具链及 Qt 6 MSVC 套件，在 PowerShell 中执行（路径替换为实际 Qt 安装位置）：
+安装 CMake、Visual Studio 2022 C++ 工具链及 Qt 6 MSVC 套件。在 Qt MaintenanceTool 中为同一 Qt 版本和 MSVC 架构安装 Qt WebEngine、Qt WebChannel、Qt Positioning 和 Qt 5 Compatibility 附加组件；仅安装桌面基础套件不足以构建本项目。在 PowerShell 中执行（路径替换为实际 Qt 安装位置）：
 
 ```powershell
 $env:Qt6_DIR = "C:/Qt/6.8.3/msvc2022_64"
@@ -46,6 +46,8 @@ cmake --build build --config Release --parallel
 & "$env:Qt6_DIR/bin/windeployqt.exe" build/src/Release/qsnote.exe
 ./build/src/Release/qsnote.exe
 ```
+
+如果 CMake 报 `Failed to find required Qt component "WebEngineWidgets"`，请先补装上述组件，再重新运行配置；CLion 中执行 Reload CMake Project。使用 Ninja 时，还需要在 MSVC Developer PowerShell 中构建，或在 CLion 中选择 Visual Studio 工具链，使编译器能找到 Windows SDK 头文件和库。
 
 安装规则包含应用和 VTextEdit 动态库；分发 macOS / Windows 应用时，需要使用 Qt 的 `macdeployqt` / `windeployqt` 部署运行时。
 
