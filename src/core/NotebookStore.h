@@ -1,6 +1,7 @@
 #ifndef QSNOTE_NOTEBOOKSTORE_H
 #define QSNOTE_NOTEBOOKSTORE_H
 
+#include <QHash>
 #include <QJsonObject>
 #include <QList>
 #include <QString>
@@ -38,6 +39,7 @@ public:
     Notebook *owner(const QString &noteId);
     static QString newId();
     static QString typeLabel(const QString &type);
+    static QHash<QString, QString> chapterTitles(const Notebook &book);
     static QString storagePath();
     static QString indexFileName();
     static QString sanitized(const QString &name);

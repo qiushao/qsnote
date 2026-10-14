@@ -1470,24 +1470,77 @@ st->e
         runAction(nullptr, "添加章节", "第一章");
         runAction(nullptr, "添加章节", "第二章");
         QCOMPARE(tree->topLevelItemCount(), 2);
+        auto *numbering = window.findChild<QCheckBox *>("autoNumberChapters");
+        QVERIFY(numbering && numbering->isVisible());
+        QVERIFY(!numbering->isChecked());
+        numbering->click();
+        QCOMPARE(tree->topLevelItem(1)->text(0), QString("2 第二章"));
         runAction(tree->topLevelItem(1), "缩进为子章节");
         QCOMPARE(tree->topLevelItemCount(), 1);
         QCOMPARE(tree->topLevelItem(0)->childCount(), 1);
+        QCOMPARE(tree->topLevelItem(0)->child(0)->text(0), QString("1.1 第二章"));
         runAction(tree->topLevelItem(0)->child(0), "提升层级");
         QCOMPARE(tree->topLevelItemCount(), 2);
         runAction(tree->topLevelItem(1), "上移");
-        QCOMPARE(tree->topLevelItem(0)->text(0), QString("第二章"));
+        QCOMPARE(tree->topLevelItem(0)->text(0), QString("1 第二章"));
         runAction(tree->topLevelItem(0), "添加子章节", "子章节");
         QCOMPARE(tree->topLevelItem(0)->childCount(), 1);
         QTest::qWait(30);
         window.grab().save("ebook-wide.png");
         runAction(tree->topLevelItem(0)->child(0), "提升层级");
         QCOMPARE(tree->topLevelItemCount(), 3);
-        QCOMPARE(tree->topLevelItem(1)->text(0), QString("子章节"));
+        QCOMPARE(tree->topLevelItem(1)->text(0), QString("2 子章节"));
         NotebookStore reloaded;
         QVERIFY2(reloaded.load(&error), qPrintable(error));
         QCOMPARE(reloaded.notebooks[0].notes.size(), 2);
         QCOMPARE(reloaded.notebooks[1].notes.size(), 3);
+        QVERIFY(reloaded.notebooks[1].config["autoNumberChapters"].toBool());
+        QCOMPARE(reloaded.notebooks[1].notes.first().title, QString("第二章"));
+        numbering->click();
+        QCOMPARE(tree->topLevelItem(0)->text(0), QString("第二章"));
+        QVERIFY2(reloaded.load(&error), qPrintable(error));
+        QVERIFY(!reloaded.notebooks[1].config["autoNumberChapters"].toBool());
+    }
+
+    void ebookNumberingPersistsPerBookAndInSearch() {
+        NotebookStore fixture;
+        fixture.notebooks.append({"numbered", "编号书", "ebook", {
+            {"parent", {}, "父章节", "正文", false, {}},
+            {"child", "parent", "子章节", "正文", false, {}}
+        }, {{"autoNumberChapters", true}}, fixturePath("numbered")});
+        fixture.notebooks.append({"plain", "未编号书", "ebook", {
+            {"plain-note", {}, "另一章节", "正文", false, {}}
+        }, {}, fixturePath("plain")});
+        fixture.notebooks.append({"normal", "普通笔记", "normal", {}, {}, fixturePath("normal")});
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.resize(1280, 800);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *books = window.findChild<QComboBox *>("notebooks");
+        auto *numbering = window.findChild<QCheckBox *>("autoNumberChapters");
+        auto *tree = window.findChild<QTreeWidget *>("noteTree");
+        books->setCurrentIndex(0);
+        QVERIFY(numbering->isChecked());
+        QCOMPARE(tree->topLevelItem(0)->child(0)->text(0), QString("1.1 子章节"));
+        auto *search = window.findChild<QLineEdit *>("search");
+        search->setText("子章节");
+        QCOMPARE(tree->topLevelItemCount(), 1);
+        QCOMPARE(tree->topLevelItem(0)->text(0), QString("1.1 子章节"));
+        search->clear();
+        books->setCurrentIndex(1);
+        QVERIFY(numbering->isVisible());
+        QVERIFY(!numbering->isChecked());
+        QCOMPARE(tree->topLevelItem(0)->text(0), QString("另一章节"));
+        books->setCurrentIndex(2);
+        QVERIFY(!numbering->isVisible());
+        books->setCurrentIndex(0);
+        QVERIFY(numbering->isChecked());
+        QCOMPARE(tree->topLevelItem(0)->text(0), QString("1 父章节"));
+        Notebook restored;
+        QVERIFY2(NotebookStore::readNotebook(fixturePath("numbered"), restored, &error), qPrintable(error));
+        QVERIFY(restored.config["autoNumberChapters"].toBool());
     }
 
     void closeAndReopenNotebook() {

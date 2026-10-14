@@ -25,6 +25,7 @@ QString bookStyle() {
     return ArticleRenderer::stylesheet() + QStringLiteral(
         "body{margin:32px auto;padding:0 24px;max-width:900px;font:16px/1.75 system-ui,sans-serif;color:#24292f;}"
         ".chapter{page-break-before:always;}h1,h2,h3{page-break-after:avoid;}"
+        "nav ol{list-style:none;}"
         "@media print{body{margin:0;max-width:none;padding:0;}pre,table,.diagram{break-inside:avoid;}}");
 }
 
@@ -47,6 +48,7 @@ struct Chapter {
     const Note *note;
     int depth;
     QString anchor;
+    QString title;
 };
 
 QString contents(const QList<Chapter> &chapters, bool chm) {
@@ -65,10 +67,10 @@ QString contents(const QList<Chapter> &chapters, bool chm) {
         if (!child) result += "</li>";
         const auto target = "book.html#" + chapter.anchor;
         if (chm) {
-            result += R"(<li><object type="text/sitemap"><param name="Name" value=")" + chapter.note->title.toHtmlEscaped()
+            result += R"(<li><object type="text/sitemap"><param name="Name" value=")" + chapter.title.toHtmlEscaped()
                     + R"("><param name="Local" value=")" + target + "\"></object>";
         } else {
-            result += "<li><a href=\"" + target + "\">" + chapter.note->title.toHtmlEscaped() + "</a>";
+            result += "<li><a href=\"" + target + "\">" + chapter.title.toHtmlEscaped() + "</a>";
         }
     }
     while (depth-- >= 0) result += chm ? "</li></ul>" : "</li></ol>";
@@ -91,7 +93,7 @@ QString ncx(const QString &title, const QString &uid, const QList<Chapter> &chap
         while (depth > chapter.depth) { result += "</navPoint>"; --depth; }
         if (!child) result += "</navPoint>";
         result += "<navPoint id=\"" + chapter.anchor + "\" playOrder=\"" + QString::number(i + 1) + "\"><navLabel><text>"
-                + chapter.note->title.toHtmlEscaped() + "</text></navLabel><content src=\"book.xhtml#" + chapter.anchor + "\"/>";
+                + chapter.title.toHtmlEscaped() + "</text></navLabel><content src=\"book.xhtml#" + chapter.anchor + "\"/>";
     }
     while (depth-- >= 0) result += "</navPoint>";
     return result + "</navMap></ncx>";
@@ -186,7 +188,7 @@ bool addPdfBookmarks(const QString &path, const QList<Chapter> &chapters, QStrin
                    + "\n/Last " + reference(outlineId + children[0].last()) + "\n>>");
     for (const auto &chapter: chapters) {
         QByteArray title = QByteArray::fromHex("feff");
-        for (const auto character: chapter.note->title) {
+        for (const auto character: chapter.title) {
             title.append(char(character.unicode() >> 8));
             title.append(char(character.unicode() & 0xff));
         }
@@ -300,6 +302,8 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
         *error = noteId.isEmpty() ? "电子书中没有可导出的章节。" : "请选择当前电子书中的文档。";
         return {};
     }
+    const auto titles = NotebookStore::chapterTitles(book);
+    for (auto &chapter: chapters) chapter.title = titles.value(chapter.note->id);
     const auto title = noteId.isEmpty() ? book.name : chapters.first().note->title;
     QTemporaryDir staging;
     if (!staging.isValid()) { *error = "无法创建导出临时目录。"; return {}; }
@@ -357,7 +361,7 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
             }
             if (!replacement.isEmpty()) node.setAttribute(attribute, replacement);
         }
-        body += R"(<div class="chapter" id=")" + chapter.anchor + "\"><h1>" + note.title.toHtmlEscaped() + "</h1>" + ArticleRenderer::html(document) + "</div>";
+        body += R"(<div class="chapter" id=")" + chapter.anchor + "\"><h1>" + chapter.title.toHtmlEscaped() + "</h1>" + ArticleRenderer::html(document) + "</div>";
     }
     auto html = page(title, body);
     QString extension;

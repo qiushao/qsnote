@@ -38,6 +38,80 @@ Notebook fixture(const QString &root) {
 class EbookExporterTest : public QObject {
     Q_OBJECT
 private slots:
+    void chapterNumbering_data() { // NOLINT(readability-identifier-naming)
+        QTest::addColumn<int>("format");
+        QTest::addColumn<bool>("numbered");
+        QTest::addColumn<bool>("single");
+        for (const auto format: {EbookExporter::Format::Html, EbookExporter::Format::Epub,
+                                EbookExporter::Format::Pdf, EbookExporter::Format::Chm}) {
+            for (bool numbered: {false, true}) {
+                for (bool single: {false, true}) {
+                    QTest::newRow(qPrintable(QString("%1-%2-%3").arg(int(format)).arg(numbered).arg(single)))
+                        << int(format) << numbered << single;
+                }
+            }
+        }
+    }
+
+    void chapterNumbering() {
+        QFETCH(int, format);
+        QFETCH(bool, numbered);
+        QFETCH(bool, single);
+        const auto exportFormat = EbookExporter::Format(format);
+        if (exportFormat == EbookExporter::Format::Chm && EbookExporter::chmCompiler().isEmpty()) QSKIP("Install a CHM compiler");
+        QTemporaryDir source;
+        QTemporaryDir destination;
+        auto book = fixture(source.path());
+        book.notes.append({"deep", "two", "深层 & 章节", "深层正文", false, {}, "deep.md"});
+        book.notes.append({"sibling", "one", "同级章节", "同级正文", false, {}, "sibling.md"});
+        book.config["autoNumberChapters"] = numbered;
+        const QStringList numbers = single ? QStringList{"1.1.1"} : QStringList{"1", "1.1", "1.1.1", "1.2", "2", "3", "3.1"};
+        const QStringList titles = single ? QStringList{"深层 & 章节"}
+            : QStringList{"第一章", "第二章", "深层 & 章节", "同级章节", "末章", "分组", "第三章"};
+        QString error;
+        const auto output = EbookExporter::exportBook(book, single ? "deep" : QString(), exportFormat, destination.path(), &error);
+        QVERIFY2(!output.isEmpty(), qPrintable(error));
+        QString html;
+        QString navigation;
+        QString ncx;
+        if (exportFormat == EbookExporter::Format::Epub) {
+            QZipReader zip(output);
+            html = QString::fromUtf8(zip.fileData("book.xhtml"));
+            navigation = QString::fromUtf8(zip.fileData("nav.xhtml"));
+            ncx = QString::fromUtf8(zip.fileData("toc.ncx"));
+        } else if (exportFormat == EbookExporter::Format::Chm) {
+            if (QStandardPaths::findExecutable("7z").isEmpty()) QSKIP("Install 7z to inspect CHM numbering");
+            QProcess process;
+            process.start("7z", {"x", "-so", output, "book.html"});
+            QVERIFY(process.waitForFinished());
+            QCOMPARE(process.exitCode(), 0);
+            html = QString::fromUtf8(process.readAllStandardOutput());
+        } else if (exportFormat == EbookExporter::Format::Html) {
+            html = QString::fromUtf8(readFile(output));
+        }
+        const auto pdf = exportFormat == EbookExporter::Format::Pdf ? readFile(output) : QByteArray();
+        for (int i = 0; i < titles.size(); ++i) {
+            const auto title = (numbered ? numbers[i] + " " : QString()) + titles[i];
+            if (exportFormat == EbookExporter::Format::Pdf) {
+                QByteArray encoded = QByteArray::fromHex("feff");
+                for (const auto character: title) {
+                    encoded.append(char(character.unicode() >> 8));
+                    encoded.append(char(character.unicode() & 0xff));
+                }
+                QVERIFY(pdf.contains("/Title <" + encoded.toHex() + ">"));
+            } else {
+                QVERIFY(html.contains("<h1>" + title.toHtmlEscaped() + "</h1>"));
+                QVERIFY(html.contains("#chapter-" + QString::number(i + 1) + "\">" + title.toHtmlEscaped() + "</a>"));
+                QVERIFY(html.contains("nav ol{list-style:none;}"));
+            }
+            if (exportFormat == EbookExporter::Format::Epub) {
+                QVERIFY(navigation.contains(">" + title.toHtmlEscaped() + "</a>"));
+                QVERIFY(ncx.contains("<text>" + title.toHtmlEscaped() + "</text>"));
+            }
+        }
+        QCOMPARE(book.notes[5].title, QString("深层 & 章节"));
+    }
+
     void htmlScopeOrderAssetsAndCollisions() {
         QTemporaryDir source;
         QTemporaryDir destination;

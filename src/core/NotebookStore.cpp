@@ -42,6 +42,26 @@ QString NotebookStore::typeLabel(const QString &type) {
     return QStringLiteral("普通笔记本");
 }
 
+QHash<QString, QString> NotebookStore::chapterTitles(const Notebook &book) {
+    QHash<QString, QString> titles;
+    for (const auto &note: book.notes) titles.insert(note.id, note.title);
+    if (book.type != "ebook" || !book.config["autoNumberChapters"].toBool()) return titles;
+    QList<QPair<QString, QString>> pending{{QString(), QString()}};
+    QSet<QString> visited;
+    while (!pending.isEmpty()) {
+        const auto entry = pending.takeLast();
+        int index = 0;
+        for (const auto &note: book.notes) {
+            if (note.parentId != entry.first || visited.contains(note.id)) continue;
+            visited.insert(note.id);
+            const auto number = entry.second + QString::number(++index);
+            titles[note.id] = number + " " + note.title;
+            pending.append({note.id, number + "."});
+        }
+    }
+    return titles;
+}
+
 QString NotebookStore::storagePath() { return storageDir() + "/notebooks.json"; }
 
 QString NotebookStore::indexFileName() { return QStringLiteral("_index.json"); }

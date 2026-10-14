@@ -9,6 +9,7 @@
 
 class MarkdownEditor;
 class MarkdownPreview;
+class QCheckBox;
 class QComboBox;
 class QLabel;
 class QLineEdit;
@@ -115,6 +116,7 @@ private:
     QPushButton *siteConfig_ = nullptr;
     QPushButton *sitePreview_ = nullptr;
     QPushButton *export_ = nullptr;
+    QCheckBox *autoNumberChapters_ = nullptr;
     QPushButton *editMode_ = nullptr;
     QPushButton *previewMode_ = nullptr;
     QPushButton *splitMode_ = nullptr;

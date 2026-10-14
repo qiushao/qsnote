@@ -428,6 +428,10 @@ void MainWindow::buildUi() {
     auto *siteActions = new QWidget(header);
     siteActions->setObjectName("siteActions");
     auto *siteActionsLayout = new FlowLayout(siteActions, 0, 6);
+    autoNumberChapters_ = new QCheckBox("章节自动编号", siteActions);
+    autoNumberChapters_->setObjectName("autoNumberChapters");
+    autoNumberChapters_->setToolTip("按章节层级显示 1、1.1、1.2 等编号，同时应用于电子书导出");
+    siteActionsLayout->addWidget(autoNumberChapters_);
     for (auto *action: {siteConfig_, sitePreview_, export_}) siteActionsLayout->addWidget(action);
     headerLayout->addWidget(siteActions, 1);
     toggleRight_ = button({}, "toggleRight", header);
@@ -663,6 +667,13 @@ void MainWindow::buildUi() {
     connect(siteConfig_, &QPushButton::clicked, this, &MainWindow::showSiteConfig);
     connect(sitePreview_, &QPushButton::clicked, this, &MainWindow::showSitePreview);
     connect(export_, &QPushButton::clicked, this, &MainWindow::exportNotebook);
+    connect(autoNumberChapters_, &QCheckBox::toggled, this, [this](bool checked) {
+        auto *book = store_.notebook(currentNotebookId_);
+        if (!book || book->type != "ebook") return;
+        book->config["autoNumberChapters"] = checked;
+        save();
+        refreshTree();
+    });
     connect(outline_, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *item) {
         const int line = item->data(0, Qt::UserRole).toInt();
         if (previewModeEnabled_) {
@@ -750,6 +761,11 @@ void MainWindow::refreshNotebooks() {
     const bool site = book && book->type == "site";
     siteConfig_->setVisible(site);
     sitePreview_->setVisible(site);
+    autoNumberChapters_->setVisible(book && book->type == "ebook");
+    {
+        const QSignalBlocker numberingBlocker(autoNumberChapters_);
+        autoNumberChapters_->setChecked(book && book->config["autoNumberChapters"].toBool());
+    }
     export_->setVisible(book && book->type != "normal");
     export_->setText(site ? "发布站点" : "导出电子书");
     updatePanels();
@@ -771,6 +787,7 @@ void MainWindow::refreshTree() {
     const auto query = search_->text().trimmed();
     tree_->setDragDropMode(book->type == "normal" && query.isEmpty() ? QAbstractItemView::InternalMove : QAbstractItemView::NoDragDrop);
     QHash<QString, QTreeWidgetItem *> nodes;
+    const auto titles = NotebookStore::chapterTitles(*book);
     int matches = 0;
     for (const auto &note: book->notes) {
         if (!query.isEmpty() && (note.folder || (!note.title.contains(query, Qt::CaseInsensitive) && !note.content.contains(query, Qt::CaseInsensitive)))) continue;
@@ -787,7 +804,7 @@ void MainWindow::refreshTree() {
         }
         for (const auto &group: groups) {
             auto *item = new QTreeWidgetItem;
-            item->setText(0, note.title);
+            item->setText(0, titles.value(note.id));
             if (!note.folder) item->setFlags(item->flags() & ~Qt::ItemIsDropEnabled);
             item->setIcon(0, icon(note.folder ? "folder" : book->type));
             item->setData(0, Qt::UserRole, note.id);
@@ -1061,6 +1078,7 @@ void MainWindow::updatePanels() {
     export_->setText(book && book->type == "site" ? (width() < 600 ? "发布" : "发布站点")
                                                              : (width() < 600 ? "导出" : "导出电子书"));
     int actionWidth = 0;
+    if (!autoNumberChapters_->isHidden()) actionWidth += autoNumberChapters_->sizeHint().width() + 6;
     for (auto *action: {siteConfig_, sitePreview_, export_}) {
         if (!action->isHidden()) actionWidth += action->sizeHint().width() + 6;
     }
