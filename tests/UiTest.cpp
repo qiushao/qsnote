@@ -40,6 +40,7 @@
 #include <vtextedit/previewdata.h>
 #include <vtextedit/previewmgr.h>
 #include <QPushButton>
+#include <QPlainTextEdit>
 #include <QStackedWidget>
 #include <QStandardPaths>
 #include <QTabBar>
@@ -1187,7 +1188,7 @@ st->e
         window.resize(1280, 800);
         window.show();
         QVERIFY(QTest::qWaitForWindowExposed(&window));
-        for (int type = 0; type < 3; ++type) {
+        for (int type = 0; type < 4; ++type) {
             QTimer::singleShot(30, &window, [type] {
                 auto *dialog = QApplication::activeModalWidget();
                 QVERIFY(dialog);
@@ -1198,16 +1199,152 @@ st->e
             });
             QTest::mouseClick(window.findChild<QPushButton *>("newNotebook"), Qt::LeftButton);
             QCOMPARE(window.findChild<QComboBox *>("notebooks")->count(), type + 1);
-            QCOMPARE(window.findChild<QTreeWidget *>("noteTree")->topLevelItemCount(), 0);
+            QCOMPARE(window.findChild<QTreeWidget *>("noteTree")->topLevelItemCount(), type == 3 ? 2 : 0);
             QCOMPARE(window.findChild<QPushButton *>("siteConfig")->isVisible(), type == 1);
-            QCOMPARE(window.findChild<QPushButton *>("exportNotebook")->isVisible(), type != 0);
+            QCOMPARE(window.findChild<QPushButton *>("exportNotebook")->isVisible(), type == 1 || type == 2);
         }
         NotebookStore reloaded;
         QString error;
         QVERIFY2(reloaded.load(&error), qPrintable(error));
-        QCOMPARE(reloaded.notebooks.size(), 3);
+        QCOMPARE(reloaded.notebooks.size(), 4);
         QCOMPARE(reloaded.notebooks.at(1).config["commentPlatform"].toString(), QString("none"));
         for (const auto &book: reloaded.notebooks) QVERIFY(book.notes.isEmpty());
+    }
+
+    void todoCategoriesEditingAndPersistence() {
+        NotebookStore fixture;
+        fixture.notebooks.append({"todo", "待办", "todo", {}, {}, fixturePath("todo")});
+        fixture.notebooks.append({"normal", "笔记", "normal", {{"note", {}, "普通笔记", "正文"}}, {}, fixturePath("todo-normal")});
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.resize(1280, 800);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *tree = window.findChild<QTreeWidget *>("noteTree");
+        auto *list = window.findChild<QTreeWidget *>("todoList");
+        auto *status = window.findChild<QComboBox *>("todoStatus");
+        auto *category = window.findChild<QComboBox *>("todoCategory");
+        auto *content = window.findChild<QPlainTextEdit *>("todoContent");
+        auto *title = window.findChild<QLineEdit *>("todoTitle");
+        auto *completed = window.findChild<QCheckBox *>("todoCompleted");
+        auto *details = window.findChild<QWidget *>("todoDetails");
+        auto *books = window.findChild<QComboBox *>("notebooks");
+        QCOMPARE(tree->topLevelItemCount(), 2);
+        QCOMPARE(tree->topLevelItem(0)->text(0), QString("全部"));
+        QCOMPARE(tree->topLevelItem(1)->text(0), QString("默认"));
+        QCOMPARE(status->currentText(), QString("进行中"));
+        QVERIFY(!details->isEnabled());
+        QVERIFY(!window.findChild<QTabBar *>("noteTabs")->isVisible());
+        auto addTodo = [&window](const QString &name) {
+            QTimer::singleShot(20, &window, [name] {
+                auto *dialog = qobject_cast<QInputDialog *>(QApplication::activeModalWidget());
+                QVERIFY(dialog);
+                dialog->setTextValue(name);
+                dialog->accept();
+            });
+            QTest::mouseClick(window.findChild<QPushButton *>("newTodo"), Qt::LeftButton);
+        };
+        addTodo("默认事项");
+        QCOMPARE(list->topLevelItemCount(), 1);
+        QCOMPARE(category->currentText(), QString("默认"));
+        const auto defaultId = list->currentItem()->data(0, Qt::UserRole).toString();
+        QTimer::singleShot(20, &window, [] {
+            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            QVERIFY(menu);
+            QAction *create = nullptr;
+            for (auto *action: menu->actions()) {
+                QVERIFY(action->text() != "删除");
+                if (action->text() == "新建分类") create = action;
+            }
+            QVERIFY(create);
+            QTimer::singleShot(20, menu, [] {
+                auto *dialog = qobject_cast<QInputDialog *>(QApplication::activeModalWidget());
+                QVERIFY(dialog);
+                dialog->setTextValue("工作");
+                dialog->accept();
+            });
+            QTest::mouseClick(menu, Qt::LeftButton, Qt::NoModifier, menu->actionGeometry(create).center());
+        });
+        emit tree->customContextMenuRequested(QPoint(20, tree->height() - 20));
+        QCOMPARE(tree->topLevelItemCount(), 3);
+        QCOMPARE(tree->currentItem()->text(0), QString("工作"));
+        QCOMPARE(list->topLevelItemCount(), 0);
+        QVERIFY(content->toPlainText().isEmpty());
+        addTodo("工作事项");
+        QCOMPARE(category->currentText(), QString("工作"));
+        const auto workId = list->currentItem()->data(0, Qt::UserRole).toString();
+        title->setFocus();
+        title->selectAll();
+        QTest::keyClicks(title, "Review");
+        content->setPlainText("需要保存的详情");
+        tree->setCurrentItem(tree->topLevelItem(0));
+        QCOMPARE(list->topLevelItemCount(), 2);
+        QCOMPARE(title->text(), QString("Review"));
+        QCOMPARE(content->toPlainText(), QString("需要保存的详情"));
+        QTest::mouseClick(completed, Qt::LeftButton, Qt::NoModifier, QPoint(8, completed->height() / 2));
+        QCOMPARE(list->topLevelItemCount(), 1);
+        QCOMPARE(list->currentItem()->data(0, Qt::UserRole).toString(), defaultId);
+        status->setCurrentIndex(1);
+        QCOMPARE(list->topLevelItemCount(), 1);
+        QCOMPARE(title->text(), QString("Review"));
+        QVERIFY(completed->isChecked());
+        tree->setCurrentItem(tree->topLevelItem(1));
+        QCOMPARE(list->topLevelItemCount(), 0);
+        QVERIFY(!details->isEnabled());
+        tree->setCurrentItem(tree->topLevelItem(2));
+        QCOMPARE(list->topLevelItemCount(), 1);
+        list->currentItem()->setCheckState(0, Qt::Unchecked);
+        QTRY_COMPARE(list->topLevelItemCount(), 0);
+        status->setCurrentIndex(0);
+        QCOMPARE(list->topLevelItemCount(), 1);
+        category->setCurrentText("默认");
+        QCOMPARE(list->topLevelItemCount(), 0);
+        tree->setCurrentItem(tree->topLevelItem(1));
+        QCOMPARE(list->topLevelItemCount(), 2);
+        auto *search = window.findChild<QLineEdit *>("search");
+        search->setText("需要保存");
+        QCOMPARE(list->topLevelItemCount(), 1);
+        QCOMPARE(title->text(), QString("Review"));
+        search->clear();
+        books->setCurrentIndex(1);
+        QVERIFY(!status->isVisible());
+        QVERIFY(!details->isVisible());
+        openTreeNote(tree, tree->topLevelItem(0));
+        QCOMPARE(window.findChild<QTabBar *>("noteTabs")->count(), 1);
+        QVERIFY(window.findChild<QTabBar *>("noteTabs")->isVisible());
+        books->setCurrentIndex(0);
+        QVERIFY(status->isVisible());
+        QVERIFY(details->isVisible());
+        QCOMPARE(list->topLevelItemCount(), 2);
+        status->setCurrentIndex(1);
+        addTodo("从已完成中新建");
+        QCOMPARE(status->currentIndex(), 0);
+        QCOMPARE(title->text(), QString("从已完成中新建"));
+        QVERIFY(!completed->isChecked());
+        window.grab().save("todo-list.png");
+        const auto completedId = list->currentItem()->data(0, Qt::UserRole).toString();
+        QTest::mouseClick(completed, Qt::LeftButton, Qt::NoModifier, QPoint(8, completed->height() / 2));
+        QVERIFY(window.close());
+        NotebookStore reloaded;
+        QVERIFY2(reloaded.load(&error), qPrintable(error));
+        QCOMPARE(reloaded.notebook("todo")->notes.size(), 3);
+        QVERIFY(reloaded.note(completedId)->metadata["completed"].toBool());
+        QCOMPARE(reloaded.note(workId)->title, QString("Review"));
+        QCOMPARE(reloaded.note(workId)->content, QString("需要保存的详情"));
+        QCOMPARE(reloaded.note(workId)->metadata["category"].toString(), QString("默认"));
+        QVERIFY(!reloaded.note(workId)->metadata["completed"].toBool());
+        Notebook reopened;
+        QVERIFY2(NotebookStore::readNotebook(fixturePath("todo"), reopened, &error), qPrintable(error));
+        QCOMPARE(reopened.type, QString("todo"));
+        QCOMPARE(reopened.config["categories"].toArray(), QJsonArray{"工作"});
+        QCOMPARE(reopened.notes.size(), 3);
+        MainWindow restored;
+        restored.show();
+        QTRY_COMPARE(restored.findChild<QTabBar *>("noteTabs")->count(), 1);
+        QCOMPARE(restored.findChild<QComboBox *>("notebooks")->currentData().toString(), QString("todo"));
+        QVERIFY(restored.findChild<QWidget *>("todoListPage")->isVisible());
+        QCOMPARE(restored.findChild<QTreeWidget *>("todoList")->topLevelItemCount(), 2);
     }
 
     void editingSearchTabsAndOutline() {

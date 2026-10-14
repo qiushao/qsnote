@@ -57,3 +57,7 @@ QMenu::item:disabled { color: #8a8f98; }
 QMenu::separator { background: #e3e5e8; height: 1px; margin: 4px 8px; }
 QScrollArea { border: none; background: #ffffff; }
 QLabel[heading="true"] { font-weight: 600; border-bottom: 1px solid #e3e5e8; padding-bottom: 6px; margin-top: 12px; }
+
+QTreeWidget#todoList::indicator { width: 13px; height: 13px; border: 1px solid #b9bec7; border-radius: 3px; background: #ffffff; }
+QTreeWidget#todoList::indicator:checked { background: #3b6fd4; border-color: #3b6fd4; }
+QPlainTextEdit#todoContent { border: 1px solid #e3e5e8; border-radius: 6px; background: #ffffff; padding: 8px; selection-background-color: #e8effc; }

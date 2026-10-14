@@ -39,6 +39,7 @@ QString NotebookStore::newId() { return QUuid::createUuid().toString(QUuid::With
 QString NotebookStore::typeLabel(const QString &type) {
     if (type == "site") return QStringLiteral("静态站点");
     if (type == "ebook") return QStringLiteral("电子书");
+    if (type == "todo") return QStringLiteral("Todo List");
     return QStringLiteral("普通笔记本");
 }
 

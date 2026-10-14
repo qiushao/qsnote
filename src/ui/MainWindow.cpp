@@ -41,6 +41,7 @@
 #include <vtextedit/vmarkdowneditor.h>
 #include <vtextedit/texteditutils.h>
 #include <QPushButton>
+#include <QPlainTextEdit>
 #include <QRegularExpression>
 #include <QScreen>
 #include <QScrollArea>
@@ -314,7 +315,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     if (!storageReady_) {
         QTimer::singleShot(0, this, [this, error] { QMessageBox::warning(this, "无法读取笔记", error); });
     }
-    // 恢复上次会话的笔记本与全部标签页；笔记存在时优先以笔记所属笔记本为准。
+    // 恢复上次会话；待办笔记本独立于 Markdown 标签页，其余类型优先恢复笔记所属笔记本。
     QSettings session;
     const auto savedNoteId = session.value("session/noteId").toString();
     const auto savedNotebookId = session.value("session/notebookId").toString();
@@ -328,10 +329,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     }
     const auto *savedNote = store_.note(savedNoteId);
     const auto notebookNoteId = savedNote ? savedNoteId : firstValidNoteId;
-    if (!notebookNoteId.isEmpty()) {
-        if (const auto *owner = store_.owner(notebookNoteId)) currentNotebookId_ = owner->id;
-    } else if (store_.notebook(savedNotebookId)) {
+    const auto *savedBook = store_.notebook(savedNotebookId);
+    if (savedBook && (savedBook->type == "todo" || notebookNoteId.isEmpty())) {
         currentNotebookId_ = savedNotebookId;
+    } else if (!notebookNoteId.isEmpty()) {
+        if (const auto *owner = store_.owner(notebookNoteId)) currentNotebookId_ = owner->id;
     } else if (!store_.notebooks.isEmpty()) {
         currentNotebookId_ = store_.notebooks.first().id;
     }
@@ -437,7 +439,7 @@ void MainWindow::buildUi() {
     toggleRight_ = button({}, "toggleRight", header);
     toggleRight_->setProperty("iconButton", true);
     toggleRight_->setIcon(icon("right"));
-    toggleRight_->setToolTip("收起/展开大纲栏");
+    toggleRight_->setToolTip("收起/展开右侧栏");
     toggleRight_->setAccessibleName(toggleRight_->toolTip());
     headerLayout->addWidget(toggleRight_);
     const QList<QPair<QString, QString>> windowButtons = {{"–", "windowMinimize"}, {"□", "windowMaximize"}, {"×", "windowClose"}};
@@ -491,6 +493,11 @@ void MainWindow::buildUi() {
     groupBy_->setObjectName("groupBy");
     groupBy_->addItems({"按分类", "按标签", "按日期"});
     bodyLayout->addWidget(groupBy_);
+    todoStatus_ = new QComboBox(leftBody);
+    todoStatus_->setObjectName("todoStatus");
+    todoStatus_->setAccessibleName("事项状态筛选");
+    todoStatus_->addItems({"进行中", "已完成"});
+    bodyLayout->addWidget(todoStatus_);
     treeHint_ = label({}, leftBody, true);
     treeHint_->setContentsMargins(10, 14, 10, 0);
     bodyLayout->addWidget(treeHint_);
@@ -553,7 +560,7 @@ void MainWindow::buildUi() {
     empty->setObjectName("emptyState");
     auto *emptyLayout = column(empty, 12, 6);
     emptyLayout->addStretch();
-    for (const auto &text: {"从左侧选择一篇笔记开始", "支持普通笔记本 / 静态站点 / 电子书 三种类型"}) {
+    for (const auto &text: {"从左侧选择一篇笔记开始", "支持普通笔记本 / 静态站点 / 电子书 / Todo List"}) {
         auto *hint = label(text, empty, true);
         hint->setAlignment(Qt::AlignCenter);
         emptyLayout->addWidget(hint);
@@ -622,11 +629,13 @@ void MainWindow::buildUi() {
     outline_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     outline_->setMinimumSize(0, 0);
     rightLayout->addWidget(outline_, 1);
+    buildTodoUi();
     splitter_->setStretchFactor(0, 0);
     splitter_->setStretchFactor(1, 1);
     splitter_->setStretchFactor(2, 0);
     QTimer::singleShot(0, this, [this] {
-        splitter_->setSizes({264, qMax(240, width() - 496), 232});
+        splitter_->setSizes(pages_->currentWidget() == todoListPage_ ? QList<int>{264, 320, qMax(240, width() - 584)}
+                                                                  : QList<int>{264, qMax(240, width() - 496), 232});
     });
     connect(add, &QPushButton::clicked, this, &MainWindow::createNotebook);
     connect(notebooks_, &QComboBox::currentIndexChanged, this, [this] {
@@ -636,6 +645,13 @@ void MainWindow::buildUi() {
     });
     connect(search_, &QLineEdit::textChanged, this, &MainWindow::refreshTree);
     connect(groupBy_, &QComboBox::currentIndexChanged, this, &MainWindow::refreshTree);
+    connect(todoStatus_, &QComboBox::currentIndexChanged, this, [this] { refreshTodoList(); });
+    connect(tree_, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *item) {
+        const auto *book = store_.notebook(currentNotebookId_);
+        if (!book || book->type != "todo" || !item) return;
+        todoCategoryFilter_ = item->data(0, Qt::UserRole).toString();
+        refreshTodoList();
+    });
     connect(tree_, &QTreeWidget::customContextMenuRequested, this, &MainWindow::showTreeMenu);
     connect(tree_, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *item) {
         const auto id = item->data(0, Qt::UserRole).toString();
@@ -747,6 +763,200 @@ void MainWindow::buildToolbar() {
     connect(splitMode_, &QPushButton::clicked, this, [this] { setViewMode(ViewMode::Split); });
 }
 
+void MainWindow::buildTodoUi() {
+    todoListPage_ = new QWidget(pages_);
+    todoListPage_->setObjectName("todoListPage");
+    auto *listLayout = column(todoListPage_, 10, 8);
+    auto *add = button("＋ 新建事项", "newTodo", todoListPage_);
+    listLayout->addWidget(add);
+    todoHint_ = label("暂无进行中的事项", todoListPage_, true);
+    listLayout->addWidget(todoHint_);
+    todoList_ = new QTreeWidget(todoListPage_);
+    todoList_->setObjectName("todoList");
+    todoList_->setHeaderHidden(true);
+    todoList_->setRootIsDecorated(false);
+    todoList_->setMinimumSize(0, 0);
+    listLayout->addWidget(todoList_, 1);
+    pages_->addWidget(todoListPage_);
+
+    todoDetails_ = new QWidget(right_);
+    todoDetails_->setObjectName("todoDetails");
+    auto *detailsLayout = column(todoDetails_, 10, 8);
+    detailsLayout->addWidget(label("事项详情", todoDetails_, true));
+    todoTitle_ = new QLineEdit(todoDetails_);
+    todoTitle_->setObjectName("todoTitle");
+    todoTitle_->setPlaceholderText("事项标题");
+    todoTitle_->setAccessibleName("事项标题");
+    detailsLayout->addWidget(todoTitle_);
+    todoCompleted_ = new QCheckBox("已完成", todoDetails_);
+    todoCompleted_->setObjectName("todoCompleted");
+    detailsLayout->addWidget(todoCompleted_);
+    todoCategory_ = new QComboBox(todoDetails_);
+    todoCategory_->setObjectName("todoCategory");
+    todoCategory_->setAccessibleName("事项分类");
+    detailsLayout->addWidget(label("分类", todoDetails_, true));
+    detailsLayout->addWidget(todoCategory_);
+    todoContent_ = new QPlainTextEdit(todoDetails_);
+    todoContent_->setObjectName("todoContent");
+    todoContent_->setPlaceholderText("选择事项后编辑详情");
+    todoContent_->setAccessibleName("事项详情正文");
+    todoContent_->setMinimumSize(0, 0);
+    detailsLayout->addWidget(todoContent_, 1);
+    right_->layout()->addWidget(todoDetails_);
+    todoDetails_->hide();
+
+    connect(add, &QPushButton::clicked, this, &MainWindow::createTodo);
+    connect(todoList_, &QTreeWidget::currentItemChanged, this, [this] { refreshTodoDetails(); });
+    connect(todoTitle_, &QLineEdit::textEdited, this, [this](const QString &text) {
+        auto *item = todoList_->currentItem();
+        auto *note = item ? store_.note(item->data(0, Qt::UserRole).toString()) : nullptr;
+        if (!note) return;
+        note->title = text.trimmed().isEmpty() ? QStringLiteral("未命名事项") : text.trimmed();
+        item->setText(0, note->title);
+        item->setToolTip(0, note->title);
+        saveTimer_->start();
+    });
+    connect(todoContent_, &QPlainTextEdit::textChanged, this, [this] {
+        const auto *item = todoList_->currentItem();
+        auto *note = item ? store_.note(item->data(0, Qt::UserRole).toString()) : nullptr;
+        if (!note) return;
+        note->content = todoContent_->toPlainText();
+        note->contentDirty = true;
+        saveTimer_->start();
+    });
+    connect(todoCategory_, &QComboBox::currentTextChanged, this, [this](const QString &category) {
+        const auto *item = todoList_->currentItem();
+        auto *note = item ? store_.note(item->data(0, Qt::UserRole).toString()) : nullptr;
+        if (!note) return;
+        note->metadata["category"] = category;
+        save();
+        refreshTodoList();
+    });
+    connect(todoCompleted_, &QCheckBox::toggled, this, [this](bool checked) {
+        const auto *item = todoList_->currentItem();
+        auto *note = item ? store_.note(item->data(0, Qt::UserRole).toString()) : nullptr;
+        if (!note) return;
+        note->metadata["completed"] = checked;
+        save();
+        refreshTodoList();
+    });
+    connect(todoList_, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem *item) {
+        auto *note = store_.note(item->data(0, Qt::UserRole).toString());
+        if (!note || note->metadata["completed"].toBool() == (item->checkState(0) == Qt::Checked)) return;
+        note->metadata["completed"] = item->checkState(0) == Qt::Checked;
+        save();
+        // 等待复选框的鼠标事件处理完毕后再移除当前行。
+        QTimer::singleShot(0, this, [this] { refreshTodoList(); });
+    });
+}
+
+void MainWindow::refreshTodoCategories() {
+    const auto *book = store_.notebook(currentNotebookId_);
+    if (!book || book->type != "todo") return;
+    if (todoNotebookId_ != book->id) {
+        todoNotebookId_ = book->id;
+        todoCategoryFilter_.clear();
+        const QSignalBlocker blocker(todoStatus_);
+        todoStatus_->setCurrentIndex(0);
+    }
+    QStringList categories{QStringLiteral("默认")};
+    for (const auto &value: book->config["categories"].toArray()) categories << value.toString();
+    for (const auto &note: book->notes) categories << note.metadata["category"].toString();
+    categories.removeAll({});
+    categories.removeAll(QStringLiteral("全部"));
+    categories.removeDuplicates();
+    const QSignalBlocker treeBlocker(tree_);
+    const QSignalBlocker categoryBlocker(todoCategory_);
+    tree_->clear();
+    tree_->setDragDropMode(QAbstractItemView::NoDragDrop);
+    groupBy_->hide();
+    treeHint_->hide();
+    todoCategory_->clear();
+    todoCategory_->addItems(categories);
+    categories.prepend(QStringLiteral("全部"));
+    for (const auto &category: categories) {
+        auto *item = new QTreeWidgetItem(tree_, {category});
+        const auto filter = category == "全部" ? QString() : category;
+        item->setData(0, Qt::UserRole, filter);
+        if (filter == todoCategoryFilter_) tree_->setCurrentItem(item);
+    }
+    refreshTodoList();
+}
+
+void MainWindow::refreshTodoList(const QString &selectedId) {
+    const auto *book = store_.notebook(currentNotebookId_);
+    if (!book || book->type != "todo") return;
+    const auto *current = todoList_->currentItem();
+    const auto id = !selectedId.isEmpty() ? selectedId : current ? current->data(0, Qt::UserRole).toString() : QString();
+    const QSignalBlocker blocker(todoList_);
+    todoList_->clear();
+    const auto query = search_->text().trimmed();
+    for (const auto &note: book->notes) {
+        if (note.folder || note.metadata["completed"].toBool() != (todoStatus_->currentIndex() == 1)) continue;
+        if (!todoCategoryFilter_.isEmpty() && note.metadata["category"].toString("默认") != todoCategoryFilter_) continue;
+        if (!query.isEmpty() && !note.title.contains(query, Qt::CaseInsensitive) && !note.content.contains(query, Qt::CaseInsensitive)) continue;
+        auto *item = new QTreeWidgetItem(todoList_, {note.title});
+        item->setData(0, Qt::UserRole, note.id);
+        item->setToolTip(0, note.title);
+        item->setCheckState(0, note.metadata["completed"].toBool() ? Qt::Checked : Qt::Unchecked);
+        if (note.id == id) todoList_->setCurrentItem(item);
+    }
+    if (!todoList_->currentItem() && todoList_->topLevelItemCount()) todoList_->setCurrentItem(todoList_->topLevelItem(0));
+    todoHint_->setText(!query.isEmpty() ? "没有匹配的事项" : todoStatus_->currentIndex() == 0 ? "暂无进行中的事项" : "暂无已完成的事项");
+    todoHint_->setVisible(todoList_->topLevelItemCount() == 0);
+    refreshTodoDetails();
+}
+
+void MainWindow::refreshTodoDetails() {
+    const auto *item = todoList_->currentItem();
+    const auto *note = item ? store_.note(item->data(0, Qt::UserRole).toString()) : nullptr;
+    const QSignalBlocker titleBlocker(todoTitle_);
+    const QSignalBlocker categoryBlocker(todoCategory_);
+    const QSignalBlocker completedBlocker(todoCompleted_);
+    const QSignalBlocker contentBlocker(todoContent_);
+    todoDetails_->setEnabled(note);
+    todoTitle_->setText(note ? note->title : QString());
+    todoCategory_->setCurrentText(note ? note->metadata["category"].toString("默认") : QStringLiteral("默认"));
+    todoCompleted_->setChecked(note && note->metadata["completed"].toBool());
+    todoContent_->setPlainText(note ? note->content : QString());
+}
+
+void MainWindow::createTodo() {
+    auto *book = store_.notebook(currentNotebookId_);
+    if (!book || book->type != "todo") return;
+    bool accepted = false;
+    const auto title = QInputDialog::getText(this, "新建事项", "事项标题：", QLineEdit::Normal, {}, &accepted).trimmed();
+    if (!accepted || title.isEmpty()) return;
+    Note note;
+    note.id = NotebookStore::newId();
+    note.title = title;
+    note.metadata = {{"category", todoCategoryFilter_.isEmpty() ? QStringLiteral("默认") : todoCategoryFilter_}, {"completed", false}};
+    book->notes.append(note);
+    save();
+    search_->clear();
+    todoStatus_->setCurrentIndex(0);
+    refreshTodoList(note.id);
+    todoTitle_->setFocus();
+}
+
+void MainWindow::createTodoCategory() {
+    auto *book = store_.notebook(currentNotebookId_);
+    if (!book || book->type != "todo") return;
+    bool accepted = false;
+    const auto name = QInputDialog::getText(this, "新建分类", "分类名称：", QLineEdit::Normal, {}, &accepted).trimmed();
+    if (!accepted || name.isEmpty()) return;
+    if (name == "全部" || todoCategory_->findText(name) >= 0) {
+        QMessageBox::information(this, "无法新建分类", "该分类已存在，请使用其他名称。");
+        return;
+    }
+    auto categories = book->config["categories"].toArray();
+    categories.append(name);
+    book->config["categories"] = categories;
+    todoCategoryFilter_ = name;
+    save();
+    refreshTodoCategories();
+}
+
 void MainWindow::refreshNotebooks() {
     const QSignalBlocker blocker(notebooks_);
     notebooks_->clear();
@@ -766,13 +976,20 @@ void MainWindow::refreshNotebooks() {
         const QSignalBlocker numberingBlocker(autoNumberChapters_);
         autoNumberChapters_->setChecked(book && book->config["autoNumberChapters"].toBool());
     }
-    export_->setVisible(book && book->type != "normal");
+    export_->setVisible(book && (book->type == "site" || book->type == "ebook"));
     export_->setText(site ? "发布站点" : "导出电子书");
     updatePanels();
-    refreshTree();
+    refreshEditor();
 }
 
 void MainWindow::refreshTree() {
+    const auto *currentBook = store_.notebook(currentNotebookId_);
+    const bool todo = currentBook && currentBook->type == "todo";
+    todoStatus_->setVisible(todo);
+    if (todo) {
+        refreshTodoCategories();
+        return;
+    }
     QSet<QString> collapsed;
     QTreeWidgetItemIterator iterator(tree_);
     while (*iterator) {
@@ -857,9 +1074,16 @@ void MainWindow::refreshTree() {
     treeHint_->setVisible(!query.isEmpty() || book->notes.isEmpty());
 }
 
-QString MainWindow::currentNoteId() const { return tabs_->tabData(tabs_->currentIndex()).toString(); }
+QString MainWindow::currentNoteId() const {
+    for (const auto &book: store_.notebooks) {
+        if (book.id == currentNotebookId_ && book.type == "todo") return {};
+    }
+    return tabs_->tabData(tabs_->currentIndex()).toString();
+}
 
 void MainWindow::openNote(const QString &id) {
+    const auto *owner = store_.owner(id);
+    if (owner && owner->type == "todo") return;
     for (int index = 0; index < tabs_->count(); ++index) {
         if (tabs_->tabData(index).toString() == id) {
             tabs_->setCurrentIndex(index);
@@ -987,6 +1211,28 @@ void MainWindow::removeEditor(const QString &id) {
 }
 
 void MainWindow::refreshEditor() {
+    const auto *book = store_.notebook(currentNotebookId_);
+    const bool todo = book && book->type == "todo";
+    if (todo != (pages_->currentWidget() == todoListPage_)) {
+        splitter_->setStretchFactor(1, todo ? 0 : 1);
+        splitter_->setStretchFactor(2, todo ? 1 : 0);
+        splitter_->setSizes(todo ? QList<int>{264, 320, qMax(240, width() - 584)}
+                                : QList<int>{264, qMax(240, width() - 496), 232});
+    }
+    tabs_->parentWidget()->setVisible(!todo);
+    status_->setVisible(!todo);
+    todoDetails_->setVisible(todo);
+    outline_->setVisible(!todo);
+    right_->findChild<QWidget *>("panelHeader")->setVisible(!todo);
+    for (auto *mode: {editMode_, previewMode_, splitMode_}) mode->setVisible(!todo);
+    if (todo) {
+        toolbar_->hide();
+        outlineHint_->hide();
+        previewTimer_->stop();
+        pages_->setCurrentWidget(todoListPage_);
+        refreshTree();
+        return;
+    }
     const auto id = currentNoteId();
     const auto *note = store_.note(id);
     toolbar_->setVisible(note);
@@ -1045,6 +1291,8 @@ void MainWindow::setViewMode(ViewMode mode) {
 }
 
 void MainWindow::refreshOutline() {
+    const auto *book = store_.notebook(currentNotebookId_);
+    if (book && book->type == "todo") return;
     outline_->clear();
     const auto *note = store_.note(currentNoteId());
     outlineHint_->setText(note ? "本文暂无标题" : "打开一篇笔记后自动生成大纲");
@@ -1194,6 +1442,7 @@ void MainWindow::createNotebook() {
     type->addItem("普通笔记本（目录 + 元数据文件）", "normal");
     type->addItem("静态站点（Pure）", "site");
     type->addItem("电子书（章节目录 · 多格式导出）", "ebook");
+    type->addItem("Todo List（分类 · 待办事项）", "todo");
     QString locationRoot = NotebookStore::defaultRoot();
     auto *location = new QLineEdit(&dialog);
     location->setObjectName("notebookLocation");
@@ -1391,6 +1640,14 @@ void MainWindow::showTreeMenu(const QPoint &position) {
     const auto id = item ? item->data(0, Qt::UserRole).toString() : QString();
     auto *note = store_.note(id);
     QMenu menu(this);
+    if (book && book->type == "todo") {
+        menu.addAction("新建分类", this, &MainWindow::createTodoCategory);
+        menu.addSeparator();
+        menu.addAction("打开笔记本…", this, &MainWindow::openNotebook);
+        menu.addAction("关闭笔记本", this, &MainWindow::closeNotebook);
+        menu.exec(tree_->viewport()->mapToGlobal(position));
+        return;
+    }
     if (book && (!note || note->folder)) {
         menu.addAction(book->type == "site" ? "新建文章" : book->type == "ebook" ? "添加章节"
                                                                                  : "新建笔记",
@@ -1761,7 +2018,7 @@ void MainWindow::showSitePreview() {
 
 void MainWindow::exportNotebook() {
     const auto *book = store_.notebook(currentNotebookId_);
-    if (!book || book->type == "normal") return;
+    if (!book || (book->type != "site" && book->type != "ebook")) return;
     if (book->type == "site") {
         QString error;
         if (!SitePublisher::validate(*book, &error)) {

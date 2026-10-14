@@ -18,6 +18,7 @@ namespace vte {
 class VTextEdit;
 }
 class QPushButton;
+class QPlainTextEdit;
 class QSplitter;
 class QStackedWidget;
 class QTabBar;
@@ -45,6 +46,12 @@ private:
     void refreshTree();
     void refreshEditor();
     void refreshOutline();
+    void buildTodoUi();
+    void refreshTodoCategories();
+    void refreshTodoList(const QString &selectedId = {});
+    void refreshTodoDetails();
+    void createTodo();
+    void createTodoCategory();
     void updateStatus();
     void updatePanels();
     void updateResizeHandles();
@@ -93,6 +100,17 @@ private:
     QWidget *toolbar_ = nullptr;
     QComboBox *notebooks_ = nullptr;
     QComboBox *groupBy_ = nullptr;
+    QComboBox *todoStatus_ = nullptr;
+    QWidget *todoListPage_ = nullptr;
+    QTreeWidget *todoList_ = nullptr;
+    QLabel *todoHint_ = nullptr;
+    QWidget *todoDetails_ = nullptr;
+    QLineEdit *todoTitle_ = nullptr;
+    QComboBox *todoCategory_ = nullptr;
+    QCheckBox *todoCompleted_ = nullptr;
+    QPlainTextEdit *todoContent_ = nullptr;
+    QString todoNotebookId_;
+    QString todoCategoryFilter_;
     QLineEdit *search_ = nullptr;
     QTreeWidget *tree_ = nullptr;
     QLabel *treeHint_ = nullptr;
