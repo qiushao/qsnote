@@ -26,7 +26,7 @@ jobs:
       - name: Install prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools qt6-svg-dev qt6-5compat-dev qt6-webengine-dev qt6-webchannel-dev libgl1-mesa-dev clang-tidy dpkg-dev
+          sudo apt-get install -y cmake build-essential qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools qt6-svg-dev qt6-5compat-dev qt6-webengine-dev qt6-webchannel-dev libgl1-mesa-dev clang-tidy dpkg-dev plantuml graphviz default-jre-headless
 
       - name: Build
         run: |
@@ -42,7 +42,17 @@ jobs:
         run: ./build/src/qsnote --version
 
       - name: Package
-        run: cpack --config build/CPackConfig.cmake -B build
+        run: |
+          cpack --config build/CPackConfig.cmake -B build
+          for dependency in plantuml graphviz default-jre-headless; do
+            dpkg-deb -f build/*.deb Depends | tr ',' '\n' | grep -Eq "^[[:space:]]*$dependency([[:space:]]|$)"
+          done
+
+      - name: Test diagram runtime
+        run: |
+          cmake -S . -B build -DQSNOTE_BUILD_TESTS=ON
+          cmake --build build --parallel --target qsnote_diagram_tests
+          ctest --test-dir build -R '^qsnote_diagram$' --output-on-failure
 
       - uses: actions/upload-artifact@v4
         with:

@@ -16,6 +16,8 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         core/EbookExporter.h
         core/PlantUmlRenderer.cpp
         core/PlantUmlRenderer.h
+        core/DiagramRuntime.cpp
+        core/DiagramRuntime.h
         core/StaticSite.cpp
         core/SiteGenerator.cpp
         core/SitePublisher.cpp
@@ -38,6 +40,11 @@ if (WIN32)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     $<TARGET_FILE:VTextEdit> $<TARGET_FILE_DIR:qsnote>
             VERBATIM)
+    include(${PROJECT_SOURCE_DIR}/cmake/WindowsDiagramRuntime.cmake)
+    qsnote_copy_diagram_runtime(qsnote)
+    install(DIRECTORY "${QSNOTE_DIAGRAM_RUNTIME_DIR}/plantuml" "${QSNOTE_DIAGRAM_RUNTIME_DIR}/graphviz"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}/runtime")
+    install(FILES "${QSNOTE_DIAGRAM_RUNTIME_DIR}/manifest.json" DESTINATION "${CMAKE_INSTALL_BINDIR}/runtime")
 endif ()
 
 set_target_properties(qsnote PROPERTIES

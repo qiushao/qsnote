@@ -42,6 +42,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(CPACK_DEBIAN_PACKAGE_MAINTAINER "qiushao")
     set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
     set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "plantuml, graphviz, default-jre-headless")
     set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
     set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
     include(CPack)
@@ -60,6 +61,7 @@ if (QSNOTE_BUILD_TESTS)
             src/resources/site.qrc
             src/core/PlantUmlRenderer.cpp
             src/resources/ui.qrc
+            src/core/DiagramRuntime.cpp
             third_party/vnote-web.qrc
     )
     target_include_directories(qsnote_site_tests PRIVATE src)
@@ -70,6 +72,7 @@ if (QSNOTE_BUILD_TESTS)
             tests/EbookExporterTest.cpp
             src/core/EbookExporter.cpp
             src/core/PlantUmlRenderer.cpp
+            src/core/DiagramRuntime.cpp
             src/core/NotebookStore.cpp
             src/core/StaticSite.cpp
             src/core/SiteGenerator.cpp
@@ -89,6 +92,7 @@ if (QSNOTE_BUILD_TESTS)
             src/core/SiteGenerator.cpp
             src/core/ArticleRenderer.cpp
             src/core/PlantUmlRenderer.cpp
+            src/core/DiagramRuntime.cpp
             src/resources/ui.qrc
             third_party/vnote-web.qrc
     )
@@ -100,6 +104,7 @@ if (QSNOTE_BUILD_TESTS)
             tests/UiTest.cpp
             src/core/EbookExporter.cpp
             src/core/PlantUmlRenderer.cpp
+            src/core/DiagramRuntime.cpp
             src/ui/MainWindow.cpp
             src/ui/MarkdownEditor.cpp
             src/ui/InplacePreview.cpp
@@ -118,4 +123,16 @@ if (QSNOTE_BUILD_TESTS)
     target_link_libraries(qsnote_ui_tests PRIVATE Qt6::Widgets Qt6::GuiPrivate Qt6::Test Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Network VTextEdit Qt6::Xml)
     add_test(NAME qsnote_ui COMMAND qsnote_ui_tests)
     set_tests_properties(qsnote_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu;XDG_DATA_HOME=${CMAKE_BINARY_DIR}/test-data")
+    add_executable(qsnote_diagram_tests
+            tests/DiagramRuntimeTest.cpp
+            src/core/DiagramRuntime.cpp
+            src/core/PlantUmlRenderer.cpp
+    )
+    target_include_directories(qsnote_diagram_tests PRIVATE src)
+    target_link_libraries(qsnote_diagram_tests PRIVATE Qt6::Gui Qt6::Test)
+    set_target_properties(qsnote_diagram_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/diagram-tests")
+    if (WIN32)
+        qsnote_copy_diagram_runtime(qsnote_diagram_tests)
+    endif ()
+    add_test(NAME qsnote_diagram COMMAND qsnote_diagram_tests)
 endif ()

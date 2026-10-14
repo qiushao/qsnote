@@ -25,7 +25,7 @@ PDF 书签按左侧笔记列表的顺序与层级生成，保留分组和嵌套�
 
 `plantuml` 代码块在阅读 / 分屏预览及全部电子书导出格式中使用本地 PlantUML 转换为 PNG。支持完整的 `@startuml` / `@enduml`（以及 `@startmindmap` 等标记），也可只填写 UML 正文，由应用补齐起止标记。代码块语言名不区分大小写，引用和列表中的代码块也会转换。导出的图片随电子书打包，阅读时无需 PlantUML 或网络；语法错误、缺少引擎或渲染超时会显示错误，导出时同时报告章节并停止生成文件。
 
-渲染需要将 `plantuml` 命令加入启动 QSNote 时的 `PATH`。Ubuntu / Debian 可执行 `sudo apt install plantuml graphviz`，macOS 可执行 `brew install plantuml graphviz`。Windows 安装 Java、Graphviz 和 [PlantUML](https://plantuml.com/command-line)，通过 PATH 中的 `plantuml.bat` 调用 `java -jar C:\path\to\plantuml.jar %*`。Graphviz 的 `dot` 命令也需位于 PATH 中。
+Windows 发布包内置 PlantUML 和 Graphviz，解压后保留 `qsnote.exe` 旁的 `runtime/`；Java 使用系统安装，需通过 PATH 中的 `java` 命令或 `JAVA_HOME` 找到。Ubuntu / Debian 通过 `apt install ./qsnote_*.deb` 安装时自动安装这些依赖（包括 Java）；macOS 通过本项目的 Homebrew Cask 安装时由 brew 安装依赖。从源码构建或直接拖入 DMG 的用户，可在 Linux 执行 `sudo apt install plantuml graphviz default-jre-headless`，在 macOS 执行 `brew install plantuml graphviz`。macOS 从 Finder 启动也会查找 Homebrew 的标准目录；详细安装步骤见 [构建与安装](../BUILD.md)。
 
 所有格式在生成时使用内置 Qt WebEngine 固化正文，阅读时无需执行脚本。EPUB / CHM 阅读器可能因其 CSS 支持、用户字体设置和分页规则而影响最终布局。
 

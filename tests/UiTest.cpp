@@ -1,5 +1,6 @@
 #include "core/NotebookStore.h"
 #include "core/EbookExporter.h"
+#include "core/DiagramRuntime.h"
 #include "core/StaticSite.h"
 #include "ui/MainWindow.h"
 #include "ui/MarkdownEditor.h"
@@ -669,7 +670,7 @@ int ordinary_code = 1;
     }
 
     void inplacePreviewRendersPlantUml() {
-        if (QStandardPaths::findExecutable("plantuml").isEmpty()) QSKIP("Install PlantUML to run diagram integration test");
+        if (DiagramRuntime::plantUml().executable.isEmpty()) QSKIP("Install PlantUML to run diagram integration test");
         MarkdownEditor editor;
         editor.resize(700, 500);
         editor.show();
@@ -687,7 +688,7 @@ int ordinary_code = 1;
         editor.show();
         QString source;
         QStringList engines = {"dot", "neato", "twopi", "circo", "fdp", "osage", "patchwork"};
-        if (!QStandardPaths::findExecutable("dot").isEmpty()) engines.append("sfdp");
+        if (!DiagramRuntime::graphviz().isEmpty()) engines.append("sfdp");
         for (const auto &engine: engines) source += "```" + engine + "\ndigraph G { a -> b }\n```\n\n";
         editor.setText(source);
         QTRY_COMPARE_WITH_TIMEOUT(previewImages(editor, vte::PreviewData::CodeBlock).size(), engines.size(), 30000);
@@ -698,6 +699,7 @@ int ordinary_code = 1;
         const auto path = qgetenv("PATH");
         const auto restore = qScopeGuard([path] { qputenv("PATH", path); });
         qputenv("PATH", "");
+        if (!DiagramRuntime::plantUml().executable.isEmpty() || !DiagramRuntime::plantUml().error.isEmpty() || !DiagramRuntime::graphviz().isEmpty()) QSKIP("Bundled/Homebrew renderers cannot be hidden by clearing PATH");
         MarkdownEditor editor;
         editor.resize(700, 500);
         editor.show();
@@ -900,7 +902,7 @@ st->e
     }
 
     void webPreviewRendersPlantUml() {
-        if (QStandardPaths::findExecutable("plantuml").isEmpty()) QSKIP("Install PlantUML to run diagram integration test");
+        if (DiagramRuntime::plantUml().executable.isEmpty()) QSKIP("Install PlantUML to run diagram integration test");
         MarkdownPreview preview;
         preview.resize(900, 700);
         preview.show();
@@ -926,6 +928,7 @@ st->e
         const auto path = qgetenv("PATH");
         const auto restorePath = qScopeGuard([&] { qputenv("PATH", path); });
         qputenv("PATH", QByteArray());
+        if (!DiagramRuntime::plantUml().executable.isEmpty() || !DiagramRuntime::plantUml().error.isEmpty()) QSKIP("Bundled/Homebrew PlantUML cannot be hidden by clearing PATH");
         MarkdownPreview preview;
         preview.show();
         preview.setMarkdown("```plantuml\nAlice -> Bob\n```", "missing-plantuml");

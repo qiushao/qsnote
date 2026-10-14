@@ -1,7 +1,7 @@
 #include "PlantUmlRenderer.h"
+#include "DiagramRuntime.h"
 #include <QImage>
 #include <QRegularExpression>
-#include <QStandardPaths>
 
 PlantUmlRenderer::PlantUmlRenderer(QObject *parent) : QObject(parent) {
     timeout_.setSingleShot(true);
@@ -27,9 +27,10 @@ PlantUmlRenderer::PlantUmlRenderer(QObject *parent) : QObject(parent) {
 }
 
 void PlantUmlRenderer::render(const QString &source) {
-    auto executable = QStandardPaths::findExecutable("plantuml");
+    const auto command = DiagramRuntime::plantUml();
+    auto executable = command.executable;
     if (executable.isEmpty()) {
-        emit finished({}, "未找到 PlantUML，请安装 PlantUML 和 Graphviz，并将 plantuml 加入 PATH。");
+        emit finished({}, command.error.isEmpty() ? QStringLiteral("未找到 PlantUML，请重新安装完整应用包，或安装 PlantUML 和 Graphviz。") : command.error);
         return;
     }
     auto text = source;
@@ -41,7 +42,8 @@ void PlantUmlRenderer::render(const QString &source) {
         process_.closeWriteChannel();
     });
     timeout_.start(30000);
-    QStringList arguments{"-pipe", "-tpng", "-charset", "UTF-8", "-failfast2"};
+    auto arguments = command.arguments;
+    arguments.append({"-pipe", "-tpng", "-charset", "UTF-8", "-failfast2"});
 #ifdef Q_OS_WIN
     if (executable.endsWith(".bat", Qt::CaseInsensitive) || executable.endsWith(".cmd", Qt::CaseInsensitive)) {
         arguments.prepend(executable);
@@ -49,5 +51,6 @@ void PlantUmlRenderer::render(const QString &source) {
         executable = qEnvironmentVariable("COMSPEC", "cmd.exe");
     }
 #endif
+    process_.setProcessEnvironment(DiagramRuntime::environment());
     process_.start(executable, arguments);
 }

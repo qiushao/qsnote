@@ -35,6 +35,16 @@ jobs:
         with:
           arch: x64
 
+      - name: Setup system Java for build and tests
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Prepare diagram runtime
+        shell: pwsh
+        run: ./scripts/prepare-windows-runtime.ps1
+
       - name: Configure
         shell: pwsh
         run: |
@@ -42,10 +52,10 @@ jobs:
           if ($env:GITHUB_REF_TYPE -eq 'tag') {
             $version = $env:GITHUB_REF_NAME -replace '^[Vv]', ''
           }
-          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 "-DAPP_VERSION=$version"
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 "-DAPP_VERSION=$version" -DQSNOTE_BUILD_TESTS=ON
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --config Release --parallel --target qsnote qsnote_diagram_tests
 
       - name: Install
         run: cmake --install build --config Release --prefix build/package
@@ -55,8 +65,20 @@ jobs:
 
       - name: Smoke test
         env:
-          QT_QPA_PLATFORM: offscreen
-        run: build/package/bin/qsnote.exe --version
+          QT_COMMAND_LINE_PARSER_NO_GUI_MESSAGE_BOXES: '1'
+        run: |
+          $process = Start-Process build/package/bin/qsnote.exe -ArgumentList '--version' -Wait -PassThru -WindowStyle Hidden
+          exit $process.ExitCode
+
+      - name: Test packaged diagram runtime
+        shell: pwsh
+        run: |
+          Copy-Item build/diagram-tests/Release/qsnote_diagram_tests.exe build/package/bin/
+          windeployqt --release --no-translations --no-compiler-runtime build/package/bin/qsnote_diagram_tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          build/package/bin/qsnote_diagram_tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item -LiteralPath build/package/bin/qsnote_diagram_tests.exe,build/package/bin/Qt6Test.dll
 
       - name: Package
         shell: pwsh

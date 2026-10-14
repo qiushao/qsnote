@@ -1,13 +1,13 @@
 #include "InplacePreview.h"
 #include "MarkdownEditor.h"
 #include "core/PlantUmlRenderer.h"
+#include "core/DiagramRuntime.h"
 #include <QCryptographicHash>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
 #include <QSettings>
-#include <QStandardPaths>
 #include <QWebChannel>
 #include <QWebEnginePage>
 #include <QWebEngineSettings>
@@ -174,9 +174,9 @@ void InplacePreview::renderNext() {
     const auto &request = requests_[next_];
     if (request.language == "sfdp") {
         busy_ = true;
-        const auto executable = QStandardPaths::findExecutable("dot");
+        const auto executable = DiagramRuntime::graphviz();
         if (executable.isEmpty()) {
-            rendered(generation_, next_, {}, 0, 0, "sfdp 布局需要安装 Graphviz，并将 dot 加入 PATH。");
+            rendered(generation_, next_, {}, 0, 0, "未找到 Graphviz，请重新安装完整应用包，或安装 Graphviz。");
             return;
         }
         auto *process = new QProcess(this);
@@ -198,6 +198,7 @@ void InplacePreview::renderNext() {
             process->closeWriteChannel();
         });
         QTimer::singleShot(30000, process, [process] { process->kill(); });
+        process->setProcessEnvironment(DiagramRuntime::environment());
         process->start(executable, {"-Ksfdp", "-Tpng"});
         return;
     }

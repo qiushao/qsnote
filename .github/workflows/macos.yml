@@ -36,8 +36,19 @@ jobs:
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then
             version="${GITHUB_REF_NAME#[Vv]}"
           fi
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DAPP_VERSION="$version"
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DAPP_VERSION="$version"
           cmake --build build --parallel
+
+      - name: Install and test diagram dependencies
+        run: |
+          brew install plantuml graphviz
+          brew tap-new qsnote/ci
+          mkdir -p "$(brew --repository qsnote/ci)/Casks"
+          cp Casks/qsnote.rb "$(brew --repository qsnote/ci)/Casks/"
+          brew readall qsnote/ci
+          cmake -S . -B build -DQSNOTE_BUILD_TESTS=ON
+          cmake --build build --parallel --target qsnote_diagram_tests
+          ctest --test-dir build -R '^qsnote_diagram$' --output-on-failure
 
       - name: Deploy Qt and package
         run: |

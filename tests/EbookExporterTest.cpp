@@ -1,4 +1,5 @@
 #include "core/EbookExporter.h"
+#include "core/DiagramRuntime.h"
 #include <QDir>
 #include <QFile>
 #include <QImage>
@@ -336,7 +337,7 @@ private slots:
         QFETCH(int, format);
         QFETCH(QString, noteId);
         QFETCH(QString, diagram);
-        if (diagram == "PlantUML" && QStandardPaths::findExecutable("plantuml").isEmpty()) QSKIP("Install PlantUML to run diagram integration test");
+        if (diagram == "PlantUML" && DiagramRuntime::plantUml().executable.isEmpty()) QSKIP("Install PlantUML to run diagram integration test");
         const auto exportFormat = EbookExporter::Format(format);
         if (exportFormat == EbookExporter::Format::Chm && EbookExporter::chmCompiler().isEmpty()) QSKIP("Install chmcmd or hhc to run CHM integration test");
         QTemporaryDir source;
@@ -564,7 +565,7 @@ $code-block$
     }
 
     void invalidPlantUmlReportsChapter() {
-        if (QStandardPaths::findExecutable("plantuml").isEmpty()) QSKIP("Install PlantUML to run diagram integration test");
+        if (DiagramRuntime::plantUml().executable.isEmpty()) QSKIP("Install PlantUML to run diagram integration test");
         QTemporaryDir source;
         QTemporaryDir destination;
         auto book = fixture(source.path());
@@ -580,6 +581,7 @@ $code-block$
         const auto path = qgetenv("PATH");
         const auto restorePath = qScopeGuard([&] { qputenv("PATH", path); });
         qputenv("PATH", QByteArray());
+        if (!DiagramRuntime::plantUml().executable.isEmpty() || !DiagramRuntime::plantUml().error.isEmpty()) QSKIP("Bundled/Homebrew PlantUML cannot be hidden by clearing PATH");
         QTemporaryDir source;
         QTemporaryDir destination;
         auto book = fixture(source.path());
