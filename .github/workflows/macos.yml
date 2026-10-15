@@ -36,8 +36,7 @@ jobs:
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then
             version="${GITHUB_REF_NAME#[Vv]}"
           fi
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DAPP_VERSION="$version"
-          cmake --build build --parallel
+          ./scripts/macos-build.sh "$version"
 
       - name: Install and test diagram dependencies
         run: |
@@ -46,24 +45,14 @@ jobs:
           mkdir -p "$(brew --repository qsnote/ci)/Casks"
           cp Casks/qsnote.rb "$(brew --repository qsnote/ci)/Casks/"
           brew readall qsnote/ci
-          cmake -S . -B build -DQSNOTE_BUILD_TESTS=ON
-          cmake --build build --parallel --target qsnote_diagram_tests
-          ctest --test-dir build -R '^qsnote_diagram$' --output-on-failure
-
-      - name: Deploy Qt and package
-        run: |
-          macdeployqt build/src/qsnote.app -dmg -always-overwrite
-          mv build/src/qsnote.dmg build/qsnote-macos-x86_64.dmg
-
-      - name: Smoke test
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: ./build/src/qsnote.app/Contents/MacOS/qsnote --version
+          cmake -S . -B build-macos -DQSNOTE_BUILD_TESTS=ON
+          cmake --build build-macos --parallel --target qsnote_diagram_tests
+          ctest --test-dir build-macos -R '^qsnote_diagram$' --output-on-failure
 
       - uses: actions/upload-artifact@v4
         with:
           name: qsnote-macos
-          path: build/*.dmg
+          path: build-macos/*.dmg
           if-no-files-found: error
 
   release:

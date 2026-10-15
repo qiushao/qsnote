@@ -37,4 +37,6 @@ qsnote/
 ./build/src/qsnote
 ```
 
+Linux、macOS、Windows 的构建、打包及标签发布步骤见 [构建与发布](BUILD.md)。
+
 源码使用 4 空格缩进，类名为 `CamelCase`，函数和变量为 `camelBack`，私有和受保护成员以 `_` 结尾。执行 `./scripts/format.sh` 格式化源码。

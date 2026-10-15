@@ -7,7 +7,7 @@
 Ubuntu / Debian 安装依赖：
 
 ```bash
-sudo apt install build-essential cmake qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools qt6-svg-dev qt6-5compat-dev qt6-webengine-dev qt6-webchannel-dev libgl1-mesa-dev clang-tidy clang-format plantuml graphviz default-jre-headless
+sudo apt install build-essential cmake qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools qt6-svg-dev qt6-5compat-dev qt6-webengine-dev qt6-webchannel-dev libgl1-mesa-dev clang-tidy clang-format dpkg-dev plantuml graphviz default-jre-headless
 ```
 
 在工程根目录执行：
@@ -18,7 +18,7 @@ cmake --build build --parallel
 ./build/src/qsnote
 ```
 
-Release 构建可执行 `./scripts/linux-build.sh [版本号]`，默认版本为 `1.0.0`。
+Release 构建和 DEB 打包执行 `./scripts/linux-build.sh [版本号]`。优先使用传入的版本号；未传入时通过 `git describe --tags --abbrev=0` 获取最近的标签并去掉 `v` / `V` 前缀，没有标签则使用 `1.0.0`。产物位于 `build/qsnote_<版本号>_<架构>.deb`。
 
 安装到自定义目录：
 
@@ -34,6 +34,15 @@ cmake -S . -B build -DCMAKE_PREFIX_PATH="$(brew --prefix qt)" -DCMAKE_BUILD_TYPE
 cmake --build build --parallel
 open build/src/qsnote.app
 ```
+
+构建和打包 DMG（Qt 的 `bin` 目录需要在 PATH 中，也可设置 `Qt6_DIR` 为 Qt 安装前缀）：
+
+```bash
+export Qt6_DIR="$(brew --prefix qt)"
+./scripts/macos-build.sh 1.2.3
+```
+
+脚本使用独立的 `build-macos/`，生成应用图标、安装到临时目录，并通过 `macdeployqt` 收集 Qt、WebEngine 和 VTextEdit 动态库。许可证随 `.app` 保存，启动验证通过后输出 `build-macos/qsnote-macos-<架构>.dmg`。Intel 发布文件名固定为 `qsnote-macos-x86_64.dmg`，供现有 Homebrew Cask 下载；应用内版本来自脚本参数。
 
 ## Windows
 
@@ -51,6 +60,15 @@ cmake --build build --config Release --parallel
 如果 CMake 报 `Failed to find required Qt component "WebEngineWidgets"`，请先补装上述组件，再重新运行配置；CLion 中执行 Reload CMake Project。使用 Ninja 时，还需要在 MSVC Developer PowerShell 中构建，或在 CLion 中选择 Visual Studio 工具链，使编译器能找到 Windows SDK 头文件和库。
 
 安装规则包含应用和 VTextEdit 动态库；分发 macOS / Windows 应用时，需要使用 Qt 的 `macdeployqt` / `windeployqt` 部署运行时。
+
+一键构建并打包 Windows x64 ZIP：
+
+```powershell
+$env:Qt6_DIR = "C:/Qt/6.8.3/msvc2022_64"
+./scripts/windows-build.ps1 -Version 1.2.3
+```
+
+脚本自动运行图表引擎准备步骤，在 `build-windows/` 中构建和安装，部署 Qt / WebEngine，检查必要文件，并在移除 Qt 开发环境 PATH 后验证启动和版本。产物为 `build-windows/qsnote-1.2.3-windows-x64.zip`，包含 VTextEdit、图表运行时、许可证及本安装说明。若系统缺少 Visual C++ 运行库，先安装 Qt 部署工具随包提供的 `vc_redist.x64.exe`，或微软官方 Visual C++ x64 Redistributable。
 
 Windows 的准备脚本下载 `scripts/windows-runtime.json` 中固定版本的 PlantUML 和 Graphviz，并验证 SHA256。Java 使用系统安装，准备脚本及应用均从 PATH 或 `JAVA_HOME/bin` 查找，不下载、不打包 JRE/JDK。下载缓存和展开的运行时位于 `build-runtime/`，不提交到 Git；CMake 配置和编译本身不联网。CLion 首次配置前也需运行一次准备脚本。构建自动将 PlantUML、Graphviz 复制到可执行文件旁的 `runtime/`，安装和 ZIP 打包也保留此目录，以及各组件的许可证和来源记录。可通过 `-DQSNOTE_DIAGRAM_RUNTIME_DIR=...` 指定已准备好的离线运行时目录。
 
@@ -77,21 +95,30 @@ brew install --cask qiushao/qsnote/qsnote
 
 ## GitHub Actions
 
-`.github/workflows/` 下提供 Linux、macOS 和 Windows MSVC 2022 三套独立流程，沿用 `qshell` 的平台和 Qt 6.2.4 配置（Linux 使用 Ubuntu 22.04 系统 Qt 包）。
+`.github/workflows/` 下提供 Linux、macOS 和 Windows MSVC 2022 三套独立流程，参考 `qshell` 的标签发布方式，并共用上述本地打包脚本。Linux 使用 Ubuntu 24.04 系统 Qt 包；macOS 使用 `macos-15-intel`，Windows 使用 `windows-2022`，两者安装 Qt 6.4.2 及 WebEngine、WebChannel、Positioning、Qt 5 Compatibility 组件。
 
 - 推送到 `master` / `main`、向这些分支提交 PR，或手动运行：构建、打包并上传 Actions artifact。仅修改 `docs/` 或根目录 Markdown 文件时跳过自动构建。
 - 推送 `V*` / `v*` 标签（例如 `V1.2.3`）：去掉标签前缀作为应用版本，并将安装包上传到对应 GitHub Release。
 - Linux 产物为 `.deb`，CPack 自动检测 Qt 共享库依赖，并显式声明图表引擎依赖；macOS 为包含 Qt 运行时的 Intel `.dmg`，通过 Cask 安装图表引擎；Windows 为包含 Qt、PlantUML 和 Graphviz 的 x64 `.zip`，Java 使用系统安装。
 - 构建任务使用只读权限，只有版本标签触发的发布任务具有 `contents: write` 权限。
+- 三个平台均验证打包后的应用能启动并输出正确版本，运行真实的 PlantUML / Graphviz 集成测试；任一步骤失败都会阻止该平台发布。
 
 Linux 本地生成同样的 DEB 包：
 
 ```bash
 ./scripts/linux-build.sh 1.2.3
-cpack --config build/CPackConfig.cmake -B build
 ```
 
 DEB 打包额外需要 `dpkg-dev`。macOS 包未签名或公证。
+
+发布新版本（先提交并推送配置和代码）：
+
+```bash
+git tag V1.2.3
+git push origin V1.2.3
+```
+
+三个工作流全部成功后，对应 GitHub Release 会包含 DEB、DMG、ZIP 三种产物。手动运行工作流只生成 Actions artifact，不发布 Release；Linux 本地脚本未指定版本时优先读取 Git 标签，macOS / Windows 脚本未指定版本时使用 `1.0.0`。
 
 ## 开发配置
 

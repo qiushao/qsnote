@@ -10,6 +10,8 @@ add_subdirectory(vtextedit/src)
 
 if (WIN32)
     set(QSNOTE_LICENSE_DIR "${CMAKE_INSTALL_BINDIR}/licenses")
+elseif (APPLE)
+    set(QSNOTE_LICENSE_DIR "qsnote.app/Contents/Resources/licenses")
 else ()
     set(QSNOTE_LICENSE_DIR "${CMAKE_INSTALL_DATADIR}/licenses/qsnote")
 endif ()

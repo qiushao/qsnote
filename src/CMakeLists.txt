@@ -56,6 +56,17 @@ set_target_properties(qsnote PROPERTIES
 
 if (UNIX AND NOT APPLE)
     set_target_properties(qsnote PROPERTIES INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+elseif (APPLE)
+    set_target_properties(qsnote PROPERTIES
+            INSTALL_RPATH "@executable_path/../Frameworks"
+            MACOSX_BUNDLE_ICON_FILE "qsnote.icns")
+    set(app_icon "${CMAKE_CURRENT_BINARY_DIR}/qsnote.icns")
+    add_custom_command(OUTPUT "${app_icon}"
+            COMMAND bash "${PROJECT_SOURCE_DIR}/scripts/macos-create-icon.sh" "${app_icon}"
+            DEPENDS resources/icons/qsnote.png "${PROJECT_SOURCE_DIR}/scripts/macos-create-icon.sh"
+            VERBATIM)
+    set_source_files_properties("${app_icon}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    target_sources(qsnote PRIVATE "${app_icon}")
 endif ()
 
 install(TARGETS qsnote
@@ -66,4 +77,6 @@ install(TARGETS qsnote
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     install(FILES resources/qsnote.desktop
             DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+    install(FILES resources/icons/qsnote.png
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/128x128/apps)
 endif ()

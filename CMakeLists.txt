@@ -15,7 +15,7 @@ if (MSVC)
     add_compile_options(/utf-8)
 endif ()
 
-if (WIN32 AND DEFINED ENV{Qt6_DIR})
+if (DEFINED ENV{Qt6_DIR})
     list(PREPEND CMAKE_PREFIX_PATH "$ENV{Qt6_DIR}")
 endif ()
 

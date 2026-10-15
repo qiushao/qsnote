@@ -41,36 +41,31 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Prepare diagram runtime
-        shell: pwsh
-        run: ./scripts/prepare-windows-runtime.ps1
-
-      - name: Configure
+      - name: Build and package
         shell: pwsh
         run: |
           $version = '1.0.0'
           if ($env:GITHUB_REF_TYPE -eq 'tag') {
             $version = $env:GITHUB_REF_NAME -replace '^[Vv]', ''
           }
-          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 "-DAPP_VERSION=$version" -DQSNOTE_BUILD_TESTS=ON
+          ./scripts/windows-build.ps1 -Version $version
 
-      - name: Build
-        run: cmake --build build --config Release --parallel --target qsnote qsnote_diagram_tests
-
-      - name: Install
-        run: cmake --install build --config Release --prefix build/package
-
-      - name: Deploy Qt
-        run: windeployqt --release --compiler-runtime build/package/bin/qsnote.exe
-
-      - name: Package
+      - name: Test diagram runtime
         shell: pwsh
-        run: Compress-Archive -Path build/package/bin/* -DestinationPath build/qsnote-windows-x64.zip
+        run: |
+          cmake -S . -B build-windows -DQSNOTE_BUILD_TESTS=ON
+          if ($LASTEXITCODE -ne 0) { throw 'Test configure failed' }
+          cmake --build build-windows --config Release --parallel --target qsnote_diagram_tests
+          if ($LASTEXITCODE -ne 0) { throw 'Test build failed' }
+          windeployqt --release --compiler-runtime build-windows/diagram-tests/Release/qsnote_diagram_tests.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Test runtime deployment failed' }
+          ctest --test-dir build-windows -C Release -R '^qsnote_diagram$' --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw 'Diagram tests failed' }
 
       - uses: actions/upload-artifact@v4
         with:
           name: qsnote-windows
-          path: build/*.zip
+          path: build-windows/*.zip
           if-no-files-found: error
 
   release:
