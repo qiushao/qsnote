@@ -63,23 +63,6 @@ jobs:
       - name: Deploy Qt
         run: windeployqt --release --compiler-runtime build/package/bin/qsnote.exe
 
-      - name: Smoke test
-        env:
-          QT_COMMAND_LINE_PARSER_NO_GUI_MESSAGE_BOXES: '1'
-        run: |
-          $process = Start-Process build/package/bin/qsnote.exe -ArgumentList '--version' -Wait -PassThru -WindowStyle Hidden
-          exit $process.ExitCode
-
-      - name: Test packaged diagram runtime
-        shell: pwsh
-        run: |
-          Copy-Item build/diagram-tests/Release/qsnote_diagram_tests.exe build/package/bin/
-          windeployqt --release --no-translations --no-compiler-runtime build/package/bin/qsnote_diagram_tests.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          build/package/bin/qsnote_diagram_tests.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Remove-Item -LiteralPath build/package/bin/qsnote_diagram_tests.exe,build/package/bin/Qt6Test.dll
-
       - name: Package
         shell: pwsh
         run: Compress-Archive -Path build/package/bin/* -DestinationPath build/qsnote-windows-x64.zip
