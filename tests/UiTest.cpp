@@ -1978,6 +1978,22 @@ st->e
             QVERIFY(categories);
             QCOMPARE(categories->count(), 3);
             QCOMPARE(categories->item(0)->text(), QString("default"));
+            QTest::qWait(30);
+            const auto itemRect = categories->visualItemRect(categories->item(1));
+            const auto textLeft = [](const QImage &image) {
+                for (int x = 0; x < image.width(); ++x) {
+                    for (int y = 0; y < image.height(); ++y) {
+                        if (qGray(image.pixel(x, y)) < 180) return x;
+                    }
+                }
+                return -1;
+            };
+            const int unselectedLeft = textLeft(categories->viewport()->grab(itemRect).toImage());
+            QVERIFY(unselectedLeft >= 0);
+            QTest::mouseClick(categories->viewport(), Qt::LeftButton, Qt::NoModifier, itemRect.center());
+            QCOMPARE(categories->currentRow(), 1);
+            QCOMPARE(textLeft(categories->viewport()->grab(itemRect).toImage()), unselectedLeft);
+            categories->setCurrentRow(0);
             auto *rename = dialog->findChild<QPushButton *>("renameSiteCategory");
             auto *remove = dialog->findChild<QPushButton *>("deleteSiteCategory");
             QVERIFY(!rename->isEnabled());
