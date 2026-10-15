@@ -12,7 +12,7 @@
         const xml = new XMLSerializer().serializeToString(svg);
         await new Promise((resolve, reject) => {
             image.onload = resolve;
-            image.onerror = () => reject(new Error('无法读取预览图片'));
+            image.onerror = () => reject(new Error(qsnoteTranslations.previewImageError));
             image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(xml)}`;
         });
         const canvas = document.createElement('canvas');
@@ -74,11 +74,11 @@
             }
         }
         const svg = root.querySelector('svg');
-        if (!svg) throw new Error('未生成图表');
+        if (!svg) throw new Error(qsnoteTranslations.missingDiagram);
         const box = svg.viewBox.baseVal;
         const width = box.width || svg.width.baseVal.value;
         const height = box.height || svg.height.baseVal.value;
-        if (!(width > 0 && height > 0)) throw new Error('图表尺寸无效');
+        if (!(width > 0 && height > 0)) throw new Error(qsnoteTranslations.diagramSizeError);
         if (!box.width) svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
         return {png: await raster(svg, width, height, request.scale * request.zoom * 2),
             width: Math.ceil(width * request.zoom), height: Math.ceil(height * request.zoom)};

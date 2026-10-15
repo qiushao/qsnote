@@ -1,4 +1,5 @@
 #include "PlantUmlRenderer.h"
+#include <QCoreApplication>
 #include "DiagramRuntime.h"
 #include <QImage>
 #include <QRegularExpression>
@@ -9,17 +10,17 @@ PlantUmlRenderer::PlantUmlRenderer(QObject *parent) : QObject(parent) {
     connect(&process_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
         if (error != QProcess::FailedToStart) return;
         timeout_.stop();
-        emit finished({}, "无法启动 PlantUML：" + process_.errorString());
+        emit finished({}, QCoreApplication::translate("PlantUmlRenderer", "无法启动 PlantUML：") + process_.errorString());
     });
     connect(&process_, &QProcess::finished, this, [this](int exitCode, QProcess::ExitStatus status) {
         const bool timedOut = !timeout_.isActive();
         timeout_.stop();
         const auto png = process_.readAllStandardOutput();
         if (timedOut) {
-            emit finished({}, "PlantUML 渲染超时。");
+            emit finished({}, QCoreApplication::translate("PlantUmlRenderer", "PlantUML 渲染超时。"));
         } else if (status != QProcess::NormalExit || exitCode != 0 || QImage::fromData(png, "PNG").isNull()) {
             const auto details = QString::fromUtf8(process_.readAllStandardError()).trimmed().right(2000);
-            emit finished({}, "PlantUML 渲染失败：" + (details.isEmpty() ? QStringLiteral("未生成有效 PNG 图片。") : details));
+            emit finished({}, QCoreApplication::translate("PlantUmlRenderer", "PlantUML 渲染失败：") + (details.isEmpty() ? QCoreApplication::translate("PlantUmlRenderer", "未生成有效 PNG 图片。") : details));
         } else {
             emit finished(png, {});
         }
@@ -30,7 +31,7 @@ void PlantUmlRenderer::render(const QString &source) {
     const auto command = DiagramRuntime::plantUml();
     auto executable = command.executable;
     if (executable.isEmpty()) {
-        emit finished({}, command.error.isEmpty() ? QStringLiteral("未找到 PlantUML，请重新安装完整应用包，或安装 PlantUML 和 Graphviz。") : command.error);
+        emit finished({}, command.error.isEmpty() ? QCoreApplication::translate("PlantUmlRenderer", "未找到 PlantUML，请重新安装完整应用包，或安装 PlantUML 和 Graphviz。") : command.error);
         return;
     }
     auto text = source;

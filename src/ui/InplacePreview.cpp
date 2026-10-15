@@ -1,7 +1,9 @@
 #include "InplacePreview.h"
+#include <QCoreApplication>
 #include "MarkdownEditor.h"
 #include "core/PlantUmlRenderer.h"
 #include "core/DiagramRuntime.h"
+#include "core/WebTranslations.h"
 #include <QCryptographicHash>
 #include <QFile>
 #include <QJsonDocument>
@@ -134,6 +136,7 @@ void InplacePreview::update(const QVector<QSharedPointer<const vte::Preview>> &p
 void InplacePreview::ensurePage() {
     if (page_) return;
     page_ = new QWebEnginePage(this);
+    installWebTranslations(page_);
     page_->settings()->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows, false);
     auto *channel = new QWebChannel(page_);
     channel->registerObject("inplaceBridge", this);
@@ -176,7 +179,7 @@ void InplacePreview::renderNext() {
         busy_ = true;
         const auto executable = DiagramRuntime::graphviz();
         if (executable.isEmpty()) {
-            rendered(generation_, next_, {}, 0, 0, "未找到 Graphviz，请重新安装完整应用包，或安装 Graphviz。");
+            rendered(generation_, next_, {}, 0, 0, QCoreApplication::translate("InplacePreview", "未找到 Graphviz，请重新安装完整应用包，或安装 Graphviz。"));
             return;
         }
         auto *process = new QProcess(this);
@@ -186,12 +189,12 @@ void InplacePreview::renderNext() {
             process->deleteLater();
         };
         connect(process, &QProcess::errorOccurred, this, [process, complete](QProcess::ProcessError error) {
-            if (error == QProcess::FailedToStart) complete({}, "无法启动 Graphviz：" + process->errorString());
+            if (error == QProcess::FailedToStart) complete({}, QCoreApplication::translate("InplacePreview", "无法启动 Graphviz：") + process->errorString());
         });
         connect(process, &QProcess::finished, this, [process, complete](int exitCode, QProcess::ExitStatus status) {
             if (status == QProcess::NormalExit && exitCode == 0) complete(process->readAllStandardOutput(), {});
             else
-                complete({}, "Graphviz 渲染失败：" + QString::fromUtf8(process->readAllStandardError()).right(2000));
+                complete({}, QCoreApplication::translate("InplacePreview", "Graphviz 渲染失败：") + QString::fromUtf8(process->readAllStandardError()).right(2000));
         });
         connect(process, &QProcess::started, this, [process, text = request.text] {
             process->write(text.toUtf8());
@@ -235,7 +238,7 @@ void InplacePreview::rendered(int generation, int index, const QString &png, int
             attach(index, image);
             cache_.insert(requests_[index].key, new Image(image), qMax(1, static_cast<int>(image.pixmap.width() * static_cast<qint64>(image.pixmap.height()) * 4 / 1024)));
         } else if (!error.isEmpty()) {
-            qWarning().noquote() << "就地预览渲染失败（" + requests_[index].language + "）：" << error;
+            qWarning().noquote() << QCoreApplication::translate("InplacePreview", "就地预览渲染失败（%1）：").arg(requests_[index].language) << error;
         }
         next_ = index + 1;
         publishTimer_.start();

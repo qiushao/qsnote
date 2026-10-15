@@ -1,4 +1,5 @@
 #include "EbookExporter.h"
+#include <QCoreApplication>
 #include "ArticleRenderer.h"
 #include <QBuffer>
 #include <QDateTime>
@@ -38,7 +39,7 @@ QString page(const QString &title, const QString &body) {
 bool writeFile(const QString &path, const QByteArray &data, QString *error) {
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.flush()) {
-        *error = "无法写入 " + path + "：" + file.errorString();
+        *error = QCoreApplication::translate("EbookExporter", "无法写入 %1：%2").arg(path, file.errorString());
         return false;
     }
     return true;
@@ -113,7 +114,7 @@ QByteArray imageData(const QUrl &url, QString *error) {
         return {};
     }
     if (url.scheme() != "https" && url.scheme() != "http") {
-        *error = "不支持的图片地址";
+        *error = QCoreApplication::translate("EbookExporter", "不支持的图片地址");
         return {};
     }
     QNetworkAccessManager network;
@@ -140,7 +141,7 @@ bool addPdfBookmarks(const QString &path, const QList<Chapter> &chapters, QStrin
     const auto pdf = file.readAll();
     // Only consume the classic xref table emitted by Qt WebEngine/Skia, not arbitrary PDFs.
     // Append an incremental update so page streams, links, fonts and images stay intact.
-    *error = "无法为 PDF 添加书签：生成的 PDF 结构不受支持。";
+    *error = QCoreApplication::translate("EbookExporter", "无法为 PDF 添加书签：生成的 PDF 结构不受支持。");
     const auto start = QRegularExpression(R"(startxref\s+(\d+)\s+%%EOF\s*$)").match(QString::fromLatin1(pdf.right(100)));
     if (!start.hasMatch()) return false;
     const auto previousXref = start.captured(1).toLongLong();
@@ -224,7 +225,7 @@ bool addPdfBookmarks(const QString &path, const QList<Chapter> &chapters, QStrin
     update += "xref\n0 1\n0000000000 65535 f \n" + QByteArray::number(firstId) + " " + QByteArray::number(objects.size()) + "\n" + offsets
             + "trailer\n<<" + trailerFields.toLatin1() + "\n/Prev " + QByteArray::number(previousXref)
             + ">>\nstartxref\n" + QByteArray::number(newXref) + "\n%%EOF\n";
-    if (file.write(update) != update.size() || !file.flush()) { *error = "无法写入 PDF 书签：" + file.errorString(); return false; }
+    if (file.write(update) != update.size() || !file.flush()) { *error = QCoreApplication::translate("EbookExporter", "无法写入 PDF 书签：") + file.errorString(); return false; }
     error->clear();
     return true;
 }
@@ -248,7 +249,7 @@ bool printPdf(const QString &htmlPath, const QString &pdfPath, const QList<Chapt
     timeout.start(60000);
     browser.load(QUrl::fromLocalFile(htmlPath));
     loop.exec(QEventLoop::ExcludeUserInputEvents);
-    if (!success) *error = "PDF 生成失败或超时。";
+    if (!success) *error = QCoreApplication::translate("EbookExporter", "PDF 生成失败或超时。");
     return success && addPdfBookmarks(pdfPath, chapters, error);
 }
 }// namespace
@@ -265,11 +266,11 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
                                  const QString &directory, QString *error) {
     error->clear();
     if (!QFileInfo(directory).isDir()) {
-        *error = "请选择已有的保存目录。";
+        *error = QCoreApplication::translate("EbookExporter", "请选择已有的保存目录。");
         return {};
     }
     if (format == Format::Chm && chmCompiler().isEmpty()) {
-        *error = "CHM 导出需要 chmcmd（Free Pascal 的 fp-utils）；Windows 也可安装 HTML Help Workshop 并将 hhc 加入 PATH。";
+        *error = QCoreApplication::translate("EbookExporter", "CHM 导出需要 chmcmd（Free Pascal 的 fp-utils）；Windows 也可安装 HTML Help Workshop 并将 hhc 加入 PATH。");
         return {};
     }
     QList<Chapter> chapters;
@@ -294,19 +295,19 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
             }
         }
         if (visited.size() != book.notes.size()) {
-            *error = "章节目录包含无效的父章节或循环，请先修复目录。";
+            *error = QCoreApplication::translate("EbookExporter", "章节目录包含无效的父章节或循环，请先修复目录。");
             return {};
         }
     }
     if (chapters.isEmpty()) {
-        *error = noteId.isEmpty() ? "电子书中没有可导出的章节。" : "请选择当前电子书中的文档。";
+        *error = noteId.isEmpty() ? QCoreApplication::translate("EbookExporter", "电子书中没有可导出的章节。") : QCoreApplication::translate("EbookExporter", "请选择当前电子书中的文档。");
         return {};
     }
     const auto titles = NotebookStore::chapterTitles(book);
     for (auto &chapter: chapters) chapter.title = titles.value(chapter.note->id);
     const auto title = noteId.isEmpty() ? book.name : chapters.first().note->title;
     QTemporaryDir staging;
-    if (!staging.isValid()) { *error = "无法创建导出临时目录。"; return {}; }
+    if (!staging.isValid()) { *error = QCoreApplication::translate("EbookExporter", "无法创建导出临时目录。"); return {}; }
     QMap<QString, QString> chapterPaths;
     for (const auto &chapter: chapters) {
         if (!chapter.note->path.isEmpty()) chapterPaths[QDir::cleanPath(QDir(book.path).absoluteFilePath(chapter.note->path))] = chapter.anchor;
@@ -322,7 +323,7 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
         const auto base = QUrl::fromLocalFile(source);
         QDomDocument document;
         if (!renderer.render(note.folder ? QString() : note.content, document, error)) {
-            *error = "无法渲染章节（" + note.title + "）：" + *error;
+            *error = QCoreApplication::translate("EbookExporter", "无法渲染章节（%1）：%2").arg(note.title, *error);
             return {};
         }
         const auto elements = ArticleRenderer::elements(document);
@@ -341,7 +342,7 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
                     const auto bytes = imageData(resolved, error);
                     const auto image = QImage::fromData(bytes);
                     if (image.isNull()) {
-                        *error = "无法读取图片 " + original.toString() + "（" + note.title + "）：" + *error;
+                        *error = QCoreApplication::translate("EbookExporter", "无法读取图片 %1（%2）：%3").arg(original.toString(), note.title, *error);
                         return {};
                     }
                     QByteArray png;
@@ -398,7 +399,7 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
                 + "</meta></metadata><manifest>" + manifest + R"(</manifest><spine toc="ncx"><itemref idref="book"/></spine></package>)";
         zip.addFile("content.opf", opf.toUtf8());
         zip.close();
-        if (zip.status() != QZipWriter::NoError) { *error = "无法写入 EPUB 文件。"; return {}; }
+        if (zip.status() != QZipWriter::NoError) { *error = QCoreApplication::translate("EbookExporter", "无法写入 EPUB 文件。"); return {}; }
     } else {
         if (!writeFile(staging.filePath("book.html"), html.toUtf8(), error)) return {};
         for (auto it = assets.cbegin(); it != assets.cend(); ++it) {
@@ -429,7 +430,7 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
             // hhc returns 1 on success; require a real CHM header as well as normal exit.
             const bool exitOk = compiler.exitCode() == 0 || (QFileInfo(compiler.program()).baseName().compare("hhc", Qt::CaseInsensitive) == 0 && compiler.exitCode() == 1);
             if (compiler.exitStatus() != QProcess::NormalExit || !exitOk || !result.open(QIODevice::ReadOnly) || result.read(4) != "ITSF") {
-                *error = "CHM 编译失败：" + QString::fromLocal8Bit(compiler.readAll()).right(2000);
+                *error = QCoreApplication::translate("EbookExporter", "CHM 编译失败：") + QString::fromLocal8Bit(compiler.readAll()).right(2000);
                 return {};
             }
         }
@@ -438,6 +439,6 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
     auto destination = QDir(directory).filePath(baseName + "." + extension);
     for (int suffix = 2; QFileInfo::exists(destination); ++suffix) destination = QDir(directory).filePath(baseName + "-" + QString::number(suffix) + "." + extension);
     QFile generated(output);
-    if (!generated.copy(destination)) { *error = "无法保存导出文件：" + generated.errorString(); return {}; }
+    if (!generated.copy(destination)) { *error = QCoreApplication::translate("EbookExporter", "无法保存导出文件：") + generated.errorString(); return {}; }
     return destination;
 }

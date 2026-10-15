@@ -314,7 +314,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     buildUi();
     setupTray();
     QTimer::singleShot(1500, this, [this] {
-        if (QSettings().value("general/checkUpdatesOnStartup", true).toBool()) checkForUpdates();
+        if (QSettings().value("General/checkUpdatesOnStartup", true).toBool()) checkForUpdates();
     });
     const QList<QPair<Qt::Edges, Qt::CursorShape>> resizeEdges = {
             {Qt::LeftEdge, Qt::SizeHorCursor},
@@ -336,7 +336,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     QString error;
     storageReady_ = store_.load(&error);
     if (!storageReady_) {
-        QTimer::singleShot(0, this, [this, error] { QMessageBox::warning(this, "无法读取笔记", error); });
+        QTimer::singleShot(0, this, [this, error] { QMessageBox::warning(this, tr("无法读取笔记"), error); });
     }
     // 恢复上次会话；待办笔记本独立于 Markdown 标签页，其余类型优先恢复笔记所属笔记本。
     QSettings session;
@@ -443,7 +443,7 @@ void MainWindow::buildUi() {
     auto *settings = button({}, "settings", headerLeft);
     settings->setProperty("iconButton", true);
     settings->setIcon(icon("settings"));
-    settings->setToolTip("设置");
+    settings->setToolTip(tr("设置"));
     settings->setAccessibleName(settings->toolTip());
     headerLeftLayout->addWidget(settings);
     connect(settings, &QPushButton::clicked, this, &MainWindow::showSettings);
@@ -458,7 +458,7 @@ void MainWindow::buildUi() {
     notebooks_ = new QComboBox(picker);
     notebooks_->setObjectName("notebooks");
     notebooks_->setItemDelegate(new NotebookDelegate(notebooks_));
-    notebooks_->setAccessibleName("当前笔记本");
+    notebooks_->setAccessibleName(tr("当前笔记本"));
     notebooks_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     notebooks_->setMinimumContentsLength(1);
     notebooks_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
@@ -467,49 +467,49 @@ void MainWindow::buildUi() {
     pickerLayout->addWidget(notebooks_, 1);
     auto *add = button("＋", "newNotebook", picker);
     add->setProperty("iconButton", true);
-    add->setToolTip("新建笔记本");
+    add->setToolTip(tr("新建笔记本"));
     add->setAccessibleName(add->toolTip());
     pickerLayout->addWidget(add);
     headerLeftLayout->addWidget(picker);
     headerLeftLayout->addStretch(1);
     search_ = new QLineEdit(header);
     search_->setObjectName("search");
-    search_->setPlaceholderText("搜索当前笔记本 (Ctrl+Shift+F)");
-    search_->setAccessibleName("搜索当前笔记本");
+    search_->setPlaceholderText(tr("搜索当前笔记本 (Ctrl+Shift+F)"));
+    search_->setAccessibleName(tr("搜索当前笔记本"));
     search_->setMinimumWidth(320);
     search_->setMaximumWidth(520);
     search_->setClearButtonEnabled(true);
     search_->addAction(icon("search"), QLineEdit::LeadingPosition);
     headerLayout->addWidget(search_, 0, 1, Qt::AlignCenter);
-    siteConfig_ = button("站点配置", "siteConfig", headerRight);
-    sitePreview_ = button("站点预览", "sitePreview", headerRight);
-    export_ = button("导出", "exportNotebook", headerRight);
+    siteConfig_ = button(tr("站点配置"), "siteConfig", headerRight);
+    sitePreview_ = button(tr("站点预览"), "sitePreview", headerRight);
+    export_ = button(tr("导出"), "exportNotebook", headerRight);
     auto *siteActions = new QWidget(headerRight);
     siteActions->setObjectName("siteActions");
     auto *siteActionsLayout = new FlowLayout(siteActions, 0, 6);
-    autoNumberChapters_ = new QCheckBox("章节自动编号", siteActions);
+    autoNumberChapters_ = new QCheckBox(tr("章节自动编号"), siteActions);
     autoNumberChapters_->setObjectName("autoNumberChapters");
-    autoNumberChapters_->setToolTip("按章节层级显示 1、1.1、1.2 等编号，同时应用于电子书导出");
+    autoNumberChapters_->setToolTip(tr("按章节层级显示 1、1.1、1.2 等编号，同时应用于电子书导出"));
     siteActionsLayout->addWidget(autoNumberChapters_);
     for (auto *action: {siteConfig_, sitePreview_, export_}) siteActionsLayout->addWidget(action);
     headerRightLayout->addWidget(siteActions);
     toggleLeft_ = button({}, "toggleLeft", headerRight);
     toggleLeft_->setProperty("iconButton", true);
     toggleLeft_->setIcon(icon("left"));
-    toggleLeft_->setToolTip("收起/展开笔记本栏");
+    toggleLeft_->setToolTip(tr("收起/展开笔记本栏"));
     toggleLeft_->setAccessibleName(toggleLeft_->toolTip());
     headerRightLayout->addWidget(toggleLeft_);
     toggleRight_ = button({}, "toggleRight", headerRight);
     toggleRight_->setProperty("iconButton", true);
     toggleRight_->setIcon(icon("right"));
-    toggleRight_->setToolTip("收起/展开右侧栏");
+    toggleRight_->setToolTip(tr("收起/展开右侧栏"));
     toggleRight_->setAccessibleName(toggleRight_->toolTip());
     headerRightLayout->addWidget(toggleRight_);
     const QList<QPair<QString, QString>> windowButtons = {{"–", "windowMinimize"}, {"□", "windowMaximize"}, {"×", "windowClose"}};
     for (const auto &entry: windowButtons) {
         auto *windowButton = button(entry.first, entry.second, headerRight);
         windowButton->setProperty("windowButton", true);
-        windowButton->setToolTip(entry.second == "windowMinimize" ? "最小化" : entry.second == "windowMaximize" ? "最大化" : "关闭");
+        windowButton->setToolTip(entry.second == "windowMinimize" ? tr("最小化") : entry.second == "windowMaximize" ? tr("最大化") : tr("关闭"));
         windowButton->setAccessibleName(windowButton->toolTip());
         headerRightLayout->addWidget(windowButton);
         if (entry.second == "windowMinimize") connect(windowButton, &QPushButton::clicked, this, [this] { showMinimized(); });
@@ -533,12 +533,12 @@ void MainWindow::buildUi() {
     auto *bodyLayout = column(leftBody, 10, 8);
     groupBy_ = new QComboBox(leftBody);
     groupBy_->setObjectName("groupBy");
-    groupBy_->addItems({"按分类", "按标签", "按日期"});
+    groupBy_->addItems({tr("按分类"), tr("按标签"), tr("按日期")});
     bodyLayout->addWidget(groupBy_);
     todoStatus_ = new QComboBox(leftBody);
     todoStatus_->setObjectName("todoStatus");
-    todoStatus_->setAccessibleName("事项状态筛选");
-    todoStatus_->addItems({"进行中", "已完成"});
+    todoStatus_->setAccessibleName(tr("事项状态筛选"));
+    todoStatus_->addItems({tr("进行中"), tr("已完成")});
     bodyLayout->addWidget(todoStatus_);
     treeHint_ = label({}, leftBody, true);
     treeHint_->setContentsMargins(10, 14, 10, 0);
@@ -608,9 +608,9 @@ void MainWindow::buildUi() {
     emptyIcon->setAlignment(Qt::AlignCenter);
     emptyLayout->addWidget(emptyIcon);
     const QList<QPair<QString, QString>> emptyLabels = {
-        {"emptyTitle", "开始记录"},
-        {"emptyDescription", "从左侧选择一篇笔记开始，或新建一个笔记本"},
-        {"emptyShortcut", "普通笔记 · 静态站点 · 电子书 · 待办事项"}};
+        {"emptyTitle", tr("开始记录")},
+        {"emptyDescription", tr("从左侧选择一篇笔记开始，或新建一个笔记本")},
+        {"emptyShortcut", tr("普通笔记 · 静态站点 · 电子书 · 待办事项")}};
     for (const auto &entry: emptyLabels) {
         auto *hint = label(entry.second, empty, true);
         hint->setObjectName(entry.first);
@@ -665,11 +665,11 @@ void MainWindow::buildUi() {
     auto *rightHeader = new QWidget(right_);
     rightHeader->setObjectName("panelHeader");
     auto *rightHeaderLayout = row(rightHeader, 18, 16, 6);
-    auto *outlineTitle = label("大纲", rightHeader, true);
+    auto *outlineTitle = label(tr("大纲"), rightHeader, true);
     outlineTitle->setObjectName("sectionTitle");
     rightHeaderLayout->addWidget(outlineTitle);
     rightLayout->addWidget(rightHeader);
-    outlineHint_ = label("打开一篇笔记后自动生成大纲", right_, true);
+    outlineHint_ = label(tr("打开一篇笔记后自动生成大纲"), right_, true);
     outlineHint_->setContentsMargins(16, 20, 16, 0);
     rightLayout->addWidget(outlineHint_);
     outline_ = new QTreeWidget(right_);
@@ -765,12 +765,12 @@ void MainWindow::buildToolbar() {
     };
     const QList<Tool> tools = {
         {"H1", Type::TypeHeading, 1}, {"H2", Type::TypeHeading, 2}, {"H3", Type::TypeHeading, 3}, {},
-        {"B", Type::TypeBold}, {"高亮", Type::TypeMark}, {},
-        {"链接", Type::TypeLink}, {"图片", Type::TypeImage}, {},
-        {"列表", Type::TypeUnorderedList}, {"有序", Type::TypeOrderedList},
-        {"任务", Type::TypeTodoList, false}, {"引用", Type::TypeQuote}, {},
-        {"代码", Type::TypeCode}, {"代码块", Type::TypeCodeBlock},
-        {"公式", Type::TypeMath}, {"公式块", Type::TypeMathBlock}, {"表格", Type::TypeTable}};
+        {"B", Type::TypeBold}, {tr("高亮"), Type::TypeMark}, {},
+        {tr("链接"), Type::TypeLink}, {tr("图片"), Type::TypeImage}, {},
+        {tr("列表"), Type::TypeUnorderedList}, {tr("有序"), Type::TypeOrderedList},
+        {tr("任务"), Type::TypeTodoList, false}, {tr("引用"), Type::TypeQuote}, {},
+        {tr("代码"), Type::TypeCode}, {tr("代码块"), Type::TypeCodeBlock},
+        {tr("公式"), Type::TypeMath}, {tr("公式块"), Type::TypeMathBlock}, {tr("表格"), Type::TypeTable}};
     for (const auto &tool: tools) {
         if (tool.title.isEmpty()) {
             auto *separator = new QFrame(toolbar_);
@@ -794,15 +794,15 @@ void MainWindow::buildToolbar() {
             markdownEditor_->type(tool.action, tool.data);
         });
     }
-    auto *more = button("更多", "editorOptions", toolbar_);
+    auto *more = button(tr("更多"), "editorOptions", toolbar_);
     layout->addWidget(more);
     auto *modes = new QWidget(toolbar_);
     modes->setProperty("alignRight", true);
     modes->setObjectName("viewModes");
     auto *modeLayout = row(modes, 3, 3, 2);
-    editMode_ = button("编辑", "editMode", modes);
-    previewMode_ = button("预览", "previewMode", modes);
-    splitMode_ = button("分屏", "splitMode", modes);
+    editMode_ = button(tr("编辑"), "editMode", modes);
+    previewMode_ = button(tr("预览"), "previewMode", modes);
+    splitMode_ = button(tr("分屏"), "splitMode", modes);
     auto *group = new QButtonGroup(modes);
     for (auto *mode: {editMode_, previewMode_, splitMode_}) {
         mode->setProperty("mode", true);
@@ -820,9 +820,9 @@ void MainWindow::buildTodoUi() {
     todoListPage_ = new QWidget(pages_);
     todoListPage_->setObjectName("todoListPage");
     auto *listLayout = column(todoListPage_, 16, 12);
-    auto *add = button("＋ 新建事项", "newTodo", todoListPage_);
+    auto *add = button(tr("＋ 新建事项"), "newTodo", todoListPage_);
     listLayout->addWidget(add);
-    todoHint_ = label("暂无进行中的事项", todoListPage_, true);
+    todoHint_ = label(tr("暂无进行中的事项"), todoListPage_, true);
     listLayout->addWidget(todoHint_);
     todoList_ = new QTreeWidget(todoListPage_);
     todoList_->setObjectName("todoList");
@@ -840,26 +840,26 @@ void MainWindow::buildTodoUi() {
     todoDetails_ = new QWidget(right_);
     todoDetails_->setObjectName("todoDetails");
     auto *detailsLayout = column(todoDetails_, 16, 12);
-    auto *detailsTitle = label("事项详情", todoDetails_, true);
+    auto *detailsTitle = label(tr("事项详情"), todoDetails_, true);
     detailsTitle->setObjectName("sectionTitle");
     detailsLayout->addWidget(detailsTitle);
     todoTitle_ = new QLineEdit(todoDetails_);
     todoTitle_->setObjectName("todoTitle");
-    todoTitle_->setPlaceholderText("事项标题");
-    todoTitle_->setAccessibleName("事项标题");
+    todoTitle_->setPlaceholderText(tr("事项标题"));
+    todoTitle_->setAccessibleName(tr("事项标题"));
     detailsLayout->addWidget(todoTitle_);
-    todoCompleted_ = new QCheckBox("已完成", todoDetails_);
+    todoCompleted_ = new QCheckBox(tr("已完成"), todoDetails_);
     todoCompleted_->setObjectName("todoCompleted");
     detailsLayout->addWidget(todoCompleted_);
     todoCategory_ = new QComboBox(todoDetails_);
     todoCategory_->setObjectName("todoCategory");
-    todoCategory_->setAccessibleName("事项分类");
-    detailsLayout->addWidget(label("分类", todoDetails_, true));
+    todoCategory_->setAccessibleName(tr("事项分类"));
+    detailsLayout->addWidget(label(tr("分类"), todoDetails_, true));
     detailsLayout->addWidget(todoCategory_);
     todoContent_ = new QPlainTextEdit(todoDetails_);
     todoContent_->setObjectName("todoContent");
-    todoContent_->setPlaceholderText("选择事项后编辑详情");
-    todoContent_->setAccessibleName("事项详情正文");
+    todoContent_->setPlaceholderText(tr("选择事项后编辑详情"));
+    todoContent_->setAccessibleName(tr("事项详情正文"));
     todoContent_->setMinimumSize(0, 0);
     detailsLayout->addWidget(todoContent_, 1);
     right_->layout()->addWidget(todoDetails_);
@@ -871,7 +871,7 @@ void MainWindow::buildTodoUi() {
         auto *item = todoList_->currentItem();
         auto *note = item ? store_.note(item->data(0, Qt::UserRole).toString()) : nullptr;
         if (!note) return;
-        note->title = text.trimmed().isEmpty() ? QStringLiteral("未命名事项") : text.trimmed();
+        note->title = text.trimmed().isEmpty() ? tr("未命名事项") : text.trimmed();
         item->setText(0, note->title);
         item->setToolTip(0, note->title);
         saveTimer_->start();
@@ -884,11 +884,11 @@ void MainWindow::buildTodoUi() {
         note->contentDirty = true;
         saveTimer_->start();
     });
-    connect(todoCategory_, &QComboBox::currentTextChanged, this, [this](const QString &category) {
+    connect(todoCategory_, &QComboBox::currentIndexChanged, this, [this] {
         const auto *item = todoList_->currentItem();
         auto *note = item ? store_.note(item->data(0, Qt::UserRole).toString()) : nullptr;
         if (!note) return;
-        note->metadata["category"] = category;
+        note->metadata["category"] = todoCategory_->currentData().toString();
         save();
         refreshTodoList();
     });
@@ -932,10 +932,13 @@ void MainWindow::refreshTodoCategories() {
     groupBy_->hide();
     treeHint_->hide();
     todoCategory_->clear();
-    todoCategory_->addItems(categories);
+    for (const auto &category: categories) {
+        todoCategory_->addItem(category == "默认" ? tr("默认") : category, category);
+    }
     categories.prepend(QStringLiteral("全部"));
     for (const auto &category: categories) {
-        auto *item = new QTreeWidgetItem(tree_, {category});
+        const auto title = category == "全部" ? tr("全部") : category == "默认" ? tr("默认") : category;
+        auto *item = new QTreeWidgetItem(tree_, {title});
         const auto filter = category == "全部" ? QString() : category;
         item->setData(0, Qt::UserRole, filter);
         if (filter == todoCategoryFilter_) tree_->setCurrentItem(item);
@@ -961,14 +964,14 @@ void MainWindow::refreshTodoList(const QString &selectedId) {
         item->setCheckState(0, note.metadata["completed"].toBool() ? Qt::Checked : Qt::Unchecked);
         auto *remove = button("×", "todoDelete", todoList_);
         remove->setProperty("iconButton", true);
-        remove->setToolTip("删除");
-        remove->setAccessibleName("删除");
+        remove->setToolTip(tr("删除"));
+        remove->setAccessibleName(tr("删除"));
         connect(remove, &QPushButton::clicked, this, [this, noteId = note.id] { deleteTodo(noteId); });
         todoList_->setItemWidget(item, 1, remove);
         if (note.id == id) todoList_->setCurrentItem(item);
     }
     if (!todoList_->currentItem() && todoList_->topLevelItemCount()) todoList_->setCurrentItem(todoList_->topLevelItem(0));
-    todoHint_->setText(!query.isEmpty() ? "没有匹配的事项" : todoStatus_->currentIndex() == 0 ? "暂无进行中的事项" : "暂无已完成的事项");
+    todoHint_->setText(!query.isEmpty() ? tr("没有匹配的事项") : todoStatus_->currentIndex() == 0 ? tr("暂无进行中的事项") : tr("暂无已完成的事项"));
     todoHint_->setVisible(todoList_->topLevelItemCount() == 0);
     refreshTodoDetails();
 }
@@ -982,7 +985,7 @@ void MainWindow::refreshTodoDetails() {
     const QSignalBlocker contentBlocker(todoContent_);
     todoDetails_->setEnabled(note);
     todoTitle_->setText(note ? note->title : QString());
-    todoCategory_->setCurrentText(note ? note->metadata["category"].toString("默认") : QStringLiteral("默认"));
+    todoCategory_->setCurrentIndex(todoCategory_->findData(note ? note->metadata["category"].toString("默认") : QStringLiteral("默认")));
     todoCompleted_->setChecked(note && note->metadata["completed"].toBool());
     todoContent_->setPlainText(note ? note->content : QString());
 }
@@ -991,7 +994,7 @@ void MainWindow::createTodo() {
     auto *book = store_.notebook(currentNotebookId_);
     if (!book || book->type != "todo") return;
     bool accepted = false;
-    const auto title = QInputDialog::getText(this, "新建事项", "事项标题：", QLineEdit::Normal, {}, &accepted).trimmed();
+    const auto title = QInputDialog::getText(this, tr("新建事项"), tr("事项标题："), QLineEdit::Normal, {}, &accepted).trimmed();
     if (!accepted || title.isEmpty()) return;
     Note note;
     note.id = NotebookStore::newId();
@@ -1010,8 +1013,8 @@ void MainWindow::deleteTodo(const QString &noteId) {
     if (!book || book->type != "todo") return;
     auto *note = store_.note(noteId);
     if (!note) return;
-    const auto hint = QStringLiteral("确认删除事项「%1」？该操作不可恢复。").arg(note->title);
-    if (QMessageBox::question(this, "删除事项", hint, QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
+    const auto hint = tr("确认删除事项「%1」？该操作不可恢复。").arg(note->title);
+    if (QMessageBox::question(this, tr("删除事项"), hint, QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
     NotebookStore::removeNoteFiles(*book, *note);
     for (int index = static_cast<int>(book->notes.size()) - 1; index >= 0; --index) {
         if (book->notes[index].id == noteId) book->notes.removeAt(index);
@@ -1024,10 +1027,10 @@ void MainWindow::createTodoCategory() {
     auto *book = store_.notebook(currentNotebookId_);
     if (!book || book->type != "todo") return;
     bool accepted = false;
-    const auto name = QInputDialog::getText(this, "新建分类", "分类名称：", QLineEdit::Normal, {}, &accepted).trimmed();
+    const auto name = QInputDialog::getText(this, tr("新建分类"), tr("分类名称："), QLineEdit::Normal, {}, &accepted).trimmed();
     if (!accepted || name.isEmpty()) return;
-    if (name == "全部" || todoCategory_->findText(name) >= 0) {
-        QMessageBox::information(this, "无法新建分类", "该分类已存在，请使用其他名称。");
+    if (name == "全部" || name == tr("全部") || todoCategory_->findText(name) >= 0 || todoCategory_->findData(name) >= 0) {
+        QMessageBox::information(this, tr("无法新建分类"), tr("该分类已存在，请使用其他名称。"));
         return;
     }
     auto categories = book->config["categories"].toArray();
@@ -1042,10 +1045,10 @@ void MainWindow::renameTodoCategory(const QString &name) {
     auto *book = store_.notebook(currentNotebookId_);
     if (!book || book->type != "todo" || name.isEmpty() || name == QStringLiteral("默认")) return;
     bool accepted = false;
-    const auto newName = QInputDialog::getText(this, "重命名分类", "新的分类名称：", QLineEdit::Normal, name, &accepted).trimmed();
+    const auto newName = QInputDialog::getText(this, tr("重命名分类"), tr("新的分类名称："), QLineEdit::Normal, name, &accepted).trimmed();
     if (!accepted || newName.isEmpty() || newName == name) return;
-    if (newName == QStringLiteral("全部") || todoCategory_->findText(newName) >= 0) {
-        QMessageBox::information(this, "无法重命名分类", "目标分类名称已存在，请使用其他名称。");
+    if (newName == QStringLiteral("全部") || newName == tr("全部") || todoCategory_->findText(newName) >= 0 || todoCategory_->findData(newName) >= 0) {
+        QMessageBox::information(this, tr("无法重命名分类"), tr("目标分类名称已存在，请使用其他名称。"));
         return;
     }
     auto categories = book->config["categories"].toArray();
@@ -1068,9 +1071,9 @@ void MainWindow::deleteTodoCategory(const QString &name) {
     for (const auto &note: book->notes) {
         if (note.metadata["category"].toString() == name) ++count;
     }
-    const auto hint = count > 0 ? QStringLiteral("确认删除分类「%1」？其中 %2 个事项将移至「默认」分类。").arg(name).arg(count)
-                                : QStringLiteral("确认删除分类「%1」？").arg(name);
-    if (QMessageBox::question(this, "删除分类", hint, QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
+    const auto hint = count > 0 ? tr("确认删除分类「%1」？其中 %2 个事项将移至「默认」分类。").arg(name).arg(count)
+                                : tr("确认删除分类「%1」？").arg(name);
+    if (QMessageBox::question(this, tr("删除分类"), hint, QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
     QJsonArray categories;
     for (const auto &value: book->config["categories"].toArray()) {
         if (value.toString() != name) categories.append(value);
@@ -1092,7 +1095,7 @@ void MainWindow::refreshNotebooks() {
         notebooks_->setItemData(notebooks_->count() - 1, NotebookStore::typeLabel(book.type), Qt::UserRole + 1);
         notebooks_->setItemData(notebooks_->count() - 1, book.name + " · " + NotebookStore::typeLabel(book.type), Qt::ToolTipRole);
     }
-    notebooks_->setPlaceholderText("无笔记本");
+    notebooks_->setPlaceholderText(tr("无笔记本"));
     notebooks_->setCurrentIndex(notebooks_->findData(currentNotebookId_));
     auto *book = store_.notebook(currentNotebookId_);
     const bool site = book && book->type == "site";
@@ -1104,7 +1107,7 @@ void MainWindow::refreshNotebooks() {
         autoNumberChapters_->setChecked(book && book->config["autoNumberChapters"].toBool());
     }
     export_->setVisible(book && (book->type == "site" || book->type == "ebook"));
-    export_->setText(site ? "发布站点" : "导出电子书");
+    export_->setText(site ? tr("发布站点") : tr("导出电子书"));
     updatePanels();
     refreshEditor();
 }
@@ -1137,12 +1140,12 @@ void MainWindow::refreshTree() {
         if (!query.isEmpty() && (note.folder || (!note.title.contains(query, Qt::CaseInsensitive) && !note.content.contains(query, Qt::CaseInsensitive)))) continue;
         QStringList groups{QString()};
         if (book->type == "site" && query.isEmpty()) {
-            if (groupBy_->currentIndex() == 0) groups = {note.metadata["category"].toString().isEmpty() ? QStringLiteral("未分类") : note.metadata["category"].toString()};
+            if (groupBy_->currentIndex() == 0) groups = {note.metadata["category"].toString().isEmpty() ? tr("未分类") : note.metadata["category"].toString()};
             else if (groupBy_->currentIndex() == 1) {
                 groups = note.metadata["tags"].toString().split(QRegularExpression("[,，]"), Qt::SkipEmptyParts);
                 for (auto &tag: groups) tag = tag.trimmed();
                 groups.removeDuplicates();
-                if (groups.isEmpty()) groups = {QStringLiteral("无标签")};
+                if (groups.isEmpty()) groups = {tr("无标签")};
             } else
                 groups = {note.metadata["date"].toString().left(7)};
         }
@@ -1194,10 +1197,10 @@ void MainWindow::refreshTree() {
         if ((*active)->data(0, Qt::UserRole).toString() == currentNoteId()) tree_->setCurrentItem(*active);
         ++active;
     }
-    if (!query.isEmpty()) treeHint_->setText(QStringLiteral("找到 %1 篇笔记").arg(matches));
+    if (!query.isEmpty()) treeHint_->setText(tr("找到 %1 篇笔记").arg(matches));
     else
-        treeHint_->setText(book->type == "site" ? "暂无文章，右键新建" : book->type == "ebook" ? "暂无章节，右键添加"
-                                                                                               : "暂无内容，右键新建");
+        treeHint_->setText(book->type == "site" ? tr("暂无文章，右键新建") : book->type == "ebook" ? tr("暂无章节，右键添加")
+                                                                                               : tr("暂无内容，右键新建"));
     treeHint_->setVisible(!query.isEmpty() || book->notes.isEmpty());
 }
 
@@ -1255,7 +1258,7 @@ void MainWindow::activateEditor(const QString &id) {
         EditorSession session;
         auto *documentEditor = new MarkdownEditor(editors_);
         auto *textEdit = documentEditor->getTextEdit();
-        textEdit->setPlaceholderText("开始书写 Markdown...");
+        textEdit->setPlaceholderText(tr("开始书写 Markdown..."));
         textEdit->setProperty("noteId", id);
         session.editor = documentEditor;
         session.menu = documentEditor->createEditorMenu(documentEditor);
@@ -1422,7 +1425,7 @@ void MainWindow::refreshOutline() {
     if (book && book->type == "todo") return;
     outline_->clear();
     const auto *note = store_.note(currentNoteId());
-    outlineHint_->setText(note ? "本文暂无标题" : "打开一篇笔记后自动生成大纲");
+    outlineHint_->setText(note ? tr("本文暂无标题") : tr("打开一篇笔记后自动生成大纲"));
     if (note && editorSessions_.contains(note->id)) {
         QList<QPair<int, QTreeWidgetItem *>> parents;
         for (const auto &heading: editorSessions_[note->id].headings) {
@@ -1442,16 +1445,16 @@ void MainWindow::refreshOutline() {
 void MainWindow::updateStatus() {
     const auto *note = store_.note(currentNoteId());
     if (!note) return;
-    status_->setText(QStringLiteral("%1 字 · %2 行 · %3").arg(note->content.size()).arg(note->content.count('\n') + 1).arg(viewMode_ == ViewMode::Split ? "分屏" : previewModeEnabled_ ? "预览" : "编辑中"));
+    status_->setText(tr("%1 字 · %2 行 · %3").arg(note->content.size()).arg(note->content.count('\n') + 1).arg(viewMode_ == ViewMode::Split ? tr("分屏") : previewModeEnabled_ ? tr("预览") : tr("编辑中")));
 }
 
 void MainWindow::updatePanels() {
     if (!left_ || !right_) return;
-    siteConfig_->setText(width() < 600 ? "配置" : "站点配置");
-    sitePreview_->setText(width() < 600 ? "预览" : "站点预览");
+    siteConfig_->setText(width() < 600 ? tr("配置") : tr("站点配置"));
+    sitePreview_->setText(width() < 600 ? tr("预览") : tr("站点预览"));
     const auto *book = store_.notebook(currentNotebookId_);
-    export_->setText(book && book->type == "site" ? (width() < 600 ? "发布" : "发布站点")
-                                                             : (width() < 600 ? "导出" : "导出电子书"));
+    export_->setText(book && book->type == "site" ? (width() < 600 ? tr("发布") : tr("发布站点"))
+                                                             : (width() < 600 ? tr("导出") : tr("导出电子书")));
     int actionWidth = 0;
     if (!autoNumberChapters_->isHidden()) actionWidth += autoNumberChapters_->sizeHint().width() + 6;
     for (auto *action: {siteConfig_, sitePreview_, export_}) {
@@ -1521,7 +1524,7 @@ void MainWindow::changeEvent(QEvent *event) {
     if (event->type() == QEvent::WindowStateChange) updateResizeHandles();
     if (event->type() == QEvent::WindowStateChange && maximize_) {
         maximize_->setText(isMaximized() ? "❐" : "□");
-        maximize_->setToolTip(isMaximized() ? "还原" : "最大化");
+        maximize_->setToolTip(isMaximized() ? tr("还原") : tr("最大化"));
         maximize_->setAccessibleName(maximize_->toolTip());
     }
 }
@@ -1551,12 +1554,12 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
 
 bool MainWindow::save() {
     if (!storageReady_) {
-        QMessageBox::warning(this, "无法保存", "原有笔记数据读取失败，为避免覆盖，当前修改尚未写入磁盘。");
+        QMessageBox::warning(this, tr("无法保存"), tr("原有笔记数据读取失败，为避免覆盖，当前修改尚未写入磁盘。"));
         return false;
     }
     QString error;
     if (!store_.save(&error)) {
-        QMessageBox::warning(this, "无法保存笔记", error);
+        QMessageBox::warning(this, tr("无法保存笔记"), error);
         return false;
     }
     for (int index = 0; index < tabs_->count(); ++index) {
@@ -1578,7 +1581,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
         QStringList openNotes;
         for (int index = 0; index < tabs_->count(); ++index) openNotes << tabs_->tabData(index).toString();
         session.setValue("session/openNotes", openNotes);
-        if (!quitting_ && session.value("general/minimizeToTray", false).toBool() && QSystemTrayIcon::isSystemTrayAvailable()) {
+        if (!quitting_ && session.value("General/minimizeToTray", false).toBool() && QSystemTrayIcon::isSystemTrayAvailable()) {
             tray_->show();
             hide();
             event->ignore();
@@ -1596,13 +1599,13 @@ void MainWindow::applyUiSettings() {
     if (!stylesheet.open(QIODevice::ReadOnly)) return;
     auto style = QString::fromUtf8(stylesheet.readAll());
     QSettings settings;
-    auto family = settings.value("general/uiFontFamily").toString();
+    auto family = settings.value("General/uiFontFamily").toString();
     if (!family.isEmpty()) {
         family.replace('\\', "\\\\");
         family.replace('"', "\\\"");
         style.replace(QRegularExpression("font-family:[^;]+;"), "font-family: \"" + family + "\";");
     }
-    const int size = qBound(10, settings.value("general/uiFontSize", 14).toInt(), 24);
+    const int size = qBound(10, settings.value("General/uiFontSize", 14).toInt(), 24);
     const QRegularExpression sizes("font-size: (\\d+)px;");
     auto matches = sizes.globalMatch(style);
     QString scaled;
@@ -1629,9 +1632,9 @@ void MainWindow::setupTray() {
         raise();
         activateWindow();
     };
-    menu->addAction("显示主窗口", this, restore);
+    menu->addAction(tr("显示主窗口"), this, restore);
     menu->addSeparator();
-    auto *quit = menu->addAction("退出", this, [this] {
+    auto *quit = menu->addAction(tr("退出"), this, [this] {
         quitting_ = true;
         if (close()) QApplication::quit();
         else quitting_ = false;
@@ -1641,22 +1644,22 @@ void MainWindow::setupTray() {
     connect(tray_, &QSystemTrayIcon::activated, this, [restore](QSystemTrayIcon::ActivationReason reason) {
         if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick) restore();
     });
-    tray_->setVisible(QSettings().value("general/minimizeToTray", false).toBool() && QSystemTrayIcon::isSystemTrayAvailable());
+    tray_->setVisible(QSettings().value("General/minimizeToTray", false).toBool() && QSystemTrayIcon::isSystemTrayAvailable());
 }
 
 void MainWindow::checkForUpdates(QLabel *status) {
     if (!updateChecker_) updateChecker_ = new UpdateChecker(this);
     if (status) {
-        status->setText("正在检查更新…");
+        status->setText(tr("正在检查更新…"));
         connect(updateChecker_, &UpdateChecker::finished, status, [status](const QString &version, const QString &error) {
-            status->setText(!error.isEmpty() ? error : version.isEmpty() ? "当前已是最新版本。" : "发现新版本 " + version + "，可前往发布页下载。");
+            status->setText(!error.isEmpty() ? error : version.isEmpty() ? tr("当前已是最新版本。") : tr("发现新版本 %1，可前往发布页下载。").arg(version));
         }, Qt::SingleShotConnection);
     } else {
         connect(updateChecker_, &UpdateChecker::finished, this, [this](const QString &version, const QString &) {
-            if (version.isEmpty() || !QSettings().value("general/checkUpdatesOnStartup", true).toBool()) return;
-            auto *notice = new QMessageBox(QMessageBox::Information, "发现新版本", "qsnote " + version + " 已发布。", QMessageBox::Close, this);
+            if (version.isEmpty() || !QSettings().value("General/checkUpdatesOnStartup", true).toBool()) return;
+            auto *notice = new QMessageBox(QMessageBox::Information, tr("发现新版本"), tr("qsnote %1 已发布。").arg(version), QMessageBox::Close, this);
             notice->setAttribute(Qt::WA_DeleteOnClose);
-            auto *download = notice->addButton("前往下载", QMessageBox::ActionRole);
+            auto *download = notice->addButton(tr("前往下载"), QMessageBox::ActionRole);
             connect(download, &QPushButton::clicked, notice, [] {
                 QDesktopServices::openUrl(QUrl("https://github.com/qiushao/qsnote/releases/latest"));
             });
@@ -1672,9 +1675,9 @@ void MainWindow::showSettings() {
     auto *bar = new QWidget(&dialog);
     bar->setObjectName("dialogBar");
     auto *barLayout = row(bar, 16, 11);
-    barLayout->addWidget(label("设置", bar));
+    barLayout->addWidget(label(tr("设置"), bar));
     barLayout->addStretch();
-    auto *close = button("关闭", "closeSettings", bar);
+    auto *close = button(tr("关闭"), "closeSettings", bar);
     barLayout->addWidget(close);
     layout->addWidget(bar);
     auto *navigation = new QWidget(&dialog);
@@ -1706,41 +1709,42 @@ void MainWindow::showSettings() {
         return content;
     };
     QSettings settings;
-    auto *general = section("generalSettingsCard", "常用设置");
+    auto *general = section("generalSettingsCard", tr("常用设置"));
     auto *fields = new QFormLayout;
     fields->setRowWrapPolicy(QFormLayout::WrapLongRows);
     fields->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     auto *language = new QComboBox(body);
     language->setObjectName("uiLanguage");
-    language->addItem("跟随系统", "system");
+    language->addItem(tr("跟随系统"), "system");
     language->addItem("简体中文", "zh_CN");
-    language->setCurrentIndex(qMax(0, language->findData(settings.value("general/language", "system"))));
-    fields->addRow("语言", language);
+    language->addItem("English", "en_US");
+    language->setCurrentIndex(qMax(0, language->findData(settings.value("General/language", "system"))));
+    fields->addRow(tr("语言"), language);
     auto *font = new QFontComboBox(body);
     font->setObjectName("uiFontFamily");
-    font->setCurrentFont(QFont(settings.value("general/uiFontFamily", this->font().family()).toString()));
+    font->setCurrentFont(QFont(settings.value("General/uiFontFamily", this->font().family()).toString()));
     font->setMinimumWidth(0);
     font->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     auto *fontSize = new QSpinBox(body);
     fontSize->setObjectName("uiFontSize");
     fontSize->setRange(10, 24);
-    fontSize->setValue(settings.value("general/uiFontSize", 14).toInt());
-    fields->addRow("UI 字体", font);
-    fields->addRow("UI 字号（px）", fontSize);
+    fontSize->setValue(settings.value("General/uiFontSize", 14).toInt());
+    fields->addRow(tr("UI 字体"), font);
+    fields->addRow(tr("UI 字号（px）"), fontSize);
     general->addLayout(fields);
-    auto *tray = new QCheckBox("关闭时最小化到系统托盘", body);
+    auto *tray = new QCheckBox(tr("关闭时最小化到系统托盘"), body);
     tray->setObjectName("minimizeToTray");
-    tray->setChecked(settings.value("general/minimizeToTray", false).toBool());
+    tray->setChecked(settings.value("General/minimizeToTray", false).toBool());
     general->addWidget(tray);
-    general->addWidget(label("托盘菜单可恢复窗口或退出；系统没有可用托盘时正常退出。", body, true));
-    auto *updates = new QCheckBox("启动时检查更新", body);
+    general->addWidget(label(tr("托盘菜单可恢复窗口或退出；系统没有可用托盘时正常退出。"), body, true));
+    auto *updates = new QCheckBox(tr("启动时检查更新"), body);
     updates->setObjectName("checkUpdatesOnStartup");
-    updates->setChecked(settings.value("general/checkUpdatesOnStartup", true).toBool());
+    updates->setChecked(settings.value("General/checkUpdatesOnStartup", true).toBool());
     general->addWidget(updates);
-    general->addWidget(label("通过 GitHub 检查新版本，有更新时提示下载。", body, true));
-    general->addWidget(label("设置保存后生效。语言设置在重启后生效，暂无对应翻译时使用简体中文。", body, true));
+    general->addWidget(label(tr("通过 GitHub 检查新版本，有更新时提示下载。"), body, true));
+    general->addWidget(label(tr("设置保存后生效。语言设置在重启后生效。"), body, true));
 
-    auto *editorCard = section("editorSettingsCard", "编辑器设置");
+    auto *editorCard = section("editorSettingsCard", tr("编辑器设置"));
     // An empty workspace still allows editing the same settings as an open note.
     auto *settingsEditor = markdownEditor_;
     if (!settingsEditor) {
@@ -1751,21 +1755,21 @@ void MainWindow::showSettings() {
         });
     }
     std::function<void()> applyEditor;
-    editorCard->addWidget(label("应用于所有笔记。", body, true));
+    editorCard->addWidget(label(tr("应用于所有笔记。"), body, true));
     editorCard->addWidget(settingsEditor->createSettingsPage(body, applyEditor));
 
-    auto *about = section("aboutSettingsCard", "关于");
+    auto *about = section("aboutSettingsCard", tr("关于"));
     about->addWidget(label("qsnote", body));
-    about->addWidget(label("版本 " + QCoreApplication::applicationVersion(), body, true));
-    about->addWidget(label("本地 Markdown 笔记、静态站点、电子书与待办管理。", body, true));
-    auto *check = button("检查更新", "checkUpdates", body);
+    about->addWidget(label(tr("版本 %1").arg(QCoreApplication::applicationVersion()), body, true));
+    about->addWidget(label(tr("本地 Markdown 笔记、静态站点、电子书与待办管理。"), body, true));
+    auto *check = button(tr("检查更新"), "checkUpdates", body);
     about->addWidget(check, 0, Qt::AlignLeft);
     auto *updateStatus = label("", body, true);
     updateStatus->setObjectName("updateStatus");
     updateStatus->setTextFormat(Qt::PlainText);
     about->addWidget(updateStatus);
     connect(check, &QPushButton::clicked, &dialog, [this, updateStatus] { checkForUpdates(updateStatus); });
-    auto *project = label("<a href=\"https://github.com/qiushao/qsnote\">项目主页</a> · <a href=\"https://github.com/qiushao/qsnote/releases/latest\">版本下载</a>", body);
+    auto *project = label(tr("<a href=\"https://github.com/qiushao/qsnote\">项目主页</a> · <a href=\"https://github.com/qiushao/qsnote/releases/latest\">版本下载</a>"), body);
     project->setOpenExternalLinks(true);
     about->addWidget(project);
     cards->addStretch();
@@ -1778,20 +1782,20 @@ void MainWindow::showSettings() {
     auto *footer = new QWidget(&dialog);
     auto *footerLayout = row(footer, 16, 12);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, footer);
-    buttons->button(QDialogButtonBox::Save)->setText("保存");
+    buttons->button(QDialogButtonBox::Save)->setText(tr("保存"));
     buttons->button(QDialogButtonBox::Save)->setProperty("primary", true);
-    buttons->button(QDialogButtonBox::Cancel)->setText("取消");
+    buttons->button(QDialogButtonBox::Cancel)->setText(tr("取消"));
     footerLayout->addWidget(buttons);
     layout->addWidget(footer);
     connect(close, &QPushButton::clicked, &dialog, &QDialog::reject);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     if (dialog.exec() != QDialog::Accepted) return;
-    settings.setValue("general/language", language->currentData());
-    settings.setValue("general/uiFontFamily", font->currentFont().family());
-    settings.setValue("general/uiFontSize", fontSize->value());
-    settings.setValue("general/minimizeToTray", tray->isChecked());
-    settings.setValue("general/checkUpdatesOnStartup", updates->isChecked());
+    settings.setValue("General/language", language->currentData());
+    settings.setValue("General/uiFontFamily", font->currentFont().family());
+    settings.setValue("General/uiFontSize", fontSize->value());
+    settings.setValue("General/minimizeToTray", tray->isChecked());
+    settings.setValue("General/checkUpdatesOnStartup", updates->isChecked());
     settings.sync();
     applyUiSettings();
     applyEditor();
@@ -1801,18 +1805,18 @@ void MainWindow::showSettings() {
 void MainWindow::createNotebook() {
     OverlayDialog dialog(this, "newNotebookDialog");
     auto *layout = column(&dialog, 22, 12);
-    auto *title = label("新建笔记本", &dialog);
+    auto *title = label(tr("新建笔记本"), &dialog);
     title->setStyleSheet("font-size: 15px; font-weight: 600;");
     layout->addWidget(title);
     auto *name = new QLineEdit(&dialog);
     name->setObjectName("notebookName");
-    name->setPlaceholderText("笔记本名称");
+    name->setPlaceholderText(tr("笔记本名称"));
     auto *type = new QComboBox(&dialog);
     type->setObjectName("notebookType");
-    type->addItem("普通笔记本（目录 + 元数据文件）", "normal");
-    type->addItem("静态站点（Pure）", "site");
-    type->addItem("电子书（章节目录 · 多格式导出）", "ebook");
-    type->addItem("Todo List（分类 · 待办事项）", "todo");
+    type->addItem(tr("普通笔记本（目录 + 元数据文件）"), "normal");
+    type->addItem(tr("静态站点（Pure）"), "site");
+    type->addItem(tr("电子书（章节目录 · 多格式导出）"), "ebook");
+    type->addItem(tr("Todo List（分类 · 待办事项）"), "todo");
     QString locationRoot = NotebookStore::defaultRoot();
     auto *location = new QLineEdit(&dialog);
     location->setObjectName("notebookLocation");
@@ -1821,22 +1825,22 @@ void MainWindow::createNotebook() {
     auto *locationRow = new QWidget(&dialog);
     auto *locationLayout = row(locationRow, 0, 0, 6);
     locationLayout->addWidget(location, 1);
-    auto *browse = button("浏览…", "browseLocation", locationRow);
+    auto *browse = button(tr("浏览…"), "browseLocation", locationRow);
     locationLayout->addWidget(browse);
     const auto updateLocation = [&locationRoot, name, location] {
         const auto title = name->text().trimmed();
-        location->setText(locationRoot + "/" + NotebookStore::sanitized(title.isEmpty() ? QStringLiteral("未命名笔记本") : title));
+        location->setText(locationRoot + "/" + NotebookStore::sanitized(title.isEmpty() ? tr("未命名笔记本") : title));
     };
     updateLocation();
     connect(name, &QLineEdit::textChanged, location, updateLocation);
     connect(browse, &QPushButton::clicked, &dialog, [&locationRoot, &dialog, updateLocation] {
-        const auto chosen = QFileDialog::getExistingDirectory(&dialog, "选择笔记本保存目录", locationRoot);
+        const auto chosen = QFileDialog::getExistingDirectory(&dialog, tr("选择笔记本保存目录"), locationRoot);
         if (!chosen.isEmpty()) {
             locationRoot = chosen;
             updateLocation();
         }
     });
-    for (const auto &field: QList<QPair<QString, QWidget *>>{{"名称", name}, {"类型", type}, {"保存位置", locationRow}}) {
+    for (const auto &field: QList<QPair<QString, QWidget *>>{{tr("名称"), name}, {tr("类型"), type}, {tr("保存位置"), locationRow}}) {
         auto *caption = label(field.first, &dialog, true);
         caption->setBuddy(field.second);
         layout->addWidget(caption);
@@ -1846,8 +1850,8 @@ void MainWindow::createNotebook() {
     auto *actions = new QWidget(&dialog);
     auto *actionsLayout = row(actions, 0, 0, 8);
     actionsLayout->addStretch();
-    auto *cancel = button("取消", "cancelNotebook", actions);
-    auto *create = button("创建", "confirmNotebook", actions);
+    auto *cancel = button(tr("取消"), "cancelNotebook", actions);
+    auto *create = button(tr("创建"), "confirmNotebook", actions);
     create->setProperty("primary", true);
     create->setDefault(true);
     actionsLayout->addWidget(cancel);
@@ -1859,11 +1863,11 @@ void MainWindow::createNotebook() {
     if (dialog.exec() != QDialog::Accepted) return;
     Notebook book;
     book.id = NotebookStore::newId();
-    book.name = name->text().trimmed().isEmpty() ? QStringLiteral("未命名笔记本") : name->text().trimmed();
+    book.name = name->text().trimmed().isEmpty() ? tr("未命名笔记本") : name->text().trimmed();
     book.type = type->currentData().toString();
     book.path = NotebookStore::uniqueDirectory(locationRoot, book.name);
     if (!QDir().mkpath(book.path)) {
-        QMessageBox::warning(this, "无法创建笔记本", "无法创建目录：" + book.path);
+        QMessageBox::warning(this, tr("无法创建笔记本"), tr("无法创建目录：") + book.path);
         return;
     }
     if (book.type == "site") {
@@ -1876,7 +1880,7 @@ void MainWindow::createNotebook() {
 }
 
 void MainWindow::openNotebook() {
-    const auto directory = QFileDialog::getExistingDirectory(this, "打开笔记本", NotebookStore::defaultRoot());
+    const auto directory = QFileDialog::getExistingDirectory(this, tr("打开笔记本"), NotebookStore::defaultRoot());
     if (directory.isEmpty()) return;
     const QString path = QDir(directory).absolutePath();
     for (const auto &book: store_.notebooks) {
@@ -1890,7 +1894,7 @@ void MainWindow::openNotebook() {
     Notebook book;
     QString error;
     if (!NotebookStore::readNotebook(path, book, &error)) {
-        QMessageBox::warning(this, "无法打开笔记本", error);
+        QMessageBox::warning(this, tr("无法打开笔记本"), error);
         return;
     }
     currentNotebookId_ = book.id;
@@ -1903,8 +1907,8 @@ void MainWindow::openNotebook() {
 void MainWindow::closeNotebook() {
     const auto *book = store_.notebook(currentNotebookId_);
     if (!book) return;
-    const auto hint = QStringLiteral("关闭笔记本「%1」？\n关闭后不再显示在列表中，磁盘上的文件会保留，之后可通过「打开笔记本」重新加入。").arg(book->name);
-    if (QMessageBox::question(this, "关闭笔记本", hint, QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
+    const auto hint = tr("关闭笔记本「%1」？\n关闭后不再显示在列表中，磁盘上的文件会保留，之后可通过「打开笔记本」重新加入。").arg(book->name);
+    if (QMessageBox::question(this, tr("关闭笔记本"), hint, QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
     // 先落盘，保证笔记本目录中的索引包含最新元信息，供之后恢复。
     if (!save()) return;
     const QString id = book->id;
@@ -1949,23 +1953,23 @@ void MainWindow::createNote(const QString &parentId, bool folder) {
     if (book->type == "site") {
         const auto noteId = NotebookStore::newId();
         QDialog dialog(this);
-        dialog.setWindowTitle("新建文章");
+        dialog.setWindowTitle(tr("新建文章"));
         auto *layout = new QFormLayout(&dialog);
         auto *titleInput = new QLineEdit(&dialog);
-        layout->addRow("名称：", titleInput);
+        layout->addRow(tr("名称："), titleInput);
         auto *categoryInput = new QComboBox(&dialog);
         categoryInput->addItems(siteCategories(*book));
-        layout->addRow("分类：", categoryInput);
+        layout->addRow(tr("分类："), categoryInput);
         auto *tagsInput = new QLineEdit(&dialog);
-        tagsInput->setPlaceholderText("逗号分隔");
-        layout->addRow("标签：", tagsInput);
+        tagsInput->setPlaceholderText(tr("逗号分隔"));
+        layout->addRow(tr("标签："), tagsInput);
         auto *dateInput = new QDateEdit(QDate::currentDate(), &dialog);
         dateInput->setDisplayFormat("yyyy-MM-dd");
         dateInput->setCalendarPopup(true);
-        layout->addRow("日期：", dateInput);
+        layout->addRow(tr("日期："), dateInput);
         auto *slugInput = new QLineEdit("post-" + noteId.left(8), &dialog);
         layout->addRow("Slug：", slugInput);
-        auto *draftInput = new QCheckBox("保存为草稿", &dialog);
+        auto *draftInput = new QCheckBox(tr("保存为草稿"), &dialog);
         layout->addRow(draftInput);
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
         connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
@@ -1988,10 +1992,10 @@ void MainWindow::createNote(const QString &parentId, bool folder) {
         openNote(note.id);
         return;
     }
-    const auto kind = folder ? QStringLiteral("文件夹") : book->type == "ebook" ? QStringLiteral("章节")
-                                                                                : QStringLiteral("笔记");
+    const auto kind = folder ? tr("文件夹") : book->type == "ebook" ? tr("章节")
+                                                                                : tr("笔记");
     bool accepted = false;
-    auto title = QInputDialog::getText(this, "新建" + kind, kind + "名称：", QLineEdit::Normal, {}, &accepted).trimmed();
+    auto title = QInputDialog::getText(this, tr("新建%1").arg(kind), tr("%1名称：").arg(kind), QLineEdit::Normal, {}, &accepted).trimmed();
     if (!accepted || title.isEmpty()) return;
     if (book->type == "normal" && !folder && !title.endsWith(".md")) title += ".md";
     Note note;
@@ -2012,28 +2016,28 @@ void MainWindow::showTreeMenu(const QPoint &position) {
     auto *note = store_.note(id);
     QMenu menu(this);
     if (book && book->type == "todo") {
-        menu.addAction("新建分类", this, &MainWindow::createTodoCategory);
+        menu.addAction(tr("新建分类"), this, &MainWindow::createTodoCategory);
         // 「全部」与内置兜底分类「默认」不可重命名/删除。
         const auto category = item ? item->data(0, Qt::UserRole).toString() : QString();
         if (!category.isEmpty() && category != QStringLiteral("默认")) {
-            menu.addAction("重命名分类", this, [this, category] { renameTodoCategory(category); });
-            menu.addAction("删除分类", this, [this, category] { deleteTodoCategory(category); });
+            menu.addAction(tr("重命名分类"), this, [this, category] { renameTodoCategory(category); });
+            menu.addAction(tr("删除分类"), this, [this, category] { deleteTodoCategory(category); });
         }
         menu.addSeparator();
-        menu.addAction("打开笔记本…", this, &MainWindow::openNotebook);
-        menu.addAction("关闭笔记本", this, &MainWindow::closeNotebook);
+        menu.addAction(tr("打开笔记本…"), this, &MainWindow::openNotebook);
+        menu.addAction(tr("关闭笔记本"), this, &MainWindow::closeNotebook);
         menu.exec(tree_->viewport()->mapToGlobal(position));
         return;
     }
     if (book && (!note || note->folder)) {
-        menu.addAction(book->type == "site" ? "新建文章" : book->type == "ebook" ? "添加章节"
-                                                                                 : "新建笔记",
+        menu.addAction(book->type == "site" ? tr("新建文章") : book->type == "ebook" ? tr("添加章节")
+                                                                                 : tr("新建笔记"),
                        this, [this, id, note] { createNote(note ? id : QString(), false); });
-        if (book->type == "normal") menu.addAction("新建文件夹", this, [this, id, note] { createNote(note ? id : QString(), true); });
+        if (book->type == "normal") menu.addAction(tr("新建文件夹"), this, [this, id, note] { createNote(note ? id : QString(), true); });
         if (book->type == "site") {
-            menu.addAction("新建分类", this, [this, book] {
+            menu.addAction(tr("新建分类"), this, [this, book] {
                 bool accepted = false;
-                const auto name = QInputDialog::getText(this, "新建分类", "分类名称：", QLineEdit::Normal, {}, &accepted).trimmed();
+                const auto name = QInputDialog::getText(this, tr("新建分类"), tr("分类名称："), QLineEdit::Normal, {}, &accepted).trimmed();
                 if (!accepted || name.isEmpty()) return;
                 auto categories = book->config["categories"].toArray();
                 for (const auto &value: categories) {
@@ -2043,11 +2047,11 @@ void MainWindow::showTreeMenu(const QPoint &position) {
                 book->config["categories"] = categories;
                 save();
             });
-            menu.addAction("站点配置", this, &MainWindow::showSiteConfig);
+            menu.addAction(tr("站点配置"), this, &MainWindow::showSiteConfig);
         }
     }
     if (book && note && book->type == "ebook") {
-        menu.addAction("添加子章节", this, [this, id] { createNote(id, false); });
+        menu.addAction(tr("添加子章节"), this, [this, id] { createNote(id, false); });
         menu.addSeparator();
         QList<int> siblings;
         int current = -1;
@@ -2057,7 +2061,7 @@ void MainWindow::showTreeMenu(const QPoint &position) {
             siblings.append(index);
         }
         for (int direction: {-1, 1}) {
-            auto *action = menu.addAction(direction < 0 ? "上移" : "下移");
+            auto *action = menu.addAction(direction < 0 ? tr("上移") : tr("下移"));
             const int target = current + direction;
             action->setEnabled(target >= 0 && target < siblings.size());
             connect(action, &QAction::triggered, this, [this, book, siblings, current, target] {
@@ -2066,14 +2070,14 @@ void MainWindow::showTreeMenu(const QPoint &position) {
                 refreshTree();
             });
         }
-        auto *indent = menu.addAction("缩进为子章节");
+        auto *indent = menu.addAction(tr("缩进为子章节"));
         indent->setEnabled(current > 0);
         connect(indent, &QAction::triggered, this, [this, book, id, siblings, current] {
             store_.note(id)->parentId = book->notes[siblings[current - 1]].id;
             save();
             refreshTree();
         });
-        auto *outdent = menu.addAction("提升层级");
+        auto *outdent = menu.addAction(tr("提升层级"));
         outdent->setEnabled(!note->parentId.isEmpty());
         connect(outdent, &QAction::triggered, this, [this, id] {
             auto *target = store_.note(id);
@@ -2096,28 +2100,28 @@ void MainWindow::showTreeMenu(const QPoint &position) {
     if (book && note) {
         if (!menu.actions().isEmpty()) menu.addSeparator();
         if (book->type == "site") {
-            menu.addAction("属性更改", this, [this, book, id] {
+            menu.addAction(tr("属性更改"), this, [this, book, id] {
                 auto *target = store_.note(id);
                 QDialog dialog(this);
-                dialog.setWindowTitle("文章属性");
+                dialog.setWindowTitle(tr("文章属性"));
                 auto *layout = new QFormLayout(&dialog);
                 auto *titleInput = new QLineEdit(target->title, &dialog);
-                layout->addRow("名称：", titleInput);
+                layout->addRow(tr("名称："), titleInput);
                 auto *categoryInput = new QComboBox(&dialog);
                 categoryInput->addItems(siteCategories(*book));
                 const auto currentCategory = target->metadata["category"].toString();
                 categoryInput->setCurrentIndex(qMax(0, categoryInput->findText(currentCategory)));
-                layout->addRow("分类：", categoryInput);
+                layout->addRow(tr("分类："), categoryInput);
                 auto *tagsInput = new QLineEdit(target->metadata["tags"].toString(), &dialog);
-                tagsInput->setPlaceholderText("逗号分隔");
-                layout->addRow("标签：", tagsInput);
+                tagsInput->setPlaceholderText(tr("逗号分隔"));
+                layout->addRow(tr("标签："), tagsInput);
                 auto *dateInput = new QDateEdit(QDate::fromString(target->metadata["date"].toString(), Qt::ISODate), &dialog);
                 dateInput->setDisplayFormat("yyyy-MM-dd");
                 dateInput->setCalendarPopup(true);
-                layout->addRow("日期：", dateInput);
+                layout->addRow(tr("日期："), dateInput);
                 auto *slugInput = new QLineEdit(target->metadata["slug"].toString(), &dialog);
                 layout->addRow("Slug：", slugInput);
-                auto *draftInput = new QCheckBox("保存为草稿", &dialog);
+                auto *draftInput = new QCheckBox(tr("保存为草稿"), &dialog);
                 draftInput->setChecked(target->metadata["draft"].toBool());
                 layout->addRow(draftInput);
                 auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
@@ -2135,18 +2139,18 @@ void MainWindow::showTreeMenu(const QPoint &position) {
                 refreshTree();
             });
         } else {
-            menu.addAction("重命名", this, [this, id] {
+            menu.addAction(tr("重命名"), this, [this, id] {
             auto *target = store_.note(id);
             bool accepted = false;
-            const auto title = QInputDialog::getText(this, "重命名", "名称：", QLineEdit::Normal, target->title, &accepted).trimmed();
+            const auto title = QInputDialog::getText(this, tr("重命名"), tr("名称："), QLineEdit::Normal, target->title, &accepted).trimmed();
             if (!accepted || title.isEmpty()) return;
             target->title = title;
             save();
             refreshTree();
         });
         }
-        menu.addAction("删除", this, [this, id] {
-            if (QMessageBox::question(this, "删除", "确认删除此内容及其子项？该操作不可恢复。", QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
+        menu.addAction(tr("删除"), this, [this, id] {
+            if (QMessageBox::question(this, tr("删除"), tr("确认删除此内容及其子项？该操作不可恢复。"), QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
             auto *owner = store_.owner(id);
             QSet<QString> removed{id};
             bool changed = true;
@@ -2180,8 +2184,8 @@ void MainWindow::showTreeMenu(const QPoint &position) {
         });
     }
     if (!menu.actions().isEmpty()) menu.addSeparator();
-    menu.addAction("打开笔记本…", this, &MainWindow::openNotebook);
-    if (book) menu.addAction("关闭笔记本", this, &MainWindow::closeNotebook);
+    menu.addAction(tr("打开笔记本…"), this, &MainWindow::openNotebook);
+    if (book) menu.addAction(tr("关闭笔记本"), this, &MainWindow::closeNotebook);
     menu.exec(tree_->viewport()->mapToGlobal(position));
 }
 
@@ -2193,9 +2197,9 @@ void MainWindow::showSiteConfig() {
     auto *bar = new QWidget(&dialog);
     bar->setObjectName("dialogBar");
     auto *barLayout = row(bar, 16, 11);
-    barLayout->addWidget(label("站点配置", bar));
+    barLayout->addWidget(label(tr("站点配置"), bar));
     barLayout->addStretch();
-    auto *close = button("关闭", "closeSiteConfig", bar);
+    auto *close = button(tr("关闭"), "closeSiteConfig", bar);
     barLayout->addWidget(close);
     layout->addWidget(bar);
     auto *navigation = new QWidget(&dialog);
@@ -2263,13 +2267,13 @@ void MainWindow::showSiteConfig() {
         form->addWidget(container);
         return container;
     };
-    section("siteBasicCard", "基本信息");
-    field("title", "站点标题");
-    field("description", "站点描述");
-    field("author", "作者");
-    field("domain", "域名");
-    section("siteCommentsCard", "评论");
-    auto *comments = field("commentPlatform", "评论平台", {"关闭", "Valine", "Gitalk", "Disqus"}, {"none", "valine", "gitalk", "disqus"})->findChild<QComboBox *>();
+    section("siteBasicCard", tr("基本信息"));
+    field("title", tr("站点标题"));
+    field("description", tr("站点描述"));
+    field("author", tr("作者"));
+    field("domain", tr("域名"));
+    section("siteCommentsCard", tr("评论"));
+    auto *comments = field("commentPlatform", tr("评论平台"), {tr("关闭"), "Valine", "Gitalk", "Disqus"}, {"none", "valine", "gitalk", "disqus"})->findChild<QComboBox *>();
     auto commentField = [&](const QString &key, const QString &caption, const QString &platform) {
         auto *container = field(key, caption);
         container->setVisible(comments->currentData().toString() == platform);
@@ -2277,17 +2281,17 @@ void MainWindow::showSiteConfig() {
             container->setVisible(comments->currentData().toString() == platform);
         });
     };
-    commentField("commentOwner", "GitHub 用户", "gitalk");
-    commentField("commentRepo", "评论仓库", "gitalk");
+    commentField("commentOwner", tr("GitHub 用户"), "gitalk");
+    commentField("commentRepo", tr("评论仓库"), "gitalk");
     commentField("clientId", "Client ID", "gitalk");
     commentField("clientSecret", "Client Secret", "gitalk");
     commentField("disqus", "Disqus Shortname", "disqus");
     commentField("valineAppId", "Valine App ID", "valine");
     commentField("valineAppKey", "Valine App Key", "valine");
-    section("siteThemeCard", "主题与页脚");
-    field("theme", "站点主题", {"Pure", "Stellar"}, {"pure", "stellar"});
-    field("footer", "页脚文字");
-    section("siteCategoriesCard", "分类管理");
+    section("siteThemeCard", tr("主题与页脚"));
+    field("theme", tr("站点主题"), {"Pure", "Stellar"}, {"pure", "stellar"});
+    field("footer", tr("页脚文字"));
+    section("siteCategoriesCard", tr("分类管理"));
     auto *categories = new QListWidget(card);
     categories->setObjectName("siteCategories");
     categories->setMinimumHeight(120);
@@ -2296,15 +2300,15 @@ void MainWindow::showSiteConfig() {
     form->addWidget(categories);
     auto *categoryActions = new QWidget(card);
     auto *categoryLayout = row(categoryActions, 0, 0, 8);
-    auto *addCategory = button("新建", "addSiteCategory", categoryActions);
-    auto *renameCategory = button("重命名", "renameSiteCategory", categoryActions);
-    auto *deleteCategory = button("删除", "deleteSiteCategory", categoryActions);
+    auto *addCategory = button(tr("新建"), "addSiteCategory", categoryActions);
+    auto *renameCategory = button(tr("重命名"), "renameSiteCategory", categoryActions);
+    auto *deleteCategory = button(tr("删除"), "deleteSiteCategory", categoryActions);
     categoryLayout->addWidget(addCategory);
     categoryLayout->addWidget(renameCategory);
     categoryLayout->addWidget(deleteCategory);
     categoryLayout->addStretch();
     form->addWidget(categoryActions);
-    form->addWidget(label("删除分类后，文章将移入 default；默认分类不可重命名或删除。", card, true));
+    form->addWidget(label(tr("删除分类后，文章将移入 default；默认分类不可重命名或删除。"), card, true));
     connect(categories, &QListWidget::currentTextChanged, &dialog, [renameCategory, deleteCategory](const QString &name) {
         const bool editable = !name.isEmpty() && name != "default";
         renameCategory->setEnabled(editable);
@@ -2322,12 +2326,12 @@ void MainWindow::showSiteConfig() {
     const auto editCategory = [book, categories, updateCategories, &dialog](bool rename) {
         const auto previous = rename ? categories->currentItem()->text() : QString();
         bool accepted = false;
-        const auto name = QInputDialog::getText(&dialog, rename ? "重命名分类" : "新建分类", "分类名称：",
+        const auto name = QInputDialog::getText(&dialog, rename ? tr("重命名分类") : tr("新建分类"), tr("分类名称："),
                                               QLineEdit::Normal, previous, &accepted).trimmed();
         if (!accepted || name.isEmpty() || name == previous) return;
         auto names = siteCategories(*book);
         if (names.contains(name)) {
-            QMessageBox::warning(&dialog, "分类已存在", "请使用其他分类名称。");
+            QMessageBox::warning(&dialog, tr("分类已存在"), tr("请使用其他分类名称。"));
             return;
         }
         if (rename) {
@@ -2344,7 +2348,7 @@ void MainWindow::showSiteConfig() {
     connect(renameCategory, &QPushButton::clicked, &dialog, [editCategory] { editCategory(true); });
     connect(deleteCategory, &QPushButton::clicked, &dialog, [book, categories, updateCategories, &dialog] {
         const auto name = categories->currentItem()->text();
-        if (QMessageBox::question(&dialog, "删除分类", QString("删除分类「%1」？其中的文章将移入 default，不会删除文章。").arg(name),
+        if (QMessageBox::question(&dialog, tr("删除分类"), tr("删除分类「%1」？其中的文章将移入 default，不会删除文章。").arg(name),
                                   QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
         auto names = siteCategories(*book);
         names.removeAll(name);
@@ -2353,7 +2357,7 @@ void MainWindow::showSiteConfig() {
         }
         updateCategories(names, "default");
     });
-    section("siteLinksCard", "友链");
+    section("siteLinksCard", tr("友链"));
     auto *links = new QWidget(card);
     auto *linksLayout = column(links, 0, 6);
     auto appendLink = [this, book, links, linksLayout](const QJsonObject &value) {
@@ -2362,7 +2366,7 @@ void MainWindow::showSiteConfig() {
         for (const auto &key: {QStringLiteral("name"), QStringLiteral("url")}) {
             auto *input = new QLineEdit(value[key].toString(), container);
             input->setObjectName(key);
-            input->setPlaceholderText(key == "name" ? "名称" : "https://");
+            input->setPlaceholderText(key == "name" ? tr("名称") : "https://");
             input->setMinimumWidth(0);
             linkLayout->addWidget(input, 1);
             connect(input, &QLineEdit::textEdited, links, [this, book, links] {
@@ -2375,7 +2379,7 @@ void MainWindow::showSiteConfig() {
                 saveTimer_->start();
             });
         }
-        auto *remove = button("删除", "removeLink", container);
+        auto *remove = button(tr("删除"), "removeLink", container);
         linkLayout->addWidget(remove);
         connect(remove, &QPushButton::clicked, links, [container] {
             container->hide();
@@ -2387,11 +2391,11 @@ void MainWindow::showSiteConfig() {
     };
     for (const auto &entry: book->config["links"].toArray()) appendLink(entry.toObject());
     form->addWidget(links);
-    auto *addLink = button("＋ 添加友链", "addLink", card);
+    auto *addLink = button(tr("＋ 添加友链"), "addLink", card);
     form->addWidget(addLink, 0, Qt::AlignLeft);
     connect(addLink, &QPushButton::clicked, &dialog, [appendLink] { appendLink({}); });
-    section("sitePublishCard", "生成与发布");
-    auto *method = field("publishMethod", "发布方式", {"请选择", "GitHub Pages", "SSH SCP"}, {"", "github", "scp"})->findChild<QComboBox *>();
+    section("sitePublishCard", tr("生成与发布"));
+    auto *method = field("publishMethod", tr("发布方式"), {tr("请选择"), "GitHub Pages", "SSH SCP"}, {"", "github", "scp"})->findChild<QComboBox *>();
     auto publishField = [&](const QString &key, const QString &caption, const QString &platform, const QString &placeholder) {
         auto *container = field(key, caption);
         container->findChild<QLineEdit *>()->setPlaceholderText(placeholder);
@@ -2400,26 +2404,26 @@ void MainWindow::showSiteConfig() {
             container->setVisible(method->currentData().toString() == platform);
         });
     };
-    publishField("githubRepository", "仓库地址", "github", "git@github.com:user/repo.git 或 HTTPS 地址");
-    publishField("githubBranch", "发布分支", "github", "gh-pages（默认）");
-    publishField("sshHost", "SSH 主机", "scp", "example.com / IP / SSH 配置别名");
-    publishField("sshPort", "SSH 端口", "scp", "22（默认）");
-    publishField("sshUser", "SSH 用户名", "scp", "部署用户");
-    publishField("sshDirectory", "远程目录", "scp", "/var/www/site（绝对路径，不含空格）");
-    publishField("sshIdentityFile", "私钥文件", "scp", "可选，填写本地完整路径；留空使用 SSH 默认配置");
+    publishField("githubRepository", tr("仓库地址"), "github", tr("git@github.com:user/repo.git 或 HTTPS 地址"));
+    publishField("githubBranch", tr("发布分支"), "github", tr("gh-pages（默认）"));
+    publishField("sshHost", tr("SSH 主机"), "scp", tr("example.com / IP / SSH 配置别名"));
+    publishField("sshPort", tr("SSH 端口"), "scp", tr("22（默认）"));
+    publishField("sshUser", tr("SSH 用户名"), "scp", tr("部署用户"));
+    publishField("sshDirectory", tr("远程目录"), "scp", tr("/var/www/site（绝对路径，不含空格）"));
+    publishField("sshIdentityFile", tr("私钥文件"), "scp", tr("可选，填写本地完整路径；留空使用 SSH 默认配置"));
     auto *publishHint = label({}, card, true);
     const auto updatePublishHint = [method, publishHint] {
         const auto platform = method->currentData().toString();
         publishHint->setText(platform == "github"
-            ? "使用本机 Git 凭据或 SSH 密钥。发布分支根目录将更新为站点内容；请在 GitHub 仓库 Settings → Pages 中选择该分支的 / (root)。域名请填写实际访问地址，项目站点需包含仓库子路径。"
+            ? tr("使用本机 Git 凭据或 SSH 密钥。发布分支根目录将更新为站点内容；请在 GitHub 仓库 Settings → Pages 中选择该分支的 / (root)。域名请填写实际访问地址，项目站点需包含仓库子路径。")
             : platform == "scp"
-            ? "使用 SSH 密钥或 ssh-agent；请先在终端连接主机并确认指纹。上传会覆盖同名文件，保留远端其他文件。"
-            : "选择发布方式后填写对应设置。预览无需发布设置。");
+            ? tr("使用 SSH 密钥或 ssh-agent；请先在终端连接主机并确认指纹。上传会覆盖同名文件，保留远端其他文件。")
+            : tr("选择发布方式后填写对应设置。预览无需发布设置。"));
     };
     connect(method, &QComboBox::currentIndexChanged, publishHint, updatePublishHint);
     updatePublishHint();
     form->addWidget(publishHint);
-    form->addWidget(label("内置生成器离线生成 public 目录；第三方评论服务需要联网。", card, true));
+    form->addWidget(label(tr("内置生成器离线生成 public 目录；第三方评论服务需要联网。"), card, true));
     cards->addStretch();
     scroll->setWidget(body);
     layout->addWidget(scroll, 1);
@@ -2434,9 +2438,9 @@ void MainWindow::showSiteConfig() {
 
 bool MainWindow::generateSite(const Notebook &book) {
     if (!save()) return false;
-    QProgressDialog progress("正在生成静态站点…", QString(), 0, 0, this);
+    QProgressDialog progress(tr("正在生成静态站点…"), QString(), 0, 0, this);
     progress.setObjectName("siteGenerateDialog");
-    progress.setWindowTitle("生成站点");
+    progress.setWindowTitle(tr("生成站点"));
     progress.setWindowModality(Qt::ApplicationModal);
     progress.setCancelButton(nullptr);
     progress.setMinimumDuration(0);
@@ -2444,7 +2448,7 @@ bool MainWindow::generateSite(const Notebook &book) {
     QString error;
     const bool ok = StaticSite::generate(book, &error);
     progress.close();
-    if (!ok) QMessageBox::warning(this, "站点生成失败", error);
+    if (!ok) QMessageBox::warning(this, tr("站点生成失败"), error);
     return ok;
 }
 
@@ -2455,7 +2459,7 @@ void MainWindow::showSitePreview() {
     OverlayDialog dialog(this, "sitePreviewDialog", true);
     SiteServer server(book->path + "/public", StaticSite::rootPath(*book), &dialog);
     if (!server.listen(QHostAddress::LocalHost)) {
-        QMessageBox::warning(this, "预览失败", server.errorString());
+        QMessageBox::warning(this, tr("预览失败"), server.errorString());
         return;
     }
     dialog.setMaximumSize(size());
@@ -2464,10 +2468,10 @@ void MainWindow::showSitePreview() {
     auto *bar = new QWidget(&dialog);
     bar->setObjectName("dialogBar");
     auto *barLayout = row(bar, 14, 8, 10);
-    barLayout->addWidget(label("站点预览", bar));
+    barLayout->addWidget(label(tr("站点预览"), bar));
     barLayout->addWidget(label(book->config["theme"].toString() == "stellar" ? "Stellar" : "Pure", bar, true));
     barLayout->addStretch();
-    auto *close = button("关闭", "closeSitePreview", bar);
+    auto *close = button(tr("关闭"), "closeSitePreview", bar);
     barLayout->addWidget(close);
     layout->addWidget(bar);
     auto *browser = new QWebEngineView(&dialog);
@@ -2489,15 +2493,15 @@ void MainWindow::exportNotebook() {
     if (book->type == "site") {
         QString error;
         if (!SitePublisher::validate(*book, &error)) {
-            QMessageBox::warning(this, "发布设置不完整", error);
+            QMessageBox::warning(this, tr("发布设置不完整"), error);
             showSiteConfig();
             return;
         }
         if (!generateSite(*book)) return;
         const auto snapshot = *book;
-        QProgressDialog progress("正在发布站点…", QString(), 0, 0, this);
+        QProgressDialog progress(tr("正在发布站点…"), QString(), 0, 0, this);
         progress.setObjectName("sitePublishDialog");
-        progress.setWindowTitle("发布站点");
+        progress.setWindowTitle(tr("发布站点"));
         progress.setWindowModality(Qt::ApplicationModal);
         progress.setCancelButton(nullptr);
         progress.setMinimumDuration(0);
@@ -2505,63 +2509,63 @@ void MainWindow::exportNotebook() {
         const bool ok = SitePublisher::publish(snapshot, &error);
         progress.close();
         if (!ok) {
-            status_->setText("站点发布失败");
-            QMessageBox::warning(this, "站点发布失败", error);
+            status_->setText(tr("站点发布失败"));
+            QMessageBox::warning(this, tr("站点发布失败"), error);
             return;
         }
         status_->setText(snapshot.config["publishMethod"].toString() == "github"
-            ? "已推送至 GitHub Pages 发布分支，等待 GitHub 部署完成"
-            : "站点已通过 SSH SCP 上传");
+            ? tr("已推送至 GitHub Pages 发布分支，等待 GitHub 部署完成")
+            : tr("站点已通过 SSH SCP 上传"));
         return;
     }
     QDialog dialog(this);
     dialog.setObjectName("ebookExportDialog");
-    dialog.setWindowTitle("导出电子书");
+    dialog.setWindowTitle(tr("导出电子书"));
     dialog.resize(540, 300);
     auto *layout = new QVBoxLayout(&dialog);
     auto *form = new QFormLayout;
     auto *scope = new QComboBox(&dialog);
     scope->setObjectName("exportScope");
-    scope->addItem("整本电子书 · " + book->name, QString());
+    scope->addItem(tr("整本电子书 · ") + book->name, QString());
     const auto *note = store_.note(currentNoteId());
-    if (note && !note->folder && store_.owner(note->id) == book) scope->addItem("当前文档 · " + note->title, note->id);
+    if (note && !note->folder && store_.owner(note->id) == book) scope->addItem(tr("当前文档 · ") + note->title, note->id);
     auto *format = new QComboBox(&dialog);
     format->setObjectName("exportFormat");
-    format->addItem("EPUB · 电子书", int(EbookExporter::Format::Epub));
-    format->addItem("PDF · 打印文档", int(EbookExporter::Format::Pdf));
-    format->addItem("CHM · 帮助文档", int(EbookExporter::Format::Chm));
-    format->addItem("HTML · 网页", int(EbookExporter::Format::Html));
+    format->addItem(tr("EPUB · 电子书"), int(EbookExporter::Format::Epub));
+    format->addItem(tr("PDF · 打印文档"), int(EbookExporter::Format::Pdf));
+    format->addItem(tr("CHM · 帮助文档"), int(EbookExporter::Format::Chm));
+    format->addItem(tr("HTML · 网页"), int(EbookExporter::Format::Html));
     auto *directoryRow = new QWidget(&dialog);
     auto *directoryLayout = row(directoryRow, 0, 0);
     const auto defaultDirectory = defaultExportDirectory();
     QDir().mkpath(defaultDirectory);
     auto *directory = new QLineEdit(QSettings().value("ebookExport/directory", defaultDirectory).toString(), directoryRow);
     directory->setObjectName("exportDirectory");
-    auto *browse = button("浏览…", "browseExportDirectory", directoryRow);
+    auto *browse = button(tr("浏览…"), "browseExportDirectory", directoryRow);
     directoryLayout->addWidget(directory, 1);
     directoryLayout->addWidget(browse);
     connect(browse, &QPushButton::clicked, &dialog, [&] {
-        const auto selected = QFileDialog::getExistingDirectory(&dialog, "选择保存目录", directory->text());
+        const auto selected = QFileDialog::getExistingDirectory(&dialog, tr("选择保存目录"), directory->text());
         if (!selected.isEmpty()) directory->setText(selected);
     });
-    form->addRow("导出范围", scope);
-    form->addRow("导出格式", format);
-    form->addRow("保存目录", directoryRow);
+    form->addRow(tr("导出范围"), scope);
+    form->addRow(tr("导出格式"), format);
+    form->addRow(tr("保存目录"), directoryRow);
     layout->addLayout(form);
-    layout->addWidget(label("整本导出保留章节层级和顺序；当前文档仅导出该文档。已有同名文件时自动添加序号。", &dialog, true));
+    layout->addWidget(label(tr("整本导出保留章节层级和顺序；当前文档仅导出该文档。已有同名文件时自动添加序号。"), &dialog, true));
     auto *hint = label({}, &dialog, true);
     hint->setObjectName("exportHint");
     layout->addWidget(hint);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
     auto *confirm = buttons->button(QDialogButtonBox::Save);
     confirm->setObjectName("confirmExport");
-    confirm->setText("导出");
-    buttons->button(QDialogButtonBox::Cancel)->setText("取消");
+    confirm->setText(tr("导出"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(tr("取消"));
     const auto validate = [&] {
         const bool missingCompiler = format->currentData().toInt() == int(EbookExporter::Format::Chm) && EbookExporter::chmCompiler().isEmpty();
         const bool validDirectory = QFileInfo(directory->text().trimmed()).isDir();
-        hint->setText(missingCompiler ? "CHM 需要安装 Free Pascal 的 chmcmd（Linux：fp-utils）；Windows 也可将 HTML Help Workshop 的 hhc 加入 PATH。"
-                                    : !validDirectory ? "请选择已有的保存目录。" : book->notes.isEmpty() ? "电子书中还没有章节。" : QString());
+        hint->setText(missingCompiler ? tr("CHM 需要安装 Free Pascal 的 chmcmd（Linux：fp-utils）；Windows 也可将 HTML Help Workshop 的 hhc 加入 PATH。")
+                                    : !validDirectory ? tr("请选择已有的保存目录。") : book->notes.isEmpty() ? tr("电子书中还没有章节。") : QString());
         confirm->setEnabled(!missingCompiler && validDirectory && !book->notes.isEmpty());
     };
     connect(format, &QComboBox::currentIndexChanged, &dialog, validate);
@@ -2575,8 +2579,8 @@ void MainWindow::exportNotebook() {
     QSettings().setValue("ebookExport/directory", destination);
     // Editor changes already update store_ synchronously; export that snapshot, including unsaved edits.
     const auto snapshot = *book;
-    QProgressDialog progress("正在导出电子书…", QString(), 0, 0, this);
-    progress.setWindowTitle("导出电子书");
+    QProgressDialog progress(tr("正在导出电子书…"), QString(), 0, 0, this);
+    progress.setWindowTitle(tr("导出电子书"));
     progress.setWindowModality(Qt::ApplicationModal);
     progress.setCancelButton(nullptr);
     progress.setMinimumDuration(0);
@@ -2585,6 +2589,6 @@ void MainWindow::exportNotebook() {
     const auto path = EbookExporter::exportBook(snapshot, scope->currentData().toString(),
         static_cast<EbookExporter::Format>(format->currentData().toInt()), destination, &error);
     progress.close();
-    if (path.isEmpty()) QMessageBox::warning(this, "导出失败", error);
-    else status_->setText("已导出至 " + path);
+    if (path.isEmpty()) QMessageBox::warning(this, tr("导出失败"), error);
+    else status_->setText(tr("已导出至 ") + path);
 }

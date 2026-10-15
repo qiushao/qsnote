@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/translations">
+        <file alias="qsnote_en_US.qm">@CMAKE_CURRENT_BINARY_DIR@/qsnote_en_US.qm</file>
+        <file alias="qtbase_zh_CN.qm">@QT_TRANSLATIONS_DIR@/qtbase_zh_CN.qm</file>
+    </qresource>
+</RCC>

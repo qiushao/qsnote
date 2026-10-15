@@ -29,7 +29,7 @@ DiagramRuntime::Command DiagramRuntime::plantUml() {
         auto java = QStandardPaths::findExecutable("java");
         const auto javaHome = qEnvironmentVariable("JAVA_HOME");
         if (java.isEmpty() && !javaHome.isEmpty()) java = QStandardPaths::findExecutable("java", {javaHome + "/bin"});
-        if (java.isEmpty()) return {{}, {}, "未找到 Java，请安装 Java，并将 java 加入 PATH 或设置 JAVA_HOME。"};
+        if (java.isEmpty()) return {{}, {}, QCoreApplication::translate("DiagramRuntime", "未找到 Java，请安装 Java，并将 java 加入 PATH 或设置 JAVA_HOME。")};
         return {java, {"-Djava.awt.headless=true", "-Dfile.encoding=UTF-8", "-jar", QDir::toNativeSeparators(jar)}, {}};
     }
 #endif

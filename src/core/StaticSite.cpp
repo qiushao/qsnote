@@ -1,4 +1,5 @@
 #include "StaticSite.h"
+#include <QCoreApplication>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -12,7 +13,7 @@
 namespace {
 bool writeFile(const QString &path, const QByteArray &data, QString *error) {
     if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
-        *error = QStringLiteral("无法创建目录：") + QFileInfo(path).absolutePath();
+        *error = QCoreApplication::translate("StaticSite", "无法创建目录：") + QFileInfo(path).absolutePath();
         return false;
     }
     QFile current(path);
@@ -30,7 +31,7 @@ bool writeFile(const QString &path, const QByteArray &data, QString *error) {
 
 bool StaticSite::copyDirectory(const QString &source, const QString &destination, QString *error) {
     if (!QDir().mkpath(destination)) {
-        *error = QStringLiteral("无法创建目录：") + destination;
+        *error = QCoreApplication::translate("StaticSite", "无法创建目录：") + destination;
         return false;
     }
     QDirIterator files(source, QDir::Files | QDir::Hidden, QDirIterator::Subdirectories);
@@ -60,7 +61,7 @@ bool StaticSite::prepare(Notebook &book, QString *error) {
     if (!book.config.contains("commentPlatform")) book.config["commentPlatform"] = "none";
     for (const auto &directory: {"source/_posts", "source/_drafts", "public"}) {
         if (!QDir().mkpath(book.path + "/" + directory)) {
-            *error = QStringLiteral("无法创建站点目录：") + directory;
+            *error = QCoreApplication::translate("StaticSite", "无法创建站点目录：") + directory;
             return false;
         }
     }

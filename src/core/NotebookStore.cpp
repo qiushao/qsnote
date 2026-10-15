@@ -1,4 +1,5 @@
 #include "NotebookStore.h"
+#include <QCoreApplication>
 #include "StaticSite.h"
 #include <QDir>
 #include <QFile>
@@ -18,7 +19,7 @@ QString storageDir() { return QStandardPaths::writableLocation(QStandardPaths::A
 
 bool writeFile(const QString &path, const QByteArray &data, QString *error) {
     if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
-        *error = QStringLiteral("无法创建目录：") + QFileInfo(path).absolutePath();
+        *error = QCoreApplication::translate("NotebookStore", "无法创建目录：") + QFileInfo(path).absolutePath();
         return false;
     }
     // Metadata-only site saves still check every post; keep unchanged file timestamps.
@@ -37,10 +38,10 @@ bool writeFile(const QString &path, const QByteArray &data, QString *error) {
 QString NotebookStore::newId() { return QUuid::createUuid().toString(QUuid::WithoutBraces); }
 
 QString NotebookStore::typeLabel(const QString &type) {
-    if (type == "site") return QStringLiteral("静态站点");
-    if (type == "ebook") return QStringLiteral("电子书");
+    if (type == "site") return QCoreApplication::translate("NotebookStore", "静态站点");
+    if (type == "ebook") return QCoreApplication::translate("NotebookStore", "电子书");
     if (type == "todo") return QStringLiteral("Todo List");
-    return QStringLiteral("普通笔记本");
+    return QCoreApplication::translate("NotebookStore", "普通笔记本");
 }
 
 QHash<QString, QString> NotebookStore::chapterTitles(const Notebook &book) {
@@ -145,11 +146,11 @@ void NotebookStore::removeNoteFiles(const Notebook &book, const Note &note) {
 
 bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
     if (book.path.isEmpty()) {
-        *error = QStringLiteral("笔记本「%1」未设置保存目录").arg(book.name);
+        *error = QCoreApplication::translate("NotebookStore", "笔记本「%1」未设置保存目录").arg(book.name);
         return false;
     }
     if (!QDir().mkpath(book.path)) {
-        *error = QStringLiteral("无法创建笔记本目录：") + book.path;
+        *error = QCoreApplication::translate("NotebookStore", "无法创建笔记本目录：") + book.path;
         return false;
     }
     if (book.type == "site" && !StaticSite::prepare(book, error)) return false;
@@ -200,7 +201,7 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
             const QString oldAbsolute = root.absoluteFilePath(oldPath);
             const QString newAbsolute = root.absoluteFilePath(expected);
             if (QFileInfo::exists(oldAbsolute) && (!QDir().mkpath(QFileInfo(newAbsolute).absolutePath()) || !QDir().rename(oldAbsolute, newAbsolute))) {
-                *error = QStringLiteral("无法将 %1 移动到 %2").arg(oldAbsolute, newAbsolute);
+                *error = QCoreApplication::translate("NotebookStore", "无法将 %1 移动到 %2").arg(oldAbsolute, newAbsolute);
                 return false;
             }
             // 电子书章节附带同名子章节目录；普通笔记本文件夹本身即目录。
@@ -210,7 +211,7 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
                 const QString oldDirectory = root.absoluteFilePath(chapterBase(oldPath));
                 const QString newDirectory = root.absoluteFilePath(chapterBase(expected));
                 if (QFileInfo::exists(oldDirectory) && (!QDir().mkpath(QFileInfo(newDirectory).absolutePath()) || !QDir().rename(oldDirectory, newDirectory))) {
-                    *error = QStringLiteral("无法将 %1 移动到 %2").arg(oldDirectory, newDirectory);
+                    *error = QCoreApplication::translate("NotebookStore", "无法将 %1 移动到 %2").arg(oldDirectory, newDirectory);
                     return false;
                 }
                 oldPrefix = chapterBase(oldPath) + "/";
@@ -227,7 +228,7 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
         used.insert(expected);
         if (note->folder) {
             if (!QDir().mkpath(root.absoluteFilePath(expected))) {
-                *error = QStringLiteral("无法创建目录：") + root.absoluteFilePath(expected);
+                *error = QCoreApplication::translate("NotebookStore", "无法创建目录：") + root.absoluteFilePath(expected);
                 return false;
             }
         } else if (book.type == "site" || note->contentDirty || !QFileInfo::exists(root.absoluteFilePath(expected))) {
@@ -267,7 +268,7 @@ bool NotebookStore::loadNotebook(Notebook &book, QString *error) {
     QJsonParseError parseError;
     const auto document = QJsonDocument::fromJson(index.readAll(), &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-        *error = QStringLiteral("笔记本「%1」索引格式无效：").arg(book.name) + parseError.errorString();
+        *error = QCoreApplication::translate("NotebookStore", "笔记本「%1」索引格式无效：").arg(book.name) + parseError.errorString();
         return false;
     }
     // 索引是笔记本的权威记录，优先于全局登记信息。
@@ -301,7 +302,7 @@ bool NotebookStore::loadNotebook(Notebook &book, QString *error) {
 
 bool NotebookStore::readNotebook(const QString &path, Notebook &book, QString *error) {
     if (!QFileInfo::exists(QDir(path).absoluteFilePath(indexFileName()))) {
-        *error = QStringLiteral("所选目录不是 qsnote 笔记本（缺少 %1）").arg(indexFileName());
+        *error = QCoreApplication::translate("NotebookStore", "所选目录不是 qsnote 笔记本（缺少 %1）").arg(indexFileName());
         return false;
     }
     book.path = path;
@@ -323,7 +324,7 @@ bool NotebookStore::load(QString *error) {
     QJsonParseError parseError;
     const auto document = QJsonDocument::fromJson(file.readAll(), &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isArray()) {
-        *error = QStringLiteral("笔记数据格式无效：") + parseError.errorString();
+        *error = QCoreApplication::translate("NotebookStore", "笔记数据格式无效：") + parseError.errorString();
         return false;
     }
     for (const auto &value: document.array()) {

@@ -1,5 +1,6 @@
 #include "MarkdownPreview.h"
 #include "core/PlantUmlRenderer.h"
+#include "core/WebTranslations.h"
 #include <QDesktopServices>
 #include <QCheckBox>
 #include <QContextMenuEvent>
@@ -56,6 +57,7 @@ void PreviewBridge::renderPlantUml(const QString &source, int revision, int id) 
 MarkdownPreview::MarkdownPreview(QWidget *parent) : QWebEngineView(parent), bridge_(new PreviewBridge(this)) {
     setObjectName("preview");
     setPage(new PreviewPage(this));
+    installWebTranslations(page());
     auto *channel = new QWebChannel(page());
     channel->registerObject("previewBridge", bridge_);
     page()->setWebChannel(channel);
@@ -102,39 +104,39 @@ void MarkdownPreview::applyReaderSettings() {
 void MarkdownPreview::showSettings() {
     QDialog dialog(this);
     dialog.setObjectName("readerSettings");
-    dialog.setWindowTitle("阅读设置（所有笔记）");
+    dialog.setWindowTitle(tr("阅读设置（所有笔记）"));
     auto *layout = new QFormLayout(&dialog);
     QSettings settings;
     settings.beginGroup("reader");
     auto *theme = new QComboBox(&dialog);
     theme->setObjectName("readerTheme");
-    theme->addItem("浅色", "light");
-    theme->addItem("深色", "dark");
-    theme->addItem("纸张", "sepia");
+    theme->addItem(tr("浅色"), "light");
+    theme->addItem(tr("深色"), "dark");
+    theme->addItem(tr("纸张"), "sepia");
     theme->setCurrentIndex(qMax(0, theme->findData(settings.value("theme", "light"))));
-    layout->addRow("配色", theme);
+    layout->addRow(tr("配色"), theme);
     auto *font = new QComboBox(&dialog);
     font->setObjectName("readerFont");
-    font->addItem("系统默认", QString());
+    font->addItem(tr("系统默认"), QString());
     for (const auto &family: QFontDatabase::families()) font->addItem(family, family);
     font->setCurrentIndex(qMax(0, font->findData(settings.value("fontFamily", QString()))));
-    layout->addRow("字体", font);
+    layout->addRow(tr("字体"), font);
     auto *size = new QSpinBox(&dialog);
     size->setObjectName("readerFontSize");
     size->setRange(8, 72);
     size->setValue(settings.value("fontSize", 16).toInt());
-    layout->addRow("字号（px）", size);
+    layout->addRow(tr("字号（px）"), size);
     auto *spacing = new QDoubleSpinBox(&dialog);
     spacing->setObjectName("readerLineHeight");
     spacing->setRange(1.0, 3.0);
     spacing->setSingleStep(0.05);
     spacing->setValue(settings.value("lineHeight", 1.75).toDouble());
-    layout->addRow("行距倍数", spacing);
+    layout->addRow(tr("行距倍数"), spacing);
     auto *width = new QSpinBox(&dialog);
     width->setObjectName("readerContentWidth");
     width->setRange(0, 3000);
     width->setValue(settings.value("contentWidth", 0).toInt());
-    layout->addRow("最大正文宽度（px，0 为不限）", width);
+    layout->addRow(tr("最大正文宽度（px，0 为不限）"), width);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     layout->addRow(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
@@ -160,17 +162,17 @@ void MarkdownPreview::showHeadingNavigation() {
     headingDialog_ = dialog;
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     dialog->setObjectName("readerHeadings");
-    dialog->setWindowTitle("跳转到标题");
+    dialog->setWindowTitle(tr("跳转到标题"));
     dialog->resize(420, 360);
     auto *layout = new QVBoxLayout(dialog);
     auto *query = new QLineEdit(dialog);
     query->setObjectName("readerHeadingFilter");
-    query->setPlaceholderText("搜索标题");
+    query->setPlaceholderText(tr("搜索标题"));
     layout->addWidget(query);
     auto *list = new QListWidget(dialog);
     list->setObjectName("readerHeadingList");
     layout->addWidget(list);
-    auto *hint = new QLabel("正在读取标题…", dialog);
+    auto *hint = new QLabel(tr("正在读取标题…"), dialog);
     layout->addWidget(hint);
     auto filter = [list](const QString &text) {
         QListWidgetItem *first = nullptr;
@@ -192,7 +194,7 @@ void MarkdownPreview::showHeadingNavigation() {
             auto *item = new QListWidgetItem(QString(qMax(0, heading.value("level").toInt() - 1) * 2, ' ') + heading.value("title").toString(), list);
             item->setData(Qt::UserRole, i);
         }
-        hint->setText(headings.isEmpty() ? "当前笔记没有标题" : "输入关键词筛选，回车或双击跳转");
+        hint->setText(headings.isEmpty() ? tr("当前笔记没有标题") : tr("输入关键词筛选，回车或双击跳转"));
         filter(query->text());
     });
     auto jump = [this, dialog, list, generation] {
@@ -215,13 +217,13 @@ void MarkdownPreview::showFind() {
     if (!findDialog_) {
         findDialog_ = new QDialog(this);
         findDialog_->setObjectName("previewFind");
-        findDialog_->setWindowTitle("阅读区查找");
+        findDialog_->setWindowTitle(tr("阅读区查找"));
         auto *layout = new QVBoxLayout(findDialog_);
         findQuery_ = new QLineEdit(findDialog_);
         findQuery_->setObjectName("previewFindText");
-        findQuery_->setPlaceholderText("查找阅读内容（会展开折叠章节）");
+        findQuery_->setPlaceholderText(tr("查找阅读内容（会展开折叠章节）"));
         layout->addWidget(findQuery_);
-        findCase_ = new QCheckBox("区分大小写", findDialog_);
+        findCase_ = new QCheckBox(tr("区分大小写"), findDialog_);
         layout->addWidget(findCase_);
         findResult_ = new QLabel(findDialog_);
         findResult_->setObjectName("previewFindResult");
@@ -229,7 +231,7 @@ void MarkdownPreview::showFind() {
         auto *buttons = new QHBoxLayout;
         layout->addLayout(buttons);
         for (const bool backward: {true, false}) {
-            auto *button = new QPushButton(backward ? "上一个" : "下一个", findDialog_);
+            auto *button = new QPushButton(backward ? tr("上一个") : tr("下一个"), findDialog_);
             button->setObjectName(backward ? "previewFindPrevious" : "previewFindNext");
             button->setAutoDefault(false);
             connect(button, &QPushButton::clicked, this, [this, backward] { findInPreview(backward); });
@@ -266,7 +268,7 @@ void MarkdownPreview::findInPreview(bool backward, bool restart) {
     const int generation = revision_;
     const auto query = findQuery_->text();
     if (renderedRevision_ != revision_) {
-        findResult_->setText("正在渲染…");
+        findResult_->setText(tr("正在渲染…"));
         return;
     }
     QWebEnginePage::FindFlags flags;
@@ -281,7 +283,7 @@ void MarkdownPreview::findInPreview(bool backward, bool restart) {
         if (!guard || request != guard->findRequest_ || generation != guard->revision_) return;
         guard->page()->findText(query, flags, [guard, request, generation, query](const QWebEngineFindTextResult &result) {
             if (!guard || request != guard->findRequest_ || generation != guard->revision_) return;
-            guard->findResult_->setText(query.isEmpty() ? QString() : QStringLiteral("%1 / %2 个匹配").arg(result.activeMatch()).arg(result.numberOfMatches()));
+            guard->findResult_->setText(query.isEmpty() ? QString() : tr("%1 / %2 个匹配").arg(result.activeMatch()).arg(result.numberOfMatches()));
         });
     });
 }
@@ -294,18 +296,18 @@ void MarkdownPreview::setHeadingFoldingEnabled(bool enabled) {
 void MarkdownPreview::contextMenuEvent(QContextMenuEvent *event) {
     QScopedPointer<QMenu> menu(createStandardContextMenu());
     menu->addSeparator();
-    menu->addAction("查找阅读内容…", this, &MarkdownPreview::showFind);
-    auto *headings = menu->addAction("跳转到标题…", this, &MarkdownPreview::showHeadingNavigation);
+    menu->addAction(tr("查找阅读内容…"), this, &MarkdownPreview::showFind);
+    auto *headings = menu->addAction(tr("跳转到标题…"), this, &MarkdownPreview::showHeadingNavigation);
     headings->setShortcut(QKeySequence("Ctrl+G"));
     headings->setEnabled(renderedRevision_ == revision_);
-    menu->addAction("阅读设置…", this, &MarkdownPreview::showSettings);
-    auto *fold = menu->addAction("标题折叠");
+    menu->addAction(tr("阅读设置…"), this, &MarkdownPreview::showSettings);
+    auto *fold = menu->addAction(tr("标题折叠"));
     fold->setCheckable(true);
     fold->setChecked(QSettings().value("reader/headingFolding", false).toBool());
     connect(fold, &QAction::triggered, this, &MarkdownPreview::setHeadingFoldingEnabled);
     if (fold->isChecked()) {
-        menu->addAction("展开所有章节", this, [this] { page()->runJavaScript("window.qsnotePreview.expandAll()"); });
-        menu->addAction("折叠所有章节", this, [this] { page()->runJavaScript("window.qsnotePreview.expandAll(false)"); });
+        menu->addAction(tr("展开所有章节"), this, [this] { page()->runJavaScript("window.qsnotePreview.expandAll()"); });
+        menu->addAction(tr("折叠所有章节"), this, [this] { page()->runJavaScript("window.qsnotePreview.expandAll(false)"); });
     }
     menu->exec(event->globalPos());
 }

@@ -1,5 +1,7 @@
 #include "ArticleRenderer.h"
+#include <QCoreApplication>
 #include "PlantUmlRenderer.h"
+#include "WebTranslations.h"
 #include <QEventLoop>
 #include <QFile>
 #include <QJsonDocument>
@@ -86,6 +88,7 @@ QString ArticleRenderer::html(const QDomDocument &document) {
 bool ArticleRenderer::render(const QString &markdown, QDomDocument &document, QString *error) {
     if (!browser_) {
         browser_ = std::make_unique<QWebEnginePage>();
+        installWebTranslations(browser_.get());
         browser_->setUrlRequestInterceptor(new ExportRequests(browser_.get()));
         browser_->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, false);
         browser_->settings()->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows, false);
@@ -97,18 +100,18 @@ bool ArticleRenderer::render(const QString &markdown, QDomDocument &document, QS
         QObject::connect(browser_.get(), &QWebEnginePage::loadFinished, &loop, [&](bool ok) { loaded = ok; loop.quit(); });
         timeout.start(60000);
         QFile preview(":/web/preview.html");
-        if (!preview.open(QIODevice::ReadOnly)) { *error = "无法读取预览资源。"; return false; }
+        if (!preview.open(QIODevice::ReadOnly)) { *error = QCoreApplication::translate("ArticleRenderer", "无法读取预览资源。"); return false; }
         auto html = QString::fromUtf8(preview.readAll());
         html.remove("<script src=\"qrc:///qtwebchannel/qwebchannel.js\"></script>");
         html.replace("<script src=\"preview.js\"></script>", "<script src=\"article-export.js\"></script>");
         browser_->setHtml(html, QUrl("qrc:/web/"));
         loop.exec(QEventLoop::ExcludeUserInputEvents);
-        if (!loaded) { *error = "无法加载正文渲染器。"; return false; }
+        if (!loaded) { *error = QCoreApplication::translate("ArticleRenderer", "无法加载正文渲染器。"); return false; }
     }
-    const auto prepared = evaluate(*browser_, "(function(input){try{return {plantUml:qsnoteExport.prepare(input.text)}}catch(error){return {error:'公式 / Markdown：'+error.message}}})("
+    const auto prepared = evaluate(*browser_, "(function(input){try{return {plantUml:qsnoteExport.prepare(input.text)}}catch(error){return {error:qsnoteTranslations.mathError+error.message}}})("
                                    + json({{"text", markdown}}) + ")").toMap();
     if (prepared.isEmpty() || prepared.contains("error")) {
-        *error = prepared.value("error", "正文渲染超时。").toString();
+        *error = prepared.value("error", QCoreApplication::translate("ArticleRenderer", "正文渲染超时。")).toString();
         return false;
     }
     QJsonObject plantUml;
@@ -128,7 +131,7 @@ bool ArticleRenderer::render(const QString &markdown, QDomDocument &document, QS
         plantUml[source] = QString::fromLatin1(png.toBase64());
     }
     static const auto mathCss = mathStylesheet();
-    if (mathCss.isEmpty()) { *error = "无法读取公式字体和样式。"; return false; }
+    if (mathCss.isEmpty()) { *error = QCoreApplication::translate("ArticleRenderer", "无法读取公式字体和样式。"); return false; }
     QEventLoop loop;
     QTimer timeout;
     timeout.setSingleShot(true);
@@ -141,9 +144,9 @@ bool ArticleRenderer::render(const QString &markdown, QDomDocument &document, QS
     browser_->runJavaScript("document.title='rendering';qsnoteExport.finish(" + json(plantUml) + ","
                             + json({{"css", mathCss}}) + ".css)");
     loop.exec(QEventLoop::ExcludeUserInputEvents);
-    if (!finished) { *error = "正文渲染超时：" + evaluate(*browser_, "window.exportStage").toString(); return false; }
+    if (!finished) { *error = QCoreApplication::translate("ArticleRenderer", "正文渲染超时：") + evaluate(*browser_, "window.exportStage").toString(); return false; }
     const auto result = evaluate(*browser_, "window.exportResult").toMap();
     if (result.contains("error")) { *error = result.value("error").toString(); return false; }
-    if (!document.setContent(result.value("html").toString(), false)) { *error = "无法读取正文渲染结果。"; return false; }
+    if (!document.setContent(result.value("html").toString(), false)) { *error = QCoreApplication::translate("ArticleRenderer", "无法读取正文渲染结果。"); return false; }
     return true;
 }

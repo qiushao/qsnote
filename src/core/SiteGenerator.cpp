@@ -1,4 +1,5 @@
 #include "StaticSite.h"
+#include <QCoreApplication>
 #include "ArticleRenderer.h"
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -53,7 +54,7 @@ bool frontMatter(QString &body, QJsonObject &metadata, QString *error) {
     if (!body.startsWith("---\n")) return true;
     const auto end = body.indexOf("\n---", 4);
     if (end < 0 || (end + 4 < body.size() && body[end + 4] != '\n')) {
-        *error = QStringLiteral("front matter 缺少结束分隔符");
+        *error = QCoreApplication::translate("SiteGenerator", "front matter 缺少结束分隔符");
         return false;
     }
     const auto header = body.mid(4, end - 4).trimmed();
@@ -61,7 +62,7 @@ bool frontMatter(QString &body, QJsonObject &metadata, QString *error) {
         QJsonParseError parseError;
         const auto document = QJsonDocument::fromJson(header.toUtf8(), &parseError);
         if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-            *error = QStringLiteral("front matter JSON 无效：") + parseError.errorString();
+            *error = QCoreApplication::translate("SiteGenerator", "front matter JSON 无效：") + parseError.errorString();
             return false;
         }
         metadata = document.object();
@@ -89,7 +90,7 @@ bool frontMatter(QString &body, QJsonObject &metadata, QString *error) {
             }
             const auto match = QRegularExpression("^([A-Za-z_][A-Za-z0-9_]*):(?:\\s+(.*))?$").match(line);
             if (!match.hasMatch()) {
-                *error = QStringLiteral("不支持的 front matter 行，请使用 JSON 或简单 YAML 字段：") + line;
+                *error = QCoreApplication::translate("SiteGenerator", "不支持的 front matter 行，请使用 JSON 或简单 YAML 字段：") + line;
                 return false;
             }
             const auto key = match.captured(1);
@@ -137,7 +138,7 @@ public:
 
     bool generate() {
         const auto source = book_.path + "/source";
-        if (!QFileInfo(source).isDir()) return fail(QStringLiteral("找不到站点 source 目录"));
+        if (!QFileInfo(source).isDir()) return fail(QCoreApplication::translate("SiteGenerator", "找不到站点 source 目录"));
         QDirIterator files(source, QDir::Files | QDir::Hidden, QDirIterator::Subdirectories);
         QStringList sources;
         while (files.hasNext()) sources.append(files.next());
@@ -251,7 +252,7 @@ public:
         while (resources.hasNext()) {
             const auto path = resources.next();
             QFile file(path);
-            if (!file.open(QIODevice::ReadOnly)) return fail(QStringLiteral("无法读取站点资源：") + path);
+            if (!file.open(QIODevice::ReadOnly)) return fail(QCoreApplication::translate("SiteGenerator", "无法读取站点资源：") + path);
             if (!write(path.mid(assets.size() + 1), file.readAll())) return false;
         }
         for (const auto &name: {"LICENSE", "THIRD-PARTY-NOTICES.md"}) {
@@ -267,17 +268,17 @@ private:
     bool validPath(const QString &path) {
         const auto decoded = QUrl::fromPercentEncoding(path.toUtf8());
         if (path.startsWith('/') || decoded.contains("//") || decoded.contains('\\') || decoded.contains(':') || decoded.contains('?') || decoded.contains('#') || decoded.contains(QChar::Null))
-            return fail(QStringLiteral("无效的站点路径：") + path);
-        for (const auto &part: decoded.split('/')) if (part == "." || part == ".." || part.startsWith('.')) return fail(QStringLiteral("无效的站点路径：") + path);
+            return fail(QCoreApplication::translate("SiteGenerator", "无效的站点路径：") + path);
+        for (const auto &part: decoded.split('/')) if (part == "." || part == ".." || part.startsWith('.')) return fail(QCoreApplication::translate("SiteGenerator", "无效的站点路径：") + path);
         return true;
     }
     bool write(const QString& path, const QByteArray &data) {
         if (!validPath(path)) return false;
-        if (outputs_.contains(path)) return fail(QStringLiteral("站点输出路径冲突：") + path);
+        if (outputs_.contains(path)) return fail(QCoreApplication::translate("SiteGenerator", "站点输出路径冲突：") + path);
         outputs_.insert(path);
         const auto target = output_ + "/" + path;
-        if (!QDir().mkpath(QFileInfo(target).absolutePath())) return fail(QStringLiteral("无法创建目录：") + target);
-        if (QFileInfo::exists(target)) return fail(QStringLiteral("站点输出路径冲突：") + path);
+        if (!QDir().mkpath(QFileInfo(target).absolutePath())) return fail(QCoreApplication::translate("SiteGenerator", "无法创建目录：") + target);
+        if (QFileInfo::exists(target)) return fail(QCoreApplication::translate("SiteGenerator", "站点输出路径冲突：") + path);
         QFile file(target);
         if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size()) return fail(target + ": " + file.errorString());
         return true;
@@ -571,7 +572,7 @@ private:
 bool StaticSite::generate(const Notebook &book, QString *error) {
     QTemporaryDir staging(book.path + "/.qsnote-site-XXXXXX");
     if (!staging.isValid()) {
-        *error = QStringLiteral("无法创建站点生成临时目录");
+        *error = QCoreApplication::translate("SiteGenerator", "无法创建站点生成临时目录");
         return false;
     }
     const auto output = staging.path() + "/public";
@@ -580,13 +581,13 @@ bool StaticSite::generate(const Notebook &book, QString *error) {
     const auto backup = staging.path() + "/previous";
     const bool existing = QFileInfo::exists(destination);
     if (QFileInfo(destination).isSymLink() || (existing && !QDir().rename(destination, backup))) {
-        *error = QStringLiteral("无法替换站点输出目录：") + destination;
+        *error = QCoreApplication::translate("SiteGenerator", "无法替换站点输出目录：") + destination;
         return false;
     }
     if (!QDir().rename(output, destination)) {
         const bool restored = !existing || QDir().rename(backup, destination);
         if (!restored) staging.setAutoRemove(false);
-        *error = QStringLiteral("无法保存站点生成结果：") + destination + (restored ? QString() : QStringLiteral("；上一份输出保存在：") + backup);
+        *error = QCoreApplication::translate("SiteGenerator", "无法保存站点生成结果：") + destination + (restored ? QString() : QCoreApplication::translate("SiteGenerator", "；上一份输出保存在：") + backup);
         return false;
     }
     return true;

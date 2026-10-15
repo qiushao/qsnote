@@ -1,4 +1,5 @@
 #include "core/NotebookStore.h"
+#include "core/ApplicationLanguage.h"
 #include "core/EbookExporter.h"
 #include "core/DiagramRuntime.h"
 #include "core/StaticSite.h"
@@ -23,6 +24,7 @@
 #include <QScrollArea>
 #include <QTextBlock>
 #include <QTextLayout>
+#include <QTextStream>
 #include <QDialog>
 #include <QCheckBox>
 #include <QDoubleSpinBox>
@@ -96,7 +98,7 @@ class UiTest : public QObject {
 private slots:
     void init() {
         QSettings().clear();
-        QSettings().setValue("general/checkUpdatesOnStartup", false);
+        QSettings().setValue("General/checkUpdatesOnStartup", false);
         QStandardPaths::setTestModeEnabled(true);
         QVERIFY(QDir().mkpath(QFileInfo(NotebookStore::storagePath()).absolutePath()));
         QFile::remove(NotebookStore::storagePath());
@@ -1154,7 +1156,40 @@ st->e
         }
     }
 
+    void languageSelection() {
+        QCOMPARE(ApplicationLanguage::resolve("zh_CN", QLocale("en_US")), QString("zh_CN"));
+        QCOMPARE(ApplicationLanguage::resolve("en_US", QLocale("zh_CN")), QString("en_US"));
+        QCOMPARE(ApplicationLanguage::resolve("system", QLocale("zh_CN")), QString("zh_CN"));
+        QCOMPARE(ApplicationLanguage::resolve("system", QLocale("zh_TW")), QString("zh_CN"));
+        QCOMPARE(ApplicationLanguage::resolve("system", QLocale("en_GB")), QString("en_US"));
+        QCOMPARE(ApplicationLanguage::resolve("system", QLocale("fr_FR")), QString("en_US"));
+        QCOMPARE(ApplicationLanguage::resolve("unknown", QLocale("zh_CN")), QString("zh_CN"));
+    }
+
+    void settingsDialogAndPersistence_data() { // NOLINT(readability-identifier-naming)
+        QTest::addColumn<QString>("languageCode");
+        QTest::newRow("Chinese") << QString("zh_CN");
+        QTest::newRow("English") << QString("en_US");
+    }
+
+    void legacyGeneralSettings() {
+        const QLocale originalLocale;
+        const auto restoreLocale = qScopeGuard([originalLocale] { QLocale::setDefault(originalLocale); });
+        QSettings settings;
+        settings.setValue("general/language", "zh_CN");
+        settings.setValue("general/uiFontSize", 18);
+        settings.setValue("general/minimizeToTray", true);
+        ApplicationLanguage language;
+        QCOMPARE(settings.value("General/language").toString(), QString("zh_CN"));
+        QCOMPARE(settings.value("General/uiFontSize").toInt(), 18);
+        QVERIFY(settings.value("General/minimizeToTray").toBool());
+        QCOMPARE(QLocale().name(), QString("zh_CN"));
+    }
+
     void settingsDialogAndPersistence() {
+        QFETCH(QString, languageCode);
+        const QLocale originalLocale;
+        const auto restoreLocale = qScopeGuard([originalLocale] { QLocale::setDefault(originalLocale); });
         {
             MainWindow window;
             window.resize(1280, 900);
@@ -1176,8 +1211,9 @@ st->e
                 QCOMPARE(sections->count(), 3);
                 auto *language = dialog->findChild<QComboBox *>("uiLanguage");
                 QCOMPARE(language->currentData().toString(), QString("system"));
-                QCOMPARE(language->count(), 2);
-                language->setCurrentIndex(1);
+                QCOMPARE(language->count(), 3);
+                QCOMPARE(language->itemText(language->findData("en_US")), QString("English"));
+                language->setCurrentIndex(language->findData("en_US"));
                 dialog->findChild<QSpinBox *>("uiFontSize")->setValue(18);
                 dialog->findChild<QCheckBox *>("minimizeToTray")->setChecked(true);
                 sections->setCurrentIndex(1);
@@ -1187,15 +1223,16 @@ st->e
                 dialog->reject();
             });
             settings->click();
-            QVERIFY(!QSettings().contains("general/uiFontSize"));
-            QVERIFY(!QSettings().contains("general/language"));
+            QVERIFY(!QSettings().contains("General/uiFontSize"));
+            QVERIFY(!QSettings().contains("General/language"));
             QVERIFY(!QSettings().contains("editor/fontSize"));
             QCOMPARE(settings->font().pixelSize(), originalFontSize);
-            QTimer::singleShot(30, &window, [] {
+            QTimer::singleShot(30, &window, [languageCode] {
                 auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
                 QVERIFY(dialog);
                 const auto rejectOnExit = qScopeGuard([dialog] { if (dialog->isVisible()) dialog->reject(); });
-                dialog->findChild<QComboBox *>("uiLanguage")->setCurrentIndex(1);
+                auto *language = dialog->findChild<QComboBox *>("uiLanguage");
+                language->setCurrentIndex(language->findData(languageCode));
                 dialog->findChild<QSpinBox *>("uiFontSize")->setValue(18);
                 dialog->findChild<QCheckBox *>("minimizeToTray")->setChecked(true);
                 dialog->grab().save("settings-general.png");
@@ -1212,23 +1249,49 @@ st->e
                 dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Save)->click();
             });
             settings->click();
-            QCOMPARE(QSettings().value("general/language").toString(), QString("zh_CN"));
-            QCOMPARE(QSettings().value("general/uiFontSize").toInt(), 18);
-            QVERIFY(QSettings().value("general/minimizeToTray").toBool());
+            QCOMPARE(QSettings().value("General/language").toString(), languageCode);
+            QCOMPARE(settings->toolTip(), QString("设置")); // Language changes take effect on restart.
+            QCOMPARE(QSettings().value("General/uiFontSize").toInt(), 18);
+            QVERIFY(QSettings().value("General/minimizeToTray").toBool());
             QCOMPARE(QSettings().value("editor/fontSize").toInt(), 20);
             QCOMPARE(QSettings().value("editor/tabWidth").toInt(), 2);
             QVERIFY(settings->font().pixelSize() > originalFontSize);
             window.grab().save("settings-header.png");
         }
+        // A fresh process must reload from disk, without QSettings' shared cache.
+        QSettings().sync();
+        QProcess restarted;
+        const auto settingsRoot = QFileInfo(QSettings().fileName()).dir().absoluteFilePath("..");
+        restarted.start(QCoreApplication::applicationFilePath(), {"--read-settings", settingsRoot});
+        QVERIFY(restarted.waitForFinished());
+        QCOMPARE(restarted.exitStatus(), QProcess::NormalExit);
+        QCOMPARE(restarted.exitCode(), 0);
+        const auto persisted = QJsonDocument::fromJson(restarted.readAllStandardOutput()).object();
+        QCOMPARE(persisted["language"].toString(), languageCode);
+        QCOMPARE(persisted["locale"].toString(), languageCode);
+        QCOMPARE(persisted["uiFontSize"].toVariant().toInt(), 18);
+        QCOMPARE(persisted["uiFontFamily"].toString(), QSettings().value("General/uiFontFamily").toString());
+        QVERIFY(persisted["minimizeToTray"].toVariant().toBool());
+        QVERIFY(persisted.contains("checkUpdatesOnStartup"));
+        QVERIFY(!persisted["checkUpdatesOnStartup"].toVariant().toBool());
+        ApplicationLanguage language;
+        QCOMPARE(QLocale().name(), languageCode);
+        QCOMPARE(QCoreApplication::translate("vte::VTextEditTranslate", "Insert"),
+                 languageCode == "en_US" ? QString("Insert") : QString("插入"));
+        QDialogButtonBox standardButtons(QDialogButtonBox::Cancel);
+        QCOMPARE(standardButtons.button(QDialogButtonBox::Cancel)->text().remove('&'),
+                 languageCode == "en_US" ? QString("Cancel") : QString("取消"));
         MainWindow restored;
+        QCOMPARE(restored.findChild<QPushButton *>("settings")->toolTip(),
+                 languageCode == "en_US" ? QString("Settings") : QString("设置"));
         restored.resize(480, 700);
         restored.show();
         QVERIFY(QTest::qWaitForWindowExposed(&restored));
-        QTimer::singleShot(30, &restored, [] {
+        QTimer::singleShot(30, &restored, [languageCode] {
             auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
             QVERIFY(dialog);
             const auto rejectOnExit = qScopeGuard([dialog] { if (dialog->isVisible()) dialog->reject(); });
-            QCOMPARE(dialog->findChild<QComboBox *>("uiLanguage")->currentData().toString(), QString("zh_CN"));
+            QCOMPARE(dialog->findChild<QComboBox *>("uiLanguage")->currentData().toString(), languageCode);
             QCOMPARE(dialog->findChild<QSpinBox *>("uiFontSize")->value(), 18);
             QCOMPARE(dialog->findChild<QSpinBox *>("fontSize")->value(), 20);
             auto *scroll = dialog->findChild<QScrollArea *>();
@@ -1249,6 +1312,74 @@ st->e
             QVERIFY(restored.close());
             QVERIFY(!restored.isVisible());
         }
+    }
+
+    void englishUiPreservesNotebookData() {
+        const QLocale originalLocale;
+        const auto restoreLocale = qScopeGuard([originalLocale] { QLocale::setDefault(originalLocale); });
+        QSettings().setValue("General/language", "en_US");
+        ApplicationLanguage language;
+        NotebookStore fixture;
+        fixture.notebooks.append({"todo", "待办", "todo",
+            {{"task", {}, "中文事项", "保留原文", false, {{"category", "默认"}, {"completed", false}}}},
+            {{"categories", QJsonArray{"工作"}}}, fixturePath("todo-language")});
+        fixture.notebooks.append({"normal", "中文笔记本", "normal",
+            {{"note", {}, "中文标题", "---\ntitle: 原文\n---\n# Hello\n\n保留中文内容"}}, {}, fixturePath("note-language")});
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.resize(1280, 800);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *tree = window.findChild<QTreeWidget *>("noteTree");
+        auto *list = window.findChild<QTreeWidget *>("todoList");
+        auto *category = window.findChild<QComboBox *>("todoCategory");
+        QCOMPARE(tree->topLevelItem(0)->text(0), QString("All"));
+        QCOMPARE(tree->topLevelItem(1)->text(0), QString("Default"));
+        QCOMPARE(tree->topLevelItem(1)->data(0, Qt::UserRole).toString(), QString("默认"));
+        QCOMPARE(tree->topLevelItem(2)->text(0), QString("工作"));
+        tree->setCurrentItem(tree->topLevelItem(1));
+        QCOMPARE(list->topLevelItemCount(), 1);
+        QCOMPARE(list->topLevelItem(0)->text(0), QString("中文事项"));
+        tree->setCurrentItem(tree->topLevelItem(0));
+        list->setCurrentItem(list->topLevelItem(0));
+        QCOMPARE(category->currentText(), QString("Default"));
+        QCOMPARE(category->currentData().toString(), QString("默认"));
+        category->setCurrentIndex(category->findData("工作"));
+        category->setCurrentIndex(category->findData("默认"));
+        NotebookStore reloaded;
+        QVERIFY2(reloaded.load(&error), qPrintable(error));
+        QCOMPARE(reloaded.note("task")->metadata["category"].toString(), QString("默认"));
+        QCOMPARE(reloaded.note("task")->title, QString("中文事项"));
+        QCOMPARE(reloaded.note("task")->content, QString("保留原文"));
+        QCOMPARE(NotebookStore::typeLabel("site"), QString("Static Site"));
+        auto *books = window.findChild<QComboBox *>("notebooks");
+        books->setCurrentIndex(1);
+        openTreeNote(tree, tree->topLevelItem(0));
+        auto *editor = window.findChild<MarkdownEditor *>("markdownEditor");
+        QVERIFY(editor);
+        QCOMPARE(editor->getTextEdit()->placeholderText(), QString("Start writing Markdown..."));
+        QCOMPARE(window.findChild<QPushButton *>("editMode")->text(), QString("Edit"));
+        QCOMPARE(window.findChild<QTabBar *>("noteTabs")->tabText(0), QString("中文标题"));
+        auto *menu = editor->createEditorMenu(&window);
+        QCOMPARE(menu->actions().first()->text(), QString("Find and Replace…"));
+        window.grab().save("english-editor.png");
+        window.findChild<QPushButton *>("previewMode")->click();
+        auto *preview = window.findChild<MarkdownPreview *>();
+        QVERIFY(preview);
+        QTRY_COMPARE_WITH_TIMEOUT(preview->renderedRevision(), preview->revision(), 30000);
+        QCOMPARE(javascript(*preview, "document.documentElement.lang").toString(), QString("en-US"));
+        QCOMPARE(javascript(*preview, "document.querySelector('summary').textContent").toString(), QString("Document metadata"));
+        QVERIFY(javascript(*preview, "document.querySelector('.qsnote-article').textContent.includes('保留中文内容')").toBool());
+        QTimer::singleShot(30, &window, [] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            const auto rejectOnExit = qScopeGuard([dialog] { dialog->reject(); });
+            QCOMPARE(dialog->windowTitle(), QString("Reading Settings (All Notes)"));
+            QCOMPARE(dialog->findChild<QComboBox *>("readerTheme")->itemText(0), QString("Light"));
+        });
+        preview->showSettings();
+        window.close();
     }
 
     void globalSettingsUpdateOpenEditors() {
@@ -2477,7 +2608,20 @@ int main(int argc, char **argv) {
     QCoreApplication::setOrganizationName("qsnote-tests");
     QCoreApplication::setApplicationVersion("1.0.0");
     QSettings::setDefaultFormat(QSettings::IniFormat);
-    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDirectory.path());
+    const bool readSettings = QCoreApplication::arguments().value(1) == "--read-settings";
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+                       readSettings ? QCoreApplication::arguments().value(2) : settingsDirectory.path());
+    if (readSettings) {
+        ApplicationLanguage language;
+        QSettings settings;
+        QJsonObject snapshot;
+        for (const auto *key: {"language", "uiFontFamily", "uiFontSize", "minimizeToTray", "checkUpdatesOnStartup"}) {
+            snapshot[key] = QJsonValue::fromVariant(settings.value(QStringLiteral("General/") + key));
+        }
+        snapshot["locale"] = QLocale().name();
+        QTextStream(stdout) << QJsonDocument(snapshot).toJson(QJsonDocument::Compact);
+        return 0;
+    }
     UiTest tests;
     return QTest::qExec(&tests, argc, argv);
 }

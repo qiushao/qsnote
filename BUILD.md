@@ -127,6 +127,8 @@ git push origin V1.2.3
 - Linux 上如需关闭静态检查，配置时传入 `-DQSNOTE_CLANG_TIDY_ENABLE=OFF`。
 - 应用版本可用 `-DAPP_VERSION=1.2.3` 覆盖，运行 `qsnote --version` 查看。
 
+应用以中文源码文案为基础，英文翻译位于 `src/translations/qsnote_en_US.ts`。修改界面文案后，可运行 `lupdate src/ui src/core -no-obsolete -locations relative -ts src/translations/qsnote_en_US.ts` 更新条目，并补齐英文翻译。CMake 使用 Qt LinguistTools 编译翻译，随可执行文件内嵌英文、Qt 标准控件中文及 VTextEdit 中文资源，发布时无需另行复制应用翻译文件。
+
 ## UI 验证
 
 可选测试依赖 Qt 6 Test（Linux 的 `qt6-base-dev` 已包含）：

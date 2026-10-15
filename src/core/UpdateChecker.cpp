@@ -15,7 +15,7 @@ UpdateChecker::Result UpdateChecker::parseRelease(const QByteArray &data, const 
     const auto latest = pattern.match(tag);
     const auto current = pattern.match(currentVersion);
     if (!latest.hasMatch() || !current.hasMatch() || !release.value("draft").isBool() || !release.value("prerelease").isBool()) {
-        return {{}, "无法识别版本信息，请前往项目发布页查看。"};
+        return {{}, QCoreApplication::translate("UpdateChecker", "无法识别版本信息，请前往项目发布页查看。")};
     }
     if (release.value("draft").toBool() || release.value("prerelease").toBool()) return {};
     if (QVersionNumber::fromString(latest.captured(1)) > QVersionNumber::fromString(current.captured(1))) return {tag, {}};
@@ -34,9 +34,9 @@ void UpdateChecker::check() {
     connect(reply, &QNetworkReply::finished, this, [this, network, reply] {
         Result result;
         if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 404) {
-            result.error = "暂未找到已发布的版本。";
+            result.error = QCoreApplication::translate("UpdateChecker", "暂未找到已发布的版本。");
         } else if (reply->error() != QNetworkReply::NoError) {
-            result.error = "检查更新失败：" + reply->errorString();
+            result.error = QCoreApplication::translate("UpdateChecker", "检查更新失败：") + reply->errorString();
         } else {
             result = parseRelease(reply->readAll(), QCoreApplication::applicationVersion());
         }

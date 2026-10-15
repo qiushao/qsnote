@@ -1,4 +1,6 @@
 'use strict';
+document.documentElement.lang = qsnoteTranslations.language;
+document.title = qsnoteTranslations.preview;
 window.qsnoteArticle = (() => {
     let graphId = 0;
     let viz = new Viz();
@@ -53,7 +55,7 @@ window.qsnoteArticle = (() => {
         if (metadata) {
             const details = document.createElement('details');
             const summary = document.createElement('summary');
-            summary.textContent = '文档元数据';
+            summary.textContent = qsnoteTranslations.metadata;
             const pre = document.createElement('pre');
             pre.textContent = metadata;
             details.append(summary, pre);
@@ -82,10 +84,10 @@ window.qsnoteArticle = (() => {
                     if (options.cancelled?.()) return;
                     if (result.error) throw new Error(result.error);
                     const image = new Image();
-                    image.alt = 'PlantUML 图表';
+                    image.alt = qsnoteTranslations.plantUml;
                     await new Promise((resolve, reject) => {
                         image.onload = resolve;
-                        image.onerror = () => reject(new Error('无法读取 PlantUML 图片'));
+                        image.onerror = () => reject(new Error(qsnoteTranslations.plantUmlImageError));
                         image.src = `data:image/png;base64,${result.data}`;
                     });
                     graph.appendChild(image);
@@ -113,11 +115,11 @@ window.qsnoteArticle = (() => {
                 if (options.cancelled?.()) { graph.remove(); return; }
                 parent.replaceWith(graph);
             } catch (error) {
-                if (options.strict) throw new Error(`${language === 'mermaid' ? 'Mermaid' : language} 图表：${error.message || error}`);
+                if (options.strict) throw new Error(`${language === 'mermaid' ? 'Mermaid' : language} ${qsnoteTranslations.diagramError}${error.message || error}`);
                 graph.remove();
                 const message = document.createElement('p');
                 message.className = 'render-error';
-                message.textContent = `图表渲染失败：${error.message || error}`;
+                message.textContent = qsnoteTranslations.diagramError + (error.message || error);
                 parent.after(message);
             }
         }

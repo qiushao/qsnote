@@ -9,7 +9,7 @@ window.qsnoteExport = {
     async finish(plantUml, mathCss) {
         try {
             const root = document.querySelector('.qsnote-article');
-            window.exportStage = "图表";
+            window.exportStage = qsnoteTranslations.diagram;
             await qsnoteArticle.graphs(root, {strict: true, plantUml: async source => ({data: plantUml[source]})});
             // Freeze generated graphics for readers without JavaScript or SVG support.
             for (const node of root.querySelectorAll('eq,eqn,.diagram svg')) {
@@ -17,7 +17,7 @@ window.qsnoteExport = {
                 let svg, width, height;
                 const math = node.tagName.toLowerCase() !== 'svg';
                 const alt = math ? node.querySelector('annotation')?.textContent || '' :
-                    (node.id.startsWith('mermaid') ? 'Mermaid' : '图表') + ' 图表';
+                    (node.id.startsWith('mermaid') ? 'Mermaid' : qsnoteTranslations.diagram) + ' ' + qsnoteTranslations.diagram;
                 if (math) {
                     const host = document.createElement('div');
                     host.style.cssText = 'display:inline-block;width:max-content;white-space:nowrap;padding:2px;font-size:16px;color:#24292f';
@@ -27,7 +27,7 @@ window.qsnoteExport = {
                     host.prepend(style);
                     document.body.append(host);
                     host.getBoundingClientRect();
-                    window.exportStage = '公式字体';
+                    window.exportStage = qsnoteTranslations.mathFonts;
                     await Promise.all([...document.fonts].filter(font => font.family.includes('KaTeX') && font.status === 'loading')
                         .map(font => font.loaded));
                     width = Math.ceil(host.getBoundingClientRect().width);
@@ -46,14 +46,14 @@ window.qsnoteExport = {
                     // WaveDrom installs its stylesheet in the document rather than the SVG.
                     document.querySelectorAll('head style').forEach(style => svg.prepend(style.cloneNode(true)));
                 }
-                if (!(width > 0 && height > 0)) throw new Error('图片尺寸无效');
+                if (!(width > 0 && height > 0)) throw new Error(qsnoteTranslations.imageSizeError);
                 svg.setAttribute('width', width);
                 svg.setAttribute('height', height);
-                window.exportStage = '图片：' + alt;
+                window.exportStage = qsnoteTranslations.image + alt;
                 const image = new Image();
                 await new Promise((resolve, reject) => {
                     image.onload = resolve;
-                    image.onerror = () => reject(new Error('无法转换图片'));
+                    image.onerror = () => reject(new Error(qsnoteTranslations.imageConversionError));
                     image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(svg));
                 });
                 const canvas = document.createElement('canvas');

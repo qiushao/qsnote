@@ -1,4 +1,5 @@
 #include "SitePublisher.h"
+#include <QCoreApplication>
 #include "StaticSite.h"
 #include <QDir>
 #include <QEventLoop>
@@ -40,8 +41,8 @@ bool run(const QString &program, const QStringList &arguments, const QString &di
     const auto result = standardOutput + process.readAllStandardError();
     if (output) *output = standardOutput;
     if (process.error() == QProcess::FailedToStart || process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
-        *error = QStringLiteral("发布命令失败：%1\n%2\n%3").arg(program,
-            timeout.isActive() ? process.errorString() : QStringLiteral("执行超时"), QString::fromUtf8(result).right(6000));
+        *error = QCoreApplication::translate("SitePublisher", "发布命令失败：%1\n%2\n%3").arg(program,
+            timeout.isActive() ? process.errorString() : QCoreApplication::translate("SitePublisher", "执行超时"), QString::fromUtf8(result).right(6000));
         return false;
     }
     return true;
@@ -54,14 +55,14 @@ bool SitePublisher::validate(const Notebook &book, QString *error) {
     if (method == "github") {
         const auto repository = setting(book, "githubRepository");
         if (repository.isEmpty() || repository.startsWith('-') || repository.contains('\n')) {
-            *error = QStringLiteral("请在站点配置中填写 GitHub 仓库地址。");
+            *error = QCoreApplication::translate("SitePublisher", "请在站点配置中填写 GitHub 仓库地址。");
             return false;
         }
         const auto branch = setting(book, "githubBranch", "gh-pages");
         if (!QRegularExpression("^[A-Za-z0-9_][A-Za-z0-9_./-]*$").match(branch).hasMatch() ||
             branch.contains("..") || branch.contains("//") || branch.contains("/.") ||
             branch.endsWith('/') || branch.endsWith('.') || branch.endsWith(".lock")) {
-            *error = QStringLiteral("GitHub 发布分支名称无效。");
+            *error = QCoreApplication::translate("SitePublisher", "GitHub 发布分支名称无效。");
             return false;
         }
         programs = {"git"};
@@ -72,31 +73,31 @@ bool SitePublisher::validate(const Notebook &book, QString *error) {
         const int port = setting(book, "sshPort", "22").toInt();
         if (!QRegularExpression("^[A-Za-z0-9][A-Za-z0-9.:-]*$").match(host).hasMatch() ||
             !QRegularExpression("^[A-Za-z0-9_][A-Za-z0-9_.-]*$").match(user).hasMatch()) {
-            *error = QStringLiteral("请在站点配置中填写有效的 SSH 主机和用户名。");
+            *error = QCoreApplication::translate("SitePublisher", "请在站点配置中填写有效的 SSH 主机和用户名。");
             return false;
         }
         if (port < 1 || port > 65535) {
-            *error = QStringLiteral("SSH 端口必须为 1～65535。");
+            *error = QCoreApplication::translate("SitePublisher", "SSH 端口必须为 1～65535。");
             return false;
         }
         // Both modern SFTP and legacy SCP accept this path without shell expansion.
         if (!QRegularExpression("^/[\\p{L}\\p{N}_./-]+$").match(path).hasMatch() || QDir::cleanPath(path) == "/") {
-            *error = QStringLiteral("远程目录须为绝对路径，可包含文字、数字、下划线、短横线和点，不能为根目录。");
+            *error = QCoreApplication::translate("SitePublisher", "远程目录须为绝对路径，可包含文字、数字、下划线、短横线和点，不能为根目录。");
             return false;
         }
         const auto key = setting(book, "sshIdentityFile");
         if (!key.isEmpty() && !QFileInfo(key).isFile()) {
-            *error = QStringLiteral("SSH 私钥文件不存在：") + key;
+            *error = QCoreApplication::translate("SitePublisher", "SSH 私钥文件不存在：") + key;
             return false;
         }
         programs = {"ssh", "scp"};
     } else {
-        *error = QStringLiteral("请先在站点配置中选择发布方式并填写对应设置。");
+        *error = QCoreApplication::translate("SitePublisher", "请先在站点配置中选择发布方式并填写对应设置。");
         return false;
     }
     for (const auto &program: programs) {
         if (QStandardPaths::findExecutable(program).isEmpty()) {
-            *error = QStringLiteral("发布站点需要 %1，请安装并加入 PATH。").arg(program);
+            *error = QCoreApplication::translate("SitePublisher", "发布站点需要 %1，请安装并加入 PATH。").arg(program);
             return false;
         }
     }
@@ -107,7 +108,7 @@ bool SitePublisher::publish(const Notebook &book, QString *error) {
     if (!validate(book, error)) return false;
     const auto source = QDir(book.path).absoluteFilePath("public");
     if (!QFileInfo(source + "/index.html").isFile() || QFileInfo::exists(source + "/.git")) {
-        *error = QStringLiteral("站点生成结果无效，请重新生成站点，且不要在 public 中放置 .git。");
+        *error = QCoreApplication::translate("SitePublisher", "站点生成结果无效，请重新生成站点，且不要在 public 中放置 .git。");
         return false;
     }
     if (setting(book, "publishMethod") == "scp") {
@@ -124,7 +125,7 @@ bool SitePublisher::publish(const Notebook &book, QString *error) {
 
     QTemporaryDir checkout;
     if (!checkout.isValid()) {
-        *error = QStringLiteral("无法创建发布临时目录。");
+        *error = QCoreApplication::translate("SitePublisher", "无法创建发布临时目录。");
         return false;
     }
     const auto git = [&](const QStringList &arguments, QByteArray *output = nullptr) {
@@ -141,7 +142,7 @@ bool SitePublisher::publish(const Notebook &book, QString *error) {
             if (entry.fileName() == ".git") continue;
             const bool removed = entry.isDir() && !entry.isSymLink() ? QDir(entry.filePath()).removeRecursively() : QFile::remove(entry.filePath());
             if (!removed) {
-                *error = QStringLiteral("无法清理发布临时文件：") + entry.filePath();
+                *error = QCoreApplication::translate("SitePublisher", "无法清理发布临时文件：") + entry.filePath();
                 return false;
             }
         }

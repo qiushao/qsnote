@@ -1,3 +1,18 @@
+find_package(Qt6 REQUIRED COMPONENTS LinguistTools)
+qt_add_translation(QSNOTE_QM_FILES translations/qsnote_en_US.ts)
+get_target_property(QT_QMAKE_EXECUTABLE Qt6::qmake IMPORTED_LOCATION)
+execute_process(COMMAND "${QT_QMAKE_EXECUTABLE}" -query QT_INSTALL_TRANSLATIONS
+        OUTPUT_VARIABLE QT_TRANSLATIONS_DIR OUTPUT_STRIP_TRAILING_WHITESPACE)
+configure_file(resources/translations.qrc.in translations.qrc @ONLY)
+add_library(qsnote_i18n OBJECT
+        core/ApplicationLanguage.cpp
+        ${QSNOTE_QM_FILES}
+        ${CMAKE_CURRENT_BINARY_DIR}/translations.qrc
+        ../third_party/qsnote-translations.qrc
+)
+target_include_directories(qsnote_i18n PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(qsnote_i18n PUBLIC Qt6::Core)
+
 add_executable(qsnote WIN32 MACOSX_BUNDLE
         main.cpp
         ui/MainWindow.cpp
@@ -29,12 +44,11 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         resources/ui.qrc
         resources/site.qrc
         ../third_party/vtextedit/demo/data/syntax/syntax.qrc
-        ../third_party/qsnote-translations.qrc
         ../third_party/vnote-web.qrc
 )
 
 target_include_directories(qsnote PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(qsnote PRIVATE Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Widgets Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Network Qt6::Xml VTextEdit)
+target_link_libraries(qsnote PRIVATE qsnote_i18n Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Widgets Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Network Qt6::Xml VTextEdit)
 target_compile_definitions(qsnote PRIVATE APP_VERSION="${APP_VERSION}")
 
 if (WIN32)
