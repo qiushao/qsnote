@@ -2,6 +2,7 @@
 #define QSNOTE_MARKDOWNEDITOR_H
 
 #include <vtextedit/vmarkdowneditor.h>
+#include <functional>
 
 class QMenu;
 class InplacePreview;
@@ -13,6 +14,7 @@ public:
     void type(vte::TypeAction action, const QVariant &data = {});
     void showFindReplace();
     void showSettings();
+    QWidget *createSettingsPage(QWidget *parent, std::function<void()> &apply);
     void reloadSettings();
     void zoom(int delta) override;
     QMenu *createEditorMenu(QWidget *parent);

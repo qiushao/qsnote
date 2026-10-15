@@ -10,6 +10,8 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         ui/MarkdownPreview.h
         ui/FlowLayout.cpp
         ui/FlowLayout.h
+        core/UpdateChecker.cpp
+        core/UpdateChecker.h
         core/NotebookStore.cpp
         core/ArticleRenderer.cpp
         core/EbookExporter.cpp

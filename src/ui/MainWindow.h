@@ -24,6 +24,8 @@ class QStackedWidget;
 class QTabBar;
 class QTextBrowser;
 class QTimer;
+class QSystemTrayIcon;
+class UpdateChecker;
 class QTreeWidget;
 class QTreeWidgetItem;
 
@@ -86,6 +88,10 @@ private:
     void setPreview(bool enabled);
     void setViewMode(ViewMode mode);
     void toggleMaximized();
+    void showSettings();
+    void applyUiSettings();
+    void setupTray();
+    void checkForUpdates(QLabel *status = nullptr);
     void showSiteConfig();
     void showSitePreview();
     void exportNotebook();
@@ -93,6 +99,9 @@ private:
     QString currentNoteId() const;
     bool generateSite(const Notebook &book);
 
+    QSystemTrayIcon *tray_ = nullptr;
+    UpdateChecker *updateChecker_ = nullptr;
+    bool quitting_ = false;
     NotebookStore store_;
     QString currentNotebookId_;
     QSplitter *splitter_ = nullptr;

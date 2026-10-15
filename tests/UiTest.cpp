@@ -2,6 +2,10 @@
 #include "core/EbookExporter.h"
 #include "core/DiagramRuntime.h"
 #include "core/StaticSite.h"
+#include "core/UpdateChecker.h"
+#include <QDialogButtonBox>
+#include <QSystemTrayIcon>
+#include <QLayout>
 #include "ui/MainWindow.h"
 #include "ui/MarkdownEditor.h"
 #include "ui/MarkdownPreview.h"
@@ -92,6 +96,7 @@ class UiTest : public QObject {
 private slots:
     void init() {
         QSettings().clear();
+        QSettings().setValue("general/checkUpdatesOnStartup", false);
         QStandardPaths::setTestModeEnabled(true);
         QVERIFY(QDir().mkpath(QFileInfo(NotebookStore::storagePath()).absolutePath()));
         QFile::remove(NotebookStore::storagePath());
@@ -1081,8 +1086,7 @@ st->e
             QCOMPARE(target->cursor().shape(), cursor);
         }
         auto *header = window.findChild<QWidget *>("header");
-        auto *toggleLeft = window.findChild<QPushButton *>("toggleLeft");
-        const auto point = header->mapTo(&window, QPoint(toggleLeft->geometry().right() + 5, header->height() / 2));
+        const auto point = header->mapTo(&window, QPoint(header->width() / 2, 8));
         QTest::mouseMove(&window, point);
         QCOMPARE(window.childAt(point), header);
         QCOMPARE(window.childAt(point)->cursor().shape(), Qt::ArrowCursor);
@@ -1150,6 +1154,156 @@ st->e
         }
     }
 
+    void settingsDialogAndPersistence() {
+        {
+            MainWindow window;
+            window.resize(1280, 900);
+            window.show();
+            QVERIFY(QTest::qWaitForWindowExposed(&window));
+            auto *settings = window.findChild<QPushButton *>("settings");
+            auto *left = window.findChild<QPushButton *>("toggleLeft");
+            auto *right = window.findChild<QPushButton *>("toggleRight");
+            QCOMPARE(left->parentWidget(), right->parentWidget());
+            QCOMPARE(left->parentWidget()->layout()->indexOf(left) + 1, right->parentWidget()->layout()->indexOf(right));
+            QCOMPARE(settings->parentWidget()->objectName(), QString("headerLeft"));
+            const int originalFontSize = settings->font().pixelSize();
+            QTimer::singleShot(30, &window, [] {
+                auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                QVERIFY(dialog);
+                const auto rejectOnExit = qScopeGuard([dialog] { if (dialog->isVisible()) dialog->reject(); });
+                QCOMPARE(dialog->objectName(), QString("settingsDialog"));
+                auto *sections = dialog->findChild<QTabBar *>("settingsTabs");
+                QCOMPARE(sections->count(), 3);
+                auto *language = dialog->findChild<QComboBox *>("uiLanguage");
+                QCOMPARE(language->currentData().toString(), QString("system"));
+                QCOMPARE(language->count(), 2);
+                language->setCurrentIndex(1);
+                dialog->findChild<QSpinBox *>("uiFontSize")->setValue(18);
+                dialog->findChild<QCheckBox *>("minimizeToTray")->setChecked(true);
+                sections->setCurrentIndex(1);
+                QVERIFY(dialog->findChild<QWidget *>("editorSettingsCard")->isVisible());
+                QVERIFY(!dialog->findChild<QWidget *>("generalSettingsCard")->isVisible());
+                dialog->findChild<QSpinBox *>("fontSize")->setValue(20);
+                dialog->reject();
+            });
+            settings->click();
+            QVERIFY(!QSettings().contains("general/uiFontSize"));
+            QVERIFY(!QSettings().contains("general/language"));
+            QVERIFY(!QSettings().contains("editor/fontSize"));
+            QCOMPARE(settings->font().pixelSize(), originalFontSize);
+            QTimer::singleShot(30, &window, [] {
+                auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                QVERIFY(dialog);
+                const auto rejectOnExit = qScopeGuard([dialog] { if (dialog->isVisible()) dialog->reject(); });
+                dialog->findChild<QComboBox *>("uiLanguage")->setCurrentIndex(1);
+                dialog->findChild<QSpinBox *>("uiFontSize")->setValue(18);
+                dialog->findChild<QCheckBox *>("minimizeToTray")->setChecked(true);
+                dialog->grab().save("settings-general.png");
+                auto *sections = dialog->findChild<QTabBar *>("settingsTabs");
+                sections->setCurrentIndex(1);
+                dialog->findChild<QSpinBox *>("fontSize")->setValue(20);
+                dialog->findChild<QSpinBox *>("tabWidth")->setValue(2);
+                QApplication::processEvents();
+                dialog->grab().save("settings-editor.png");
+                sections->setCurrentIndex(2);
+                QVERIFY(dialog->findChild<QPushButton *>("checkUpdates")->isVisible());
+                QApplication::processEvents();
+                dialog->grab().save("settings-about.png");
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Save)->click();
+            });
+            settings->click();
+            QCOMPARE(QSettings().value("general/language").toString(), QString("zh_CN"));
+            QCOMPARE(QSettings().value("general/uiFontSize").toInt(), 18);
+            QVERIFY(QSettings().value("general/minimizeToTray").toBool());
+            QCOMPARE(QSettings().value("editor/fontSize").toInt(), 20);
+            QCOMPARE(QSettings().value("editor/tabWidth").toInt(), 2);
+            QVERIFY(settings->font().pixelSize() > originalFontSize);
+            window.grab().save("settings-header.png");
+        }
+        MainWindow restored;
+        restored.resize(480, 700);
+        restored.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&restored));
+        QTimer::singleShot(30, &restored, [] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            const auto rejectOnExit = qScopeGuard([dialog] { if (dialog->isVisible()) dialog->reject(); });
+            QCOMPARE(dialog->findChild<QComboBox *>("uiLanguage")->currentData().toString(), QString("zh_CN"));
+            QCOMPARE(dialog->findChild<QSpinBox *>("uiFontSize")->value(), 18);
+            QCOMPARE(dialog->findChild<QSpinBox *>("fontSize")->value(), 20);
+            auto *scroll = dialog->findChild<QScrollArea *>();
+            QVERIFY(scroll);
+            QTRY_COMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+            dialog->grab().save("settings-narrow.png");
+            dialog->findChild<QTabBar *>("settingsTabs")->setCurrentIndex(1);
+            QApplication::processEvents();
+            QTRY_COMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+            for (auto *input: dialog->findChildren<QSpinBox *>()) {
+                if (input->isVisible()) QVERIFY(input->height() >= input->sizeHint().height());
+            }
+            dialog->grab().save("settings-editor-narrow.png");
+            dialog->reject();
+        });
+        restored.findChild<QPushButton *>("settings")->click();
+        if (!QSystemTrayIcon::isSystemTrayAvailable()) {
+            QVERIFY(restored.close());
+            QVERIFY(!restored.isVisible());
+        }
+    }
+
+    void globalSettingsUpdateOpenEditors() {
+        NotebookStore fixture;
+        Notebook book{"book", "笔记本", "normal", {}, {}, fixturePath("settings")};
+        book.notes.append({"a", {}, "A", "original A", false, {}});
+        book.notes.append({"b", {}, "B", "original B", false, {}});
+        fixture.notebooks.append(book);
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        QSettings().setValue("session/openNotes", QStringList{"a", "b"});
+        MainWindow window;
+        window.resize(1280, 900);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QTRY_COMPARE(window.findChildren<MarkdownEditor *>().size(), 2);
+        auto *active = window.findChild<MarkdownEditor *>("markdownEditor");
+        active->getTextEdit()->moveCursor(QTextCursor::End);
+        active->insertText(" edited");
+        const auto text = active->getText();
+        const auto cursor = active->getTextEdit()->textCursor();
+        QTimer::singleShot(30, &window, [] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            const auto rejectOnExit = qScopeGuard([dialog] { if (dialog->isVisible()) dialog->reject(); });
+            dialog->findChild<QSpinBox *>("uiFontSize")->setValue(18);
+            dialog->findChild<QSpinBox *>("fontSize")->setValue(22);
+            dialog->findChild<QSpinBox *>("tabWidth")->setValue(2);
+            dialog->accept();
+        });
+        window.findChild<QPushButton *>("settings")->click();
+        for (auto *editor: window.findChildren<MarkdownEditor *>()) {
+            QCOMPARE(editor->baseEditorFontPointSize(), 22);
+            QCOMPARE(editor->getConfig().m_tabStopWidth, 2);
+            QCOMPARE(editor->getTextEdit()->font().pointSize(), 22);
+        }
+        QCOMPARE(active->getText(), text);
+        QCOMPARE(active->getTextEdit()->textCursor().position(), cursor.position());
+        active->getTextEdit()->undo();
+        QVERIFY(!active->getText().endsWith(" edited"));
+    }
+
+    void releaseVersionComparison() {
+        const auto release = [](const QString &version, bool prerelease = false) {
+            return QJsonDocument(QJsonObject{{"tag_name", version}, {"draft", false}, {"prerelease", prerelease}}).toJson();
+        };
+        QCOMPARE(UpdateChecker::parseRelease(release("V1.10.0"), "1.9.0").version, QString("V1.10.0"));
+        QVERIFY(UpdateChecker::parseRelease(release("v1.0.0"), "1.0.0").version.isEmpty());
+        QVERIFY(UpdateChecker::parseRelease(release("v1.0.0"), "2.0.0").version.isEmpty());
+        QVERIFY(UpdateChecker::parseRelease(release("v2.0.0", true), "1.0.0").version.isEmpty());
+        QVERIFY(!UpdateChecker::parseRelease("not json", "1.0.0").error.isEmpty());
+        QVERIFY(!UpdateChecker::parseRelease("{}", "1.0.0").error.isEmpty());
+        QVERIFY(!UpdateChecker::parseRelease(release("unknown"), "1.0.0").error.isEmpty());
+    }
+
     void emptyAndResponsive() {
         MainWindow window;
         window.resize(1440, 900);
@@ -1205,17 +1359,19 @@ st->e
             window.resize(width, 900);
             for (int index = 0; index < notebooks->count(); ++index) {
                 notebooks->setCurrentIndex(index);
+                // Changing notebook type schedules layouts for the newly visible actions.
+                QApplication::processEvents();
                 QTRY_VERIFY(qAbs(2 * search->mapTo(header, QPoint()).x() + search->width() - header->width()) <= 1);
                 const QRect searchRect(search->mapTo(header, QPoint()), search->size());
                 QVERIFY(header->rect().contains(searchRect));
                 QVERIFY(search->width() >= 320);
-                for (const auto *name: {"toggleLeft", "toggleRight", "siteConfig", "sitePreview", "exportNotebook",
+                for (const auto *name: {"settings", "toggleLeft", "toggleRight", "siteConfig", "sitePreview", "exportNotebook",
                                        "autoNumberChapters", "windowMinimize", "windowMaximize", "windowClose"}) {
                     auto *control = window.findChild<QWidget *>(name);
                     if (!control->isVisible()) continue;
                     const QRect controlRect(control->mapTo(header, QPoint()), control->size());
                     QVERIFY2(!searchRect.intersects(controlRect), name);
-                    QVERIFY2(header->rect().contains(controlRect), name);
+                    QVERIFY2(header->rect().contains(controlRect), qPrintable(QStringLiteral("%1: requested width %2, notebook %3, control %4,%5 %6x%7, header %8x%9").arg(name).arg(width).arg(index).arg(controlRect.x()).arg(controlRect.y()).arg(controlRect.width()).arg(controlRect.height()).arg(header->width()).arg(header->height())));
                 }
             }
         }
@@ -2319,6 +2475,7 @@ int main(int argc, char **argv) {
     QTemporaryDir settingsDirectory;
     if (!settingsDirectory.isValid()) return 1;
     QCoreApplication::setOrganizationName("qsnote-tests");
+    QCoreApplication::setApplicationVersion("1.0.0");
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDirectory.path());
     UiTest tests;

@@ -5,6 +5,11 @@
 #include "core/StaticSite.h"
 #include "core/SitePublisher.h"
 #include "core/EbookExporter.h"
+#include "core/UpdateChecker.h"
+#include <QDesktopServices>
+#include <QFontComboBox>
+#include <QSpinBox>
+#include <QSystemTrayIcon>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QWebEngineView>
@@ -101,6 +106,16 @@ QIcon icon(const QString &kind) {
     if (kind == "left" || kind == "right") {
         painter.drawRoundedRect(QRectF(1.5, 1.5, 13, 13), 2, 2);
         painter.drawLine(QPointF(kind == "left" ? 5 : 10, 2), QPointF(kind == "left" ? 5 : 10, 14));
+    } else if (kind == "settings") {
+        painter.drawEllipse(QRectF(4, 4, 8, 8));
+        painter.drawEllipse(QRectF(6.5, 6.5, 3, 3));
+        for (int angle = 0; angle < 360; angle += 45) {
+            painter.save();
+            painter.translate(8, 8);
+            painter.rotate(angle);
+            painter.drawLine(QPointF(0, 4), QPointF(0, 6.5));
+            painter.restore();
+        }
     } else if (kind == "search") {
         painter.drawEllipse(QRectF(2, 2, 8, 8));
         painter.drawLine(QPointF(9, 9), QPointF(13, 13));
@@ -293,11 +308,14 @@ private:
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
     setWindowTitle(QCoreApplication::applicationName());
-    QFile stylesheet(":/style.qss");
-    if (stylesheet.open(QIODevice::ReadOnly)) setStyleSheet(QString::fromUtf8(stylesheet.readAll()));
+    applyUiSettings();
     const auto available = screen()->availableGeometry().size();
     resize(available.width() * 4 / 5, available.height() * 4 / 5);
     buildUi();
+    setupTray();
+    QTimer::singleShot(1500, this, [this] {
+        if (QSettings().value("general/checkUpdatesOnStartup", true).toBool()) checkForUpdates();
+    });
     const QList<QPair<Qt::Edges, Qt::CursorShape>> resizeEdges = {
             {Qt::LeftEdge, Qt::SizeHorCursor},
             {Qt::RightEdge, Qt::SizeHorCursor},
@@ -406,6 +424,7 @@ void MainWindow::buildUi() {
     header_ = header;
     header->setObjectName("header");
     header->setMinimumHeight(56);
+    header->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     header->installEventFilter(this);
     auto *headerLayout = new QGridLayout(header);
     headerLayout->setContentsMargins(16, 10, 16, 10);
@@ -421,12 +440,13 @@ void MainWindow::buildUi() {
     auto *headerRightLayout = row(headerRight, 0, 0, 8);
     headerRightLayout->addStretch(1);
     headerLayout->addWidget(headerRight, 0, 2);
-    toggleLeft_ = button({}, "toggleLeft", headerLeft);
-    toggleLeft_->setProperty("iconButton", true);
-    toggleLeft_->setIcon(icon("left"));
-    toggleLeft_->setToolTip("收起/展开笔记本栏");
-    toggleLeft_->setAccessibleName(toggleLeft_->toolTip());
-    headerLeftLayout->addWidget(toggleLeft_);
+    auto *settings = button({}, "settings", headerLeft);
+    settings->setProperty("iconButton", true);
+    settings->setIcon(icon("settings"));
+    settings->setToolTip("设置");
+    settings->setAccessibleName(settings->toolTip());
+    headerLeftLayout->addWidget(settings);
+    connect(settings, &QPushButton::clicked, this, &MainWindow::showSettings);
     auto *title = label("qsnote", headerLeft);
     title->setObjectName("appTitle");
     title->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
@@ -473,6 +493,12 @@ void MainWindow::buildUi() {
     siteActionsLayout->addWidget(autoNumberChapters_);
     for (auto *action: {siteConfig_, sitePreview_, export_}) siteActionsLayout->addWidget(action);
     headerRightLayout->addWidget(siteActions);
+    toggleLeft_ = button({}, "toggleLeft", headerRight);
+    toggleLeft_->setProperty("iconButton", true);
+    toggleLeft_->setIcon(icon("left"));
+    toggleLeft_->setToolTip("收起/展开笔记本栏");
+    toggleLeft_->setAccessibleName(toggleLeft_->toolTip());
+    headerRightLayout->addWidget(toggleLeft_);
     toggleRight_ = button({}, "toggleRight", headerRight);
     toggleRight_->setProperty("iconButton", true);
     toggleRight_->setIcon(icon("right"));
@@ -1435,9 +1461,10 @@ void MainWindow::updatePanels() {
     siteActions->setVisible(actionWidth > 0);
     siteActions->setMaximumWidth(qMax(0, actionWidth - 6));
     findChild<QLabel *>("appTitle")->setVisible(width() >= 420);
+    notebooks_->setMinimumWidth(qBound(100, width() / 4, 240));
     auto *headerLayout = qobject_cast<QGridLayout *>(header_->layout());
-    const auto *headerLeft = findChild<QWidget *>("headerLeft");
-    const auto *headerRight = findChild<QWidget *>("headerRight");
+    auto *headerLeft = findChild<QWidget *>("headerLeft");
+    auto *headerRight = findChild<QWidget *>("headerRight");
     // FlowLayout's size hint is its narrowest width; reserve the full action row here.
     const int rightWidth = headerRight->sizeHint().width()
                            + (actionWidth > 0 ? qMax(0, actionWidth - 6 - qMax(siteActions->minimumWidth(), siteActions->sizeHint().width())) : 0);
@@ -1446,12 +1473,23 @@ void MainWindow::updatePanels() {
     const bool compact = width() < 2 * sideWidth + search_->minimumWidth()
                                    + 2 * headerLayout->horizontalSpacing() + margins.left() + margins.right();
     siteActions->setMinimumWidth(compact ? 0 : qMax(0, actionWidth - 6));
+    const bool stacked = headerLeft->minimumSizeHint().width() + headerRight->minimumSizeHint().width()
+                         + margins.left() + margins.right() + 2 * headerLayout->horizontalSpacing() > width();
+    int rightRow, rightColumn, rightRowSpan, rightColumnSpan;
+    headerLayout->getItemPosition(headerLayout->indexOf(headerRight), &rightRow, &rightColumn, &rightRowSpan, &rightColumnSpan);
+    if (rightRow != (stacked ? 2 : 0)) {
+        headerLayout->removeWidget(headerLeft);
+        headerLayout->removeWidget(headerRight);
+        headerLayout->addWidget(headerLeft, 0, 0, 1, stacked ? 3 : 1);
+        headerLayout->addWidget(headerRight, stacked ? 2 : 0, stacked ? 0 : 2, 1, stacked ? 3 : 1);
+    }
     int searchRow, searchColumn, rowSpan, columnSpan;
     headerLayout->getItemPosition(headerLayout->indexOf(search_), &searchRow, &searchColumn, &rowSpan, &columnSpan);
     if (searchRow != (compact ? 1 : 0)) {
         headerLayout->removeWidget(search_);
         headerLayout->addWidget(search_, compact ? 1 : 0, compact ? 0 : 1, 1, compact ? 3 : 1, Qt::AlignCenter);
     }
+    headerLayout->activate();
     const int unit = fontMetrics().horizontalAdvance('M');
     left_->setVisible(leftRequested_ && width() >= unit * 52);
     right_->setVisible(rightRequested_ && width() >= unit * 80);
@@ -1540,10 +1578,224 @@ void MainWindow::closeEvent(QCloseEvent *event) {
         QStringList openNotes;
         for (int index = 0; index < tabs_->count(); ++index) openNotes << tabs_->tabData(index).toString();
         session.setValue("session/openNotes", openNotes);
-        event->accept();
+        if (!quitting_ && session.value("general/minimizeToTray", false).toBool() && QSystemTrayIcon::isSystemTrayAvailable()) {
+            tray_->show();
+            hide();
+            event->ignore();
+        } else {
+            tray_->hide();
+            event->accept();
+        }
     } else {
         event->ignore();
     }
+}
+
+void MainWindow::applyUiSettings() {
+    QFile stylesheet(":/style.qss");
+    if (!stylesheet.open(QIODevice::ReadOnly)) return;
+    auto style = QString::fromUtf8(stylesheet.readAll());
+    QSettings settings;
+    auto family = settings.value("general/uiFontFamily").toString();
+    if (!family.isEmpty()) {
+        family.replace('\\', "\\\\");
+        family.replace('"', "\\\"");
+        style.replace(QRegularExpression("font-family:[^;]+;"), "font-family: \"" + family + "\";");
+    }
+    const int size = qBound(10, settings.value("general/uiFontSize", 14).toInt(), 24);
+    const QRegularExpression sizes("font-size: (\\d+)px;");
+    auto matches = sizes.globalMatch(style);
+    QString scaled;
+    qsizetype offset = 0;
+    while (matches.hasNext()) {
+        const auto match = matches.next();
+        scaled += style.mid(offset, match.capturedStart() - offset);
+        scaled += QStringLiteral("font-size: %1px;").arg(qRound(match.captured(1).toInt() * size / 14.0));
+        offset = match.capturedEnd();
+    }
+    setStyleSheet(scaled + style.mid(offset));
+    if (auto *title = findChild<QLabel *>("appTitle")) title->setMaximumWidth(title->sizeHint().width());
+    updatePanels();
+}
+
+void MainWindow::setupTray() {
+    tray_ = new QSystemTrayIcon(QIcon(":/icons/qsnote.png"), this);
+    tray_->setObjectName("systemTray");
+    tray_->setToolTip("qsnote");
+    auto *menu = new QMenu(this);
+    const auto restore = [this] {
+        if (isMinimized()) showNormal();
+        else show();
+        raise();
+        activateWindow();
+    };
+    menu->addAction("显示主窗口", this, restore);
+    menu->addSeparator();
+    auto *quit = menu->addAction("退出", this, [this] {
+        quitting_ = true;
+        if (close()) QApplication::quit();
+        else quitting_ = false;
+    });
+    quit->setObjectName("quitApplication");
+    tray_->setContextMenu(menu);
+    connect(tray_, &QSystemTrayIcon::activated, this, [restore](QSystemTrayIcon::ActivationReason reason) {
+        if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick) restore();
+    });
+    tray_->setVisible(QSettings().value("general/minimizeToTray", false).toBool() && QSystemTrayIcon::isSystemTrayAvailable());
+}
+
+void MainWindow::checkForUpdates(QLabel *status) {
+    if (!updateChecker_) updateChecker_ = new UpdateChecker(this);
+    if (status) {
+        status->setText("正在检查更新…");
+        connect(updateChecker_, &UpdateChecker::finished, status, [status](const QString &version, const QString &error) {
+            status->setText(!error.isEmpty() ? error : version.isEmpty() ? "当前已是最新版本。" : "发现新版本 " + version + "，可前往发布页下载。");
+        }, Qt::SingleShotConnection);
+    } else {
+        connect(updateChecker_, &UpdateChecker::finished, this, [this](const QString &version, const QString &) {
+            if (version.isEmpty() || !QSettings().value("general/checkUpdatesOnStartup", true).toBool()) return;
+            auto *notice = new QMessageBox(QMessageBox::Information, "发现新版本", "qsnote " + version + " 已发布。", QMessageBox::Close, this);
+            notice->setAttribute(Qt::WA_DeleteOnClose);
+            auto *download = notice->addButton("前往下载", QMessageBox::ActionRole);
+            connect(download, &QPushButton::clicked, notice, [] {
+                QDesktopServices::openUrl(QUrl("https://github.com/qiushao/qsnote/releases/latest"));
+            });
+            notice->open();
+        }, Qt::SingleShotConnection);
+    }
+    updateChecker_->check();
+}
+
+void MainWindow::showSettings() {
+    OverlayDialog dialog(this, "settingsDialog", true);
+    auto *layout = column(&dialog);
+    auto *bar = new QWidget(&dialog);
+    bar->setObjectName("dialogBar");
+    auto *barLayout = row(bar, 16, 11);
+    barLayout->addWidget(label("设置", bar));
+    barLayout->addStretch();
+    auto *close = button("关闭", "closeSettings", bar);
+    barLayout->addWidget(close);
+    layout->addWidget(bar);
+    auto *navigation = new QWidget(&dialog);
+    navigation->setObjectName("settingsNavigation");
+    auto *navigationLayout = row(navigation, 16, 10);
+    auto *sections = new QTabBar(navigation);
+    sections->setObjectName("settingsTabs");
+    sections->setExpanding(false);
+    sections->setUsesScrollButtons(true);
+    sections->setElideMode(Qt::ElideNone);
+    navigationLayout->addWidget(sections);
+    layout->addWidget(navigation);
+    auto *scroll = new QScrollArea(&dialog);
+    scroll->setWidgetResizable(true);
+    auto *body = new QWidget(scroll);
+    body->setObjectName("configBody");
+    auto *cards = column(body, 20, 16);
+    auto section = [&](const QString &name, const QString &caption) {
+        auto *card = new QWidget(body);
+        card->setObjectName(name);
+        card->setProperty("configCard", true);
+        card->setAttribute(Qt::WA_StyledBackground, true);
+        auto *content = column(card, 18, 12);
+        auto *title = label(caption, card);
+        title->setProperty("heading", true);
+        content->addWidget(title);
+        cards->addWidget(card);
+        card->setVisible(sections->addTab(caption) == 0);
+        return content;
+    };
+    QSettings settings;
+    auto *general = section("generalSettingsCard", "常用设置");
+    auto *fields = new QFormLayout;
+    fields->setRowWrapPolicy(QFormLayout::WrapLongRows);
+    fields->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    auto *language = new QComboBox(body);
+    language->setObjectName("uiLanguage");
+    language->addItem("跟随系统", "system");
+    language->addItem("简体中文", "zh_CN");
+    language->setCurrentIndex(qMax(0, language->findData(settings.value("general/language", "system"))));
+    fields->addRow("语言", language);
+    auto *font = new QFontComboBox(body);
+    font->setObjectName("uiFontFamily");
+    font->setCurrentFont(QFont(settings.value("general/uiFontFamily", this->font().family()).toString()));
+    font->setMinimumWidth(0);
+    font->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    auto *fontSize = new QSpinBox(body);
+    fontSize->setObjectName("uiFontSize");
+    fontSize->setRange(10, 24);
+    fontSize->setValue(settings.value("general/uiFontSize", 14).toInt());
+    fields->addRow("UI 字体", font);
+    fields->addRow("UI 字号（px）", fontSize);
+    general->addLayout(fields);
+    auto *tray = new QCheckBox("关闭时最小化到系统托盘", body);
+    tray->setObjectName("minimizeToTray");
+    tray->setChecked(settings.value("general/minimizeToTray", false).toBool());
+    general->addWidget(tray);
+    general->addWidget(label("托盘菜单可恢复窗口或退出；系统没有可用托盘时正常退出。", body, true));
+    auto *updates = new QCheckBox("启动时检查更新", body);
+    updates->setObjectName("checkUpdatesOnStartup");
+    updates->setChecked(settings.value("general/checkUpdatesOnStartup", true).toBool());
+    general->addWidget(updates);
+    general->addWidget(label("通过 GitHub 检查新版本，有更新时提示下载。", body, true));
+    general->addWidget(label("设置保存后生效。语言设置在重启后生效，暂无对应翻译时使用简体中文。", body, true));
+
+    auto *editorCard = section("editorSettingsCard", "编辑器设置");
+    // An empty workspace still allows editing the same settings as an open note.
+    auto *settingsEditor = markdownEditor_;
+    if (!settingsEditor) {
+        settingsEditor = new MarkdownEditor(&dialog);
+        settingsEditor->hide();
+        connect(settingsEditor, &MarkdownEditor::settingsChanged, this, [this] {
+            for (const auto &session: editorSessions_) session.editor->reloadSettings();
+        });
+    }
+    std::function<void()> applyEditor;
+    editorCard->addWidget(label("应用于所有笔记。", body, true));
+    editorCard->addWidget(settingsEditor->createSettingsPage(body, applyEditor));
+
+    auto *about = section("aboutSettingsCard", "关于");
+    about->addWidget(label("qsnote", body));
+    about->addWidget(label("版本 " + QCoreApplication::applicationVersion(), body, true));
+    about->addWidget(label("本地 Markdown 笔记、静态站点、电子书与待办管理。", body, true));
+    auto *check = button("检查更新", "checkUpdates", body);
+    about->addWidget(check, 0, Qt::AlignLeft);
+    auto *updateStatus = label("", body, true);
+    updateStatus->setObjectName("updateStatus");
+    updateStatus->setTextFormat(Qt::PlainText);
+    about->addWidget(updateStatus);
+    connect(check, &QPushButton::clicked, &dialog, [this, updateStatus] { checkForUpdates(updateStatus); });
+    auto *project = label("<a href=\"https://github.com/qiushao/qsnote\">项目主页</a> · <a href=\"https://github.com/qiushao/qsnote/releases/latest\">版本下载</a>", body);
+    project->setOpenExternalLinks(true);
+    about->addWidget(project);
+    cards->addStretch();
+    scroll->setWidget(body);
+    layout->addWidget(scroll, 1);
+    connect(sections, &QTabBar::currentChanged, &dialog, [cards, scroll](int index) {
+        for (int i = 0; i < cards->count() - 1; ++i) cards->itemAt(i)->widget()->setVisible(i == index);
+        scroll->verticalScrollBar()->setValue(0);
+    });
+    auto *footer = new QWidget(&dialog);
+    auto *footerLayout = row(footer, 16, 12);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, footer);
+    buttons->button(QDialogButtonBox::Save)->setText("保存");
+    buttons->button(QDialogButtonBox::Save)->setProperty("primary", true);
+    buttons->button(QDialogButtonBox::Cancel)->setText("取消");
+    footerLayout->addWidget(buttons);
+    layout->addWidget(footer);
+    connect(close, &QPushButton::clicked, &dialog, &QDialog::reject);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() != QDialog::Accepted) return;
+    settings.setValue("general/language", language->currentData());
+    settings.setValue("general/uiFontFamily", font->currentFont().family());
+    settings.setValue("general/uiFontSize", fontSize->value());
+    settings.setValue("general/minimizeToTray", tray->isChecked());
+    settings.setValue("general/checkUpdatesOnStartup", updates->isChecked());
+    settings.sync();
+    applyUiSettings();
+    applyEditor();
+    tray_->setVisible(tray->isChecked() && QSystemTrayIcon::isSystemTrayAvailable());
 }
 
 void MainWindow::createNotebook() {

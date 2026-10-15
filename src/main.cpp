@@ -2,6 +2,8 @@
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QIcon>
+#include <QLocale>
+#include <QSettings>
 #include <QTranslator>
 
 int main(int argc, char *argv[]) {
@@ -18,6 +20,9 @@ int main(int argc, char *argv[]) {
     parser.addVersionOption();
     parser.process(app);
 
+    const auto language = QSettings().value("general/language", "system").toString();
+    QLocale::setDefault(language == "zh_CN" ? QLocale("zh_CN") : QLocale::system());
+    // Chinese is the fallback until other application translations are available.
     QTranslator editorTranslator;
     if (editorTranslator.load(":/translations/vtextedit_zh_CN.qm")) QCoreApplication::installTranslator(&editorTranslator);
 

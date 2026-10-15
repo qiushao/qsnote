@@ -277,12 +277,24 @@ void MarkdownEditor::showSettings() {
     dialog.setObjectName("editorSettings");
     dialog.setWindowTitle("编辑器设置（所有笔记）");
     auto *layout = new QVBoxLayout(&dialog);
-    auto *tabs = new QTabWidget(&dialog);
-    layout->addWidget(tabs);
+    std::function<void()> apply;
+    layout->addWidget(createSettingsPage(&dialog, apply));
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() == QDialog::Accepted) apply();
+}
+
+QWidget *MarkdownEditor::createSettingsPage(QWidget *parent, std::function<void()> &apply) {
+    auto *tabs = new QTabWidget(parent);
     auto page = [&tabs](const QString &title) {
         auto *widget = new QWidget(tabs);
         tabs->addTab(widget, title);
-        return new QFormLayout(widget);
+        auto *form = new QFormLayout(widget);
+        form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+        form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+        return form;
     };
     auto *general = page("文本");
     auto *markdown = page("Markdown");
@@ -292,49 +304,50 @@ void MarkdownEditor::showSettings() {
     // Read controls only after acceptance, so Cancel never changes live settings.
     QList<std::function<void()>> saveControls;
     auto combo = [&](QFormLayout *form, const QString &key, const QString &label, const QStringList &items, int current) {
-        auto *input = new QComboBox(&dialog);
+        auto *input = new QComboBox(tabs);
         input->setObjectName(key);
         input->addItems(items);
         input->setCurrentIndex(current);
         form->addRow(label, input);
-        saveControls.append([&, key, input] { settings.setValue(key, input->currentIndex()); });
+        saveControls.append([key, input] { QSettings().setValue("editor/" + key, input->currentIndex()); });
     };
     auto check = [&](QFormLayout *form, const QString &key, const QString &label, bool current) {
-        auto *input = new QCheckBox(label, &dialog);
+        auto *input = new QCheckBox(label, tabs);
         input->setObjectName(key);
         input->setChecked(current);
         form->addRow(input);
-        saveControls.append([&, key, input] { settings.setValue(key, input->isChecked()); });
+        saveControls.append([key, input] { QSettings().setValue("editor/" + key, input->isChecked()); });
     };
     auto number = [&](QFormLayout *form, const QString &key, const QString &label, int current, int minimum, int maximum) {
-        auto *input = new QSpinBox(&dialog);
+        auto *input = new QSpinBox(tabs);
         input->setObjectName(key);
         input->setRange(minimum, maximum);
         input->setValue(current);
         form->addRow(label, input);
-        saveControls.append([&, key, input] { settings.setValue(key, input->value()); });
+        saveControls.append([key, input] { QSettings().setValue("editor/" + key, input->value()); });
     };
     const auto &config = getConfig();
     combo(general, "inputMode", "输入模式", {"普通", "Vim", "VS Code"}, config.m_inputMode);
     combo(general, "lineNumbers", "行号", {"隐藏", "绝对行号", "相对行号"}, static_cast<int>(config.m_lineNumberType));
     combo(general, "wrapMode", "换行", {"不换行", "按单词", "任意位置", "优先按单词"}, config.m_wrapMode);
     combo(general, "centerCursor", "光标居中", {"不居中", "始终居中", "到达底部时居中"}, config.m_centerCursor);
-    auto *font = new QFontComboBox(&dialog);
+    auto *font = new QFontComboBox(tabs);
     font->setObjectName("fontFamily");
+    font->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     font->setCurrentFont(getTextEdit()->font());
     general->addRow("字体", font);
-    saveControls.append([&, font] { settings.setValue("fontFamily", font->currentFont().family()); });
+    saveControls.append([font] { QSettings().setValue("editor/fontFamily", font->currentFont().family()); });
     number(general, "fontSize", "字号（pt）", baseEditorFontPointSize(), 6, 72);
     number(general, "zoom", "字号缩放增量", zoomDelta(), -5, 50);
     number(general, "tabWidth", "Tab 宽度", config.m_tabStopWidth, 1, 32);
-    auto *spacing = new QDoubleSpinBox(&dialog);
+    auto *spacing = new QDoubleSpinBox(tabs);
     spacing->setObjectName("lineSpacing");
     spacing->setRange(1.0, 5.0);
     spacing->setSingleStep(0.1);
     spacing->setDecimals(1);
     spacing->setValue(config.m_lineSpacing);
     general->addRow("行距倍数", spacing);
-    saveControls.append([&, spacing] { settings.setValue("lineSpacing", spacing->value()); });
+    saveControls.append([spacing] { QSettings().setValue("editor/lineSpacing", spacing->value()); });
     number(general, "contentWidth", "最大正文宽度（px，0 为不限）", config.m_maxContentWidth, 0, 3000);
     check(general, "expandTab", "将 Tab 展开为空格", config.m_expandTab);
     check(general, "folding", "允许文本折叠", config.m_textFoldingEnabled);
@@ -351,7 +364,7 @@ void MarkdownEditor::showSettings() {
     check(markdown, "numberLists", "自动编号有序列表", config_->m_autoNumberOrderedListsEnabled);
     check(spelling, "spellCheck", "启用拼写检查", isSpellCheckEnabled());
     check(spelling, "autoDetectLanguage", "自动识别语言", isAutoDetectLanguageEnabled());
-    auto *languages = new QComboBox(&dialog);
+    auto *languages = new QComboBox(tabs);
     languages->setObjectName("spellLanguage");
     const auto dictionaries = availableSpellCheckDictionaries();
     for (auto it = dictionaries.begin(); it != dictionaries.end(); ++it) languages->addItem(it.key(), it.value());
@@ -362,17 +375,21 @@ void MarkdownEditor::showSettings() {
     }
     languages->setCurrentIndex(selected);
     spelling->addRow("词典", languages);
-    if (dictionaries.isEmpty()) spelling->addRow(new QLabel("未找到拼写词典，请安装所需语言的 Hunspell 词典。", &dialog));
-    saveControls.append([&, languages] { settings.setValue("spellLanguage", languages->currentData()); });
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    layout->addWidget(buttons);
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    if (dialog.exec() != QDialog::Accepted) return;
-    for (const auto &save: saveControls) save();
-    settings.sync();
-    reloadSettings();
-    emit settingsChanged();
+    if (dictionaries.isEmpty()) {
+        auto *hint = new QLabel("未找到拼写词典，请安装所需语言的 Hunspell 词典。", tabs);
+        hint->setWordWrap(true);
+        spelling->addRow(hint);
+    }
+    saveControls.append([languages] { QSettings().setValue("editor/spellLanguage", languages->currentData()); });
+    apply = [this, saveControls] {
+        for (const auto &save: saveControls) save();
+        QSettings().sync();
+        reloadSettings();
+        emit settingsChanged();
+    };
+    tabs->ensurePolished();
+    tabs->setMinimumHeight(tabs->sizeHint().height());
+    return tabs;
 }
 
 QMenu *MarkdownEditor::createEditorMenu(QWidget *parent) {

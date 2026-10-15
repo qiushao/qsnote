@@ -100,6 +100,7 @@ if (QSNOTE_BUILD_TESTS)
     target_link_libraries(qsnote_publish_tests PRIVATE Qt6::Core Qt6::Test Qt6::WebEngineWidgets Qt6::Xml)
     add_test(NAME qsnote_publish COMMAND qsnote_publish_tests)
     add_executable(qsnote_ui_tests
+            src/core/UpdateChecker.cpp
             src/core/SitePublisher.cpp
             tests/UiTest.cpp
             src/core/EbookExporter.cpp
