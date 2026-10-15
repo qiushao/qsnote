@@ -1010,6 +1010,52 @@ void MainWindow::createTodoCategory() {
     refreshTodoCategories();
 }
 
+void MainWindow::renameTodoCategory(const QString &name) {
+    auto *book = store_.notebook(currentNotebookId_);
+    if (!book || book->type != "todo" || name.isEmpty() || name == QStringLiteral("默认")) return;
+    bool accepted = false;
+    const auto newName = QInputDialog::getText(this, "重命名分类", "新的分类名称：", QLineEdit::Normal, name, &accepted).trimmed();
+    if (!accepted || newName.isEmpty() || newName == name) return;
+    if (newName == QStringLiteral("全部") || todoCategory_->findText(newName) >= 0) {
+        QMessageBox::information(this, "无法重命名分类", "目标分类名称已存在，请使用其他名称。");
+        return;
+    }
+    auto categories = book->config["categories"].toArray();
+    for (int index = 0; index < categories.size(); ++index) {
+        if (categories.at(index).toString() == name) categories.replace(index, newName);
+    }
+    book->config["categories"] = categories;
+    for (auto &note: book->notes) {
+        if (note.metadata["category"].toString() == name) note.metadata["category"] = newName;
+    }
+    if (todoCategoryFilter_ == name) todoCategoryFilter_ = newName;
+    save();
+    refreshTodoCategories();
+}
+
+void MainWindow::deleteTodoCategory(const QString &name) {
+    auto *book = store_.notebook(currentNotebookId_);
+    if (!book || book->type != "todo" || name.isEmpty() || name == QStringLiteral("默认")) return;
+    int count = 0;
+    for (const auto &note: book->notes) {
+        if (note.metadata["category"].toString() == name) ++count;
+    }
+    const auto hint = count > 0 ? QStringLiteral("确认删除分类「%1」？其中 %2 个事项将移至「默认」分类。").arg(name).arg(count)
+                                : QStringLiteral("确认删除分类「%1」？").arg(name);
+    if (QMessageBox::question(this, "删除分类", hint, QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
+    QJsonArray categories;
+    for (const auto &value: book->config["categories"].toArray()) {
+        if (value.toString() != name) categories.append(value);
+    }
+    book->config["categories"] = categories;
+    for (auto &note: book->notes) {
+        if (note.metadata["category"].toString() == name) note.metadata["category"] = QStringLiteral("默认");
+    }
+    if (todoCategoryFilter_ == name) todoCategoryFilter_.clear();
+    save();
+    refreshTodoCategories();
+}
+
 void MainWindow::refreshNotebooks() {
     const QSignalBlocker blocker(notebooks_);
     notebooks_->clear();
@@ -1642,6 +1688,7 @@ QStringList MainWindow::siteCategories(const Notebook &book) {
     return categories;
 }
 
+
 void MainWindow::createNote(const QString &parentId, bool folder) {
     auto *book = store_.notebook(currentNotebookId_);
     if (!book) return;
@@ -1712,6 +1759,12 @@ void MainWindow::showTreeMenu(const QPoint &position) {
     QMenu menu(this);
     if (book && book->type == "todo") {
         menu.addAction("新建分类", this, &MainWindow::createTodoCategory);
+        // 「全部」与内置兜底分类「默认」不可重命名/删除。
+        const auto category = item ? item->data(0, Qt::UserRole).toString() : QString();
+        if (!category.isEmpty() && category != QStringLiteral("默认")) {
+            menu.addAction("重命名分类", this, [this, category] { renameTodoCategory(category); });
+            menu.addAction("删除分类", this, [this, category] { deleteTodoCategory(category); });
+        }
         menu.addSeparator();
         menu.addAction("打开笔记本…", this, &MainWindow::openNotebook);
         menu.addAction("关闭笔记本", this, &MainWindow::closeNotebook);

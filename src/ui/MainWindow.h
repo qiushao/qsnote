@@ -53,6 +53,8 @@ private:
     void createTodo();
     void deleteTodo(const QString &noteId);
     void createTodoCategory();
+    void renameTodoCategory(const QString &name);
+    void deleteTodoCategory(const QString &name);
     void updateStatus();
     void updatePanels();
     void updateResizeHandles();
