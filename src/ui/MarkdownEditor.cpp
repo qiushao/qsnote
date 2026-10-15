@@ -52,7 +52,8 @@ QSharedPointer<vte::MarkdownEditorConfig> editorConfig() {
     config->overrideTextFontFamily(settings.value("fontFamily").toString());
     auto &font = text->m_theme->editorStyle(vte::Theme::Text);
     font.m_fontPointSize = settings.value("fontSize", font.m_fontPointSize).toInt();
-    font.m_backgroundColor = qRgb(246, 247, 249);
+    font.m_backgroundColor = qRgb(255, 255, 255);
+    text->m_theme->editorStyle(vte::Theme::CursorLine).m_backgroundColor = qRgb(244, 247, 252);
     text->m_theme->editorStyle(vte::Theme::ContentMargin).m_backgroundColor = font.m_backgroundColor;
     text->m_theme->editorStyle(vte::Theme::IndicatorsBorder).m_backgroundColor = font.m_backgroundColor;
     config->m_webCodeBlockHighlighterEnabled = true;

@@ -27,6 +27,7 @@
 #include <QDropEvent>
 #include <QFileDialog>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -94,20 +95,22 @@ QIcon icon(const QString &kind) {
     QPainter painter(&pixmap);
     painter.scale(2, 2);
     painter.setRenderHint(QPainter::Antialiasing);
-    painter.setPen(QPen(QColor("#8a8f98"), 1));
+    painter.setPen(QPen(QColor("#758195"), 1.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
     if (kind == "left" || kind == "right") {
-        painter.fillRect(QRectF(1, 1, 14, 14), QColor("#e3e5e8"));
-        painter.drawRect(QRectF(1.5, 1.5, 13, 13));
+        painter.drawRoundedRect(QRectF(1.5, 1.5, 13, 13), 2, 2);
         painter.drawLine(QPointF(kind == "left" ? 5 : 10, 2), QPointF(kind == "left" ? 5 : 10, 14));
+    } else if (kind == "search") {
+        painter.drawEllipse(QRectF(2, 2, 8, 8));
+        painter.drawLine(QPointF(9, 9), QPointF(13, 13));
     } else if (kind == "dirty") {
         painter.setPen(Qt::NoPen);
         painter.setBrush(QColor("#3b6fd4"));
         painter.drawEllipse(QRectF(4.5, 4.5, 7, 7));
     } else if (kind == "folder") {
-        painter.setBrush(QColor("#8a8f98"));
+        painter.setBrush(QColor("#e8eef7"));
         painter.drawPolygon(QPolygonF{QPointF(1, 3), QPointF(6, 3), QPointF(8, 5), QPointF(15, 5), QPointF(15, 13), QPointF(1, 13)});
     } else {
-        painter.drawRect(QRectF(3, 1, 10, 14));
+        painter.drawRoundedRect(QRectF(3, 1, 10, 14), 1.5, 1.5);
         if (kind == "ebook") painter.drawLine(5, 2, 5, 14);
         for (int y: {5, 8, 11}) painter.drawLine(6, y, 10, y);
     }
@@ -119,7 +122,7 @@ class NoteTabBar : public QTabBar {
 public:
     using QTabBar::QTabBar;
     [[nodiscard]] QSize tabSizeHint(int index) const override {
-        return {qBound(76, fontMetrics().horizontalAdvance(tabText(index)) + 64 + (tabIcon(index).isNull() ? 0 : 20), 200), 36};
+        return {qBound(76, fontMetrics().horizontalAdvance(tabText(index)) + 64 + (tabIcon(index).isNull() ? 0 : 20), 200), 32};
     }
 };
 
@@ -400,21 +403,53 @@ void MainWindow::buildUi() {
     auto *header = new QWidget(root);
     header_ = header;
     header->setObjectName("header");
-    header->setMinimumHeight(44);
+    header->setMinimumHeight(56);
     header->installEventFilter(this);
-    auto *headerLayout = row(header, 12, 8, 10);
-    toggleLeft_ = button({}, "toggleLeft", header);
+    auto *headerLayout = new QGridLayout(header);
+    headerLayout->setContentsMargins(16, 10, 16, 10);
+    headerLayout->setSpacing(8);
+    headerLayout->setColumnStretch(0, 1);
+    headerLayout->setColumnStretch(2, 1);
+    auto *headerLeft = new QWidget(header);
+    headerLeft->setObjectName("headerLeft");
+    auto *headerLeftLayout = row(headerLeft, 0, 0, 8);
+    headerLayout->addWidget(headerLeft, 0, 0);
+    auto *headerRight = new QWidget(header);
+    headerRight->setObjectName("headerRight");
+    auto *headerRightLayout = row(headerRight, 0, 0, 8);
+    headerRightLayout->addStretch(1);
+    headerLayout->addWidget(headerRight, 0, 2);
+    toggleLeft_ = button({}, "toggleLeft", headerLeft);
     toggleLeft_->setProperty("iconButton", true);
     toggleLeft_->setIcon(icon("left"));
     toggleLeft_->setToolTip("收起/展开笔记本栏");
     toggleLeft_->setAccessibleName(toggleLeft_->toolTip());
-    headerLayout->addWidget(toggleLeft_);
-    auto *title = label("qsnote", header);
+    headerLeftLayout->addWidget(toggleLeft_);
+    auto *title = label("qsnote", headerLeft);
     title->setObjectName("appTitle");
     title->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     title->setMaximumWidth(title->sizeHint().width());
-    headerLayout->addWidget(title, 1);
-    headerLayout->addStretch(1);
+    headerLeftLayout->addWidget(title);
+    auto *picker = new QWidget(headerLeft);
+    picker->setObjectName("notebookPicker");
+    auto *pickerLayout = row(picker, 0, 0, 0);
+    notebooks_ = new QComboBox(picker);
+    notebooks_->setObjectName("notebooks");
+    notebooks_->setItemDelegate(new NotebookDelegate(notebooks_));
+    notebooks_->setAccessibleName("当前笔记本");
+    notebooks_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    notebooks_->setMinimumContentsLength(1);
+    notebooks_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    notebooks_->setMinimumWidth(240);
+    notebooks_->setMaximumWidth(320);
+    pickerLayout->addWidget(notebooks_, 1);
+    auto *add = button("＋", "newNotebook", picker);
+    add->setProperty("iconButton", true);
+    add->setToolTip("新建笔记本");
+    add->setAccessibleName(add->toolTip());
+    pickerLayout->addWidget(add);
+    headerLeftLayout->addWidget(picker);
+    headerLeftLayout->addStretch(1);
     search_ = new QLineEdit(header);
     search_->setObjectName("search");
     search_->setPlaceholderText("搜索当前笔记本 (Ctrl+Shift+F)");
@@ -422,12 +457,12 @@ void MainWindow::buildUi() {
     search_->setMinimumWidth(320);
     search_->setMaximumWidth(520);
     search_->setClearButtonEnabled(true);
-    headerLayout->addWidget(search_);
-    headerLayout->addStretch(1);
-    siteConfig_ = button("站点配置", "siteConfig", header);
-    sitePreview_ = button("站点预览", "sitePreview", header);
-    export_ = button("导出", "exportNotebook", header);
-    auto *siteActions = new QWidget(header);
+    search_->addAction(icon("search"), QLineEdit::LeadingPosition);
+    headerLayout->addWidget(search_, 0, 1, Qt::AlignCenter);
+    siteConfig_ = button("站点配置", "siteConfig", headerRight);
+    sitePreview_ = button("站点预览", "sitePreview", headerRight);
+    export_ = button("导出", "exportNotebook", headerRight);
+    auto *siteActions = new QWidget(headerRight);
     siteActions->setObjectName("siteActions");
     auto *siteActionsLayout = new FlowLayout(siteActions, 0, 6);
     autoNumberChapters_ = new QCheckBox("章节自动编号", siteActions);
@@ -435,20 +470,20 @@ void MainWindow::buildUi() {
     autoNumberChapters_->setToolTip("按章节层级显示 1、1.1、1.2 等编号，同时应用于电子书导出");
     siteActionsLayout->addWidget(autoNumberChapters_);
     for (auto *action: {siteConfig_, sitePreview_, export_}) siteActionsLayout->addWidget(action);
-    headerLayout->addWidget(siteActions, 1);
-    toggleRight_ = button({}, "toggleRight", header);
+    headerRightLayout->addWidget(siteActions);
+    toggleRight_ = button({}, "toggleRight", headerRight);
     toggleRight_->setProperty("iconButton", true);
     toggleRight_->setIcon(icon("right"));
     toggleRight_->setToolTip("收起/展开右侧栏");
     toggleRight_->setAccessibleName(toggleRight_->toolTip());
-    headerLayout->addWidget(toggleRight_);
+    headerRightLayout->addWidget(toggleRight_);
     const QList<QPair<QString, QString>> windowButtons = {{"–", "windowMinimize"}, {"□", "windowMaximize"}, {"×", "windowClose"}};
     for (const auto &entry: windowButtons) {
-        auto *windowButton = button(entry.first, entry.second, header);
+        auto *windowButton = button(entry.first, entry.second, headerRight);
         windowButton->setProperty("windowButton", true);
         windowButton->setToolTip(entry.second == "windowMinimize" ? "最小化" : entry.second == "windowMaximize" ? "最大化" : "关闭");
         windowButton->setAccessibleName(windowButton->toolTip());
-        headerLayout->addWidget(windowButton);
+        headerRightLayout->addWidget(windowButton);
         if (entry.second == "windowMinimize") connect(windowButton, &QPushButton::clicked, this, [this] { showMinimized(); });
         else if (entry.second == "windowMaximize") {
             maximize_ = windowButton;
@@ -466,29 +501,8 @@ void MainWindow::buildUi() {
     left_ = new QWidget(splitter_);
     left_->setObjectName("leftPanel");
     auto *leftLayout = column(left_);
-    auto *leftHeader = new QWidget(left_);
-    leftHeader->setObjectName("panelHeader");
-    auto *leftHeaderLayout = row(leftHeader);
-    auto *picker = new QWidget(leftHeader);
-    picker->setObjectName("notebookPicker");
-    auto *pickerLayout = row(picker, 0, 0, 0);
-    notebooks_ = new QComboBox(picker);
-    notebooks_->setObjectName("notebooks");
-    notebooks_->setItemDelegate(new NotebookDelegate(notebooks_));
-    notebooks_->setAccessibleName("当前笔记本");
-    notebooks_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-    notebooks_->setMinimumContentsLength(1);
-    notebooks_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    pickerLayout->addWidget(notebooks_, 1);
-    auto *add = button("＋", "newNotebook", picker);
-    add->setProperty("iconButton", true);
-    add->setToolTip("新建笔记本");
-    add->setAccessibleName(add->toolTip());
-    pickerLayout->addWidget(add);
-    leftHeaderLayout->addWidget(picker);
-    leftLayout->addWidget(leftHeader);
     auto *leftBody = new QWidget(left_);
-    auto *bodyLayout = column(leftBody, 6, 4);
+    auto *bodyLayout = column(leftBody, 10, 8);
     groupBy_ = new QComboBox(leftBody);
     groupBy_->setObjectName("groupBy");
     groupBy_->addItems({"按分类", "按标签", "按日期"});
@@ -524,7 +538,7 @@ void MainWindow::buildUi() {
     tree_->setItemDelegate(new NoteDelegate(tree_));
     tree_->setHeaderHidden(true);
     tree_->setIndentation(14);
-    tree_->setIconSize(QSize(14, 14));
+    tree_->setIconSize(QSize(16, 16));
     tree_->setTextElideMode(Qt::ElideRight);
     tree_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     tree_->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -538,7 +552,7 @@ void MainWindow::buildUi() {
     auto *centerLayout = column(center);
     auto *strip = new QWidget(center);
     strip->setObjectName("tabStrip");
-    auto *stripLayout = row(strip, 0, 0, 0);
+    auto *stripLayout = row(strip, 8, 7, 0);
     tabs_ = new NoteTabBar(strip);
     tabs_->setObjectName("noteTabs");
     tabs_->setTabsClosable(true);
@@ -546,7 +560,7 @@ void MainWindow::buildUi() {
     tabs_->setElideMode(Qt::ElideRight);
     tabs_->setUsesScrollButtons(true);
     tabs_->setDrawBase(false);
-    strip->setMinimumHeight(36);
+    strip->setMinimumHeight(46);
     stripLayout->addWidget(tabs_);
     centerLayout->addWidget(strip);
     toolbar_ = new QWidget(center);
@@ -560,8 +574,17 @@ void MainWindow::buildUi() {
     empty->setObjectName("emptyState");
     auto *emptyLayout = column(empty, 12, 6);
     emptyLayout->addStretch();
-    for (const auto &text: {"从左侧选择一篇笔记开始", "支持普通笔记本 / 静态站点 / 电子书 / Todo List"}) {
-        auto *hint = label(text, empty, true);
+    auto *emptyIcon = label({}, empty);
+    emptyIcon->setPixmap(icon("ebook").pixmap(QSize(48, 48)));
+    emptyIcon->setAlignment(Qt::AlignCenter);
+    emptyLayout->addWidget(emptyIcon);
+    const QList<QPair<QString, QString>> emptyLabels = {
+        {"emptyTitle", "开始记录"},
+        {"emptyDescription", "从左侧选择一篇笔记开始，或新建一个笔记本"},
+        {"emptyShortcut", "普通笔记 · 静态站点 · 电子书 · 待办事项"}};
+    for (const auto &entry: emptyLabels) {
+        auto *hint = label(entry.second, empty, true);
+        hint->setObjectName(entry.first);
         hint->setAlignment(Qt::AlignCenter);
         emptyLayout->addWidget(hint);
     }
@@ -612,7 +635,7 @@ void MainWindow::buildUi() {
     auto *rightLayout = column(right_);
     auto *rightHeader = new QWidget(right_);
     rightHeader->setObjectName("panelHeader");
-    auto *rightHeaderLayout = row(rightHeader);
+    auto *rightHeaderLayout = row(rightHeader, 18, 16, 6);
     auto *outlineTitle = label("大纲", rightHeader, true);
     outlineTitle->setObjectName("sectionTitle");
     rightHeaderLayout->addWidget(outlineTitle);
@@ -625,7 +648,7 @@ void MainWindow::buildUi() {
     outline_->setHeaderHidden(true);
     outline_->setRootIsDecorated(false);
     outline_->setIndentation(14);
-    outline_->setContentsMargins(6, 6, 6, 20);
+    outline_->setContentsMargins(10, 4, 10, 20);
     outline_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     outline_->setMinimumSize(0, 0);
     rightLayout->addWidget(outline_, 1);
@@ -704,7 +727,7 @@ void MainWindow::buildUi() {
 }
 
 void MainWindow::buildToolbar() {
-    auto *layout = new FlowLayout(toolbar_, 5, 2);
+    auto *layout = new FlowLayout(toolbar_, 8, 3);
     using Type = vte::TypeAction;
     struct Tool {
         QString title;
@@ -723,7 +746,7 @@ void MainWindow::buildToolbar() {
         if (tool.title.isEmpty()) {
             auto *separator = new QFrame(toolbar_);
             separator->setFrameShape(QFrame::VLine);
-            separator->setStyleSheet("color: #e3e5e8; margin: 4px 5px;");
+            separator->setStyleSheet("color: #e7ebf0; margin: 6px 4px;");
             separator->setFixedSize(11, 24);
             layout->addWidget(separator);
             continue;
@@ -746,7 +769,8 @@ void MainWindow::buildToolbar() {
     layout->addWidget(more);
     auto *modes = new QWidget(toolbar_);
     modes->setProperty("alignRight", true);
-    auto *modeLayout = row(modes, 0, 0, 0);
+    modes->setObjectName("viewModes");
+    auto *modeLayout = row(modes, 3, 3, 2);
     editMode_ = button("编辑", "editMode", modes);
     previewMode_ = button("预览", "previewMode", modes);
     splitMode_ = button("分屏", "splitMode", modes);
@@ -766,7 +790,7 @@ void MainWindow::buildToolbar() {
 void MainWindow::buildTodoUi() {
     todoListPage_ = new QWidget(pages_);
     todoListPage_->setObjectName("todoListPage");
-    auto *listLayout = column(todoListPage_, 10, 8);
+    auto *listLayout = column(todoListPage_, 16, 12);
     auto *add = button("＋ 新建事项", "newTodo", todoListPage_);
     listLayout->addWidget(add);
     todoHint_ = label("暂无进行中的事项", todoListPage_, true);
@@ -781,8 +805,10 @@ void MainWindow::buildTodoUi() {
 
     todoDetails_ = new QWidget(right_);
     todoDetails_->setObjectName("todoDetails");
-    auto *detailsLayout = column(todoDetails_, 10, 8);
-    detailsLayout->addWidget(label("事项详情", todoDetails_, true));
+    auto *detailsLayout = column(todoDetails_, 16, 12);
+    auto *detailsTitle = label("事项详情", todoDetails_, true);
+    detailsTitle->setObjectName("sectionTitle");
+    detailsLayout->addWidget(detailsTitle);
     todoTitle_ = new QLineEdit(todoDetails_);
     todoTitle_->setObjectName("todoTitle");
     todoTitle_->setPlaceholderText("事项标题");
@@ -1334,6 +1360,23 @@ void MainWindow::updatePanels() {
     siteActions->setVisible(actionWidth > 0);
     siteActions->setMaximumWidth(qMax(0, actionWidth - 6));
     findChild<QLabel *>("appTitle")->setVisible(width() >= 420);
+    auto *headerLayout = qobject_cast<QGridLayout *>(header_->layout());
+    const auto *headerLeft = findChild<QWidget *>("headerLeft");
+    const auto *headerRight = findChild<QWidget *>("headerRight");
+    // FlowLayout's size hint is its narrowest width; reserve the full action row here.
+    const int rightWidth = headerRight->sizeHint().width()
+                           + (actionWidth > 0 ? qMax(0, actionWidth - 6 - qMax(siteActions->minimumWidth(), siteActions->sizeHint().width())) : 0);
+    const int sideWidth = qMax(headerLeft->sizeHint().width(), rightWidth);
+    const auto margins = headerLayout->contentsMargins();
+    const bool compact = width() < 2 * sideWidth + search_->minimumWidth()
+                                   + 2 * headerLayout->horizontalSpacing() + margins.left() + margins.right();
+    siteActions->setMinimumWidth(compact ? 0 : qMax(0, actionWidth - 6));
+    int searchRow, searchColumn, rowSpan, columnSpan;
+    headerLayout->getItemPosition(headerLayout->indexOf(search_), &searchRow, &searchColumn, &rowSpan, &columnSpan);
+    if (searchRow != (compact ? 1 : 0)) {
+        headerLayout->removeWidget(search_);
+        headerLayout->addWidget(search_, compact ? 1 : 0, compact ? 0 : 1, 1, compact ? 3 : 1, Qt::AlignCenter);
+    }
     const int unit = fontMetrics().horizontalAdvance('M');
     left_->setVisible(leftRequested_ && width() >= unit * 52);
     right_->setVisible(rightRequested_ && width() >= unit * 80);

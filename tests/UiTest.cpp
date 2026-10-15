@@ -1186,6 +1186,40 @@ st->e
         QVERIFY(window.findChild<QLineEdit *>("search")->hasFocus());
     }
 
+    void searchIsCenteredForEveryNotebookType() {
+        NotebookStore fixture;
+        for (const auto &type: {"normal", "site", "ebook", "todo"}) {
+            fixture.notebooks.append({type, type, type, {}, {}, fixturePath(type)});
+        }
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.resize(1440, 900);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *notebooks = window.findChild<QComboBox *>("notebooks");
+        auto *header = window.findChild<QWidget *>("header");
+        auto *search = window.findChild<QLineEdit *>("search");
+        for (const int width: {1440, 1280, 1024, 720, 480, 1440}) {
+            window.resize(width, 900);
+            for (int index = 0; index < notebooks->count(); ++index) {
+                notebooks->setCurrentIndex(index);
+                QTRY_VERIFY(qAbs(2 * search->mapTo(header, QPoint()).x() + search->width() - header->width()) <= 1);
+                const QRect searchRect(search->mapTo(header, QPoint()), search->size());
+                QVERIFY(header->rect().contains(searchRect));
+                QVERIFY(search->width() >= 320);
+                for (const auto *name: {"toggleLeft", "toggleRight", "siteConfig", "sitePreview", "exportNotebook",
+                                       "autoNumberChapters", "windowMinimize", "windowMaximize", "windowClose"}) {
+                    auto *control = window.findChild<QWidget *>(name);
+                    if (!control->isVisible()) continue;
+                    const QRect controlRect(control->mapTo(header, QPoint()), control->size());
+                    QVERIFY2(!searchRect.intersects(controlRect), name);
+                    QVERIFY2(header->rect().contains(controlRect), name);
+                }
+            }
+        }
+    }
+
     void createAllNotebookTypes() {
         MainWindow window;
         window.resize(1280, 800);
@@ -1348,6 +1382,46 @@ st->e
         QCOMPARE(restored.findChild<QComboBox *>("notebooks")->currentData().toString(), QString("todo"));
         QVERIFY(restored.findChild<QWidget *>("todoListPage")->isVisible());
         QCOMPARE(restored.findChild<QTreeWidget *>("todoList")->topLevelItemCount(), 2);
+    }
+
+    void treeSelectionHasContinuousBackground() {
+        NotebookStore fixture;
+        Notebook book{"normal", "选择样式", "normal", {}, {}, fixturePath("selection")};
+        book.notes.append({"folder", {}, "文件夹", {}, true, {}});
+        book.notes.append({"note", "folder", "笔记", "# 标题\n\n## 子标题\n\n正文", false, {}});
+        fixture.notebooks.append(book);
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.resize(1440, 900);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *tree = window.findChild<QTreeWidget *>("noteTree");
+        tree->expandAll();
+        openTreeNote(tree, tree->topLevelItem(0)->child(0));
+        auto *outline = window.findChild<QTreeWidget *>("outline");
+        QTRY_COMPARE(outline->topLevelItemCount(), 1);
+        QCOMPARE(outline->topLevelItem(0)->childCount(), 1);
+        outline->expandAll();
+        for (auto *view: {tree, outline}) {
+            auto *item = view->topLevelItem(0)->child(0);
+            view->setCurrentItem(item);
+            view->clearSelection();
+            const auto rect = view->visualItemRect(item);
+            QVERIFY(!rect.isEmpty());
+            const QPoint branch(rect.left() - view->indentation() / 2, rect.center().y());
+            const QPoint content(rect.right() - 16, rect.center().y());
+            const auto before = view->viewport()->grab().toImage();
+            item->setSelected(true);
+            const auto after = view->viewport()->grab().toImage();
+            const auto scale = after.devicePixelRatio();
+            const auto selected = after.pixelColor(content * scale);
+            QVERIFY(selected != before.pixelColor(content * scale));
+            QCOMPARE(after.pixelColor(branch * scale), selected);
+            for (const int offset: {-1, 0, 1}) {
+                QCOMPARE(after.pixelColor(QPoint(rect.left() + offset, rect.top() + 3) * scale), selected);
+            }
+        }
     }
 
     void editingSearchTabsAndOutline() {

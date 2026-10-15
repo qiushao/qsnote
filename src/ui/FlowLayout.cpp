@@ -35,19 +35,34 @@ int FlowLayout::arrange(const QRect &rect, bool apply) const {
     int x = area.x();
     int y = area.y();
     int rowHeight = 0;
+    int rowStart = 0;
+    QList<QPair<QLayoutItem *, QRect>> placed;
+    placed.reserve(items_.size());
+    const auto finishRow = [&] {
+        for (int i = rowStart; i < placed.size(); ++i) {
+            auto &entry = placed[i];
+            entry.second.moveTop(y + (rowHeight - entry.second.height()) / 2);
+        }
+        rowStart = static_cast<int>(placed.size());
+    };
     for (auto *item: items_) {
         if (item->isEmpty()) continue;
         QSize size = item->sizeHint();
         size.setWidth(qMin(size.width(), area.width()));
         if (x > area.x() && x + size.width() > area.right() + 1) {
+            finishRow();
             x = area.x();
             y += rowHeight + spacing();
             rowHeight = 0;
         }
         if (item->widget() && item->widget()->property("alignRight").toBool()) x = qMax(x, area.right() + 1 - size.width());
-        if (apply) item->setGeometry(QRect(QPoint(x, y), size));
+        placed.append({item, QRect(QPoint(x, y), size)});
         x += size.width() + spacing();
         rowHeight = qMax(rowHeight, size.height());
+    }
+    finishRow();
+    if (apply) {
+        for (const auto &entry: placed) entry.first->setGeometry(entry.second);
     }
     return y + rowHeight - rect.y() + margins.bottom();
 }
