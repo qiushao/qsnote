@@ -28,6 +28,7 @@
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QGridLayout>
+#include <QHeaderView>
 #include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -657,7 +658,7 @@ void MainWindow::buildUi() {
     splitter_->setStretchFactor(1, 1);
     splitter_->setStretchFactor(2, 0);
     QTimer::singleShot(0, this, [this] {
-        splitter_->setSizes(pages_->currentWidget() == todoListPage_ ? QList<int>{264, 320, qMax(240, width() - 584)}
+        splitter_->setSizes(pages_->currentWidget() == todoListPage_ ? QList<int>{264, 640, qMax(240, width() - 904)}
                                                                   : QList<int>{264, qMax(240, width() - 496), 232});
     });
     connect(add, &QPushButton::clicked, this, &MainWindow::createNotebook);
@@ -800,6 +801,11 @@ void MainWindow::buildTodoUi() {
     todoList_->setHeaderHidden(true);
     todoList_->setRootIsDecorated(false);
     todoList_->setMinimumSize(0, 0);
+    todoList_->setColumnCount(2);
+    todoList_->header()->setStretchLastSection(false);
+    todoList_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    todoList_->header()->setSectionResizeMode(1, QHeaderView::Fixed);
+    todoList_->header()->resizeSection(1, 40);
     listLayout->addWidget(todoList_, 1);
     pages_->addWidget(todoListPage_);
 
@@ -925,6 +931,12 @@ void MainWindow::refreshTodoList(const QString &selectedId) {
         item->setData(0, Qt::UserRole, note.id);
         item->setToolTip(0, note.title);
         item->setCheckState(0, note.metadata["completed"].toBool() ? Qt::Checked : Qt::Unchecked);
+        auto *remove = button("×", "todoDelete", todoList_);
+        remove->setProperty("iconButton", true);
+        remove->setToolTip("删除");
+        remove->setAccessibleName("删除");
+        connect(remove, &QPushButton::clicked, this, [this, noteId = note.id] { deleteTodo(noteId); });
+        todoList_->setItemWidget(item, 1, remove);
         if (note.id == id) todoList_->setCurrentItem(item);
     }
     if (!todoList_->currentItem() && todoList_->topLevelItemCount()) todoList_->setCurrentItem(todoList_->topLevelItem(0));
@@ -963,6 +975,21 @@ void MainWindow::createTodo() {
     todoStatus_->setCurrentIndex(0);
     refreshTodoList(note.id);
     todoTitle_->setFocus();
+}
+
+void MainWindow::deleteTodo(const QString &noteId) {
+    auto *book = store_.notebook(currentNotebookId_);
+    if (!book || book->type != "todo") return;
+    auto *note = store_.note(noteId);
+    if (!note) return;
+    const auto hint = QStringLiteral("确认删除事项「%1」？该操作不可恢复。").arg(note->title);
+    if (QMessageBox::question(this, "删除事项", hint, QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
+    NotebookStore::removeNoteFiles(*book, *note);
+    for (int index = static_cast<int>(book->notes.size()) - 1; index >= 0; --index) {
+        if (book->notes[index].id == noteId) book->notes.removeAt(index);
+    }
+    save();
+    refreshTodoList();
 }
 
 void MainWindow::createTodoCategory() {
@@ -1242,7 +1269,7 @@ void MainWindow::refreshEditor() {
     if (todo != (pages_->currentWidget() == todoListPage_)) {
         splitter_->setStretchFactor(1, todo ? 0 : 1);
         splitter_->setStretchFactor(2, todo ? 1 : 0);
-        splitter_->setSizes(todo ? QList<int>{264, 320, qMax(240, width() - 584)}
+        splitter_->setSizes(todo ? QList<int>{264, 640, qMax(240, width() - 904)}
                                 : QList<int>{264, qMax(240, width() - 496), 232});
     }
     tabs_->parentWidget()->setVisible(!todo);

@@ -51,6 +51,7 @@ private:
     void refreshTodoList(const QString &selectedId = {});
     void refreshTodoDetails();
     void createTodo();
+    void deleteTodo(const QString &noteId);
     void createTodoCategory();
     void updateStatus();
     void updatePanels();
