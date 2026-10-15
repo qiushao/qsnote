@@ -20,7 +20,11 @@ cmake --build "$buildDir" --parallel --target qsnote
 rm -rf "$packageDir"
 cmake --install "$buildDir" --config Release --prefix "$packageDir"
 cd "$packageDir"
-macdeployqt qsnote.app -always-overwrite -libpath="${packageDir}/lib" -dmg
+# macdeployqt resolves @rpath deps only against the bundle's own rpaths, so
+# stage VTextEdit into Frameworks before deploying Qt.
+mkdir -p qsnote.app/Contents/Frameworks
+cp -a lib/libVTextEdit*.dylib qsnote.app/Contents/Frameworks/
+macdeployqt qsnote.app -always-overwrite -dmg
 test -f qsnote.app/Contents/Resources/licenses/vtextedit/COPYING.LESSER
 test -d qsnote.app/Contents/Frameworks/QtWebEngineCore.framework
 test -f qsnote.app/Contents/Resources/qsnote.icns

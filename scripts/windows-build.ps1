@@ -28,9 +28,17 @@ try {
     windeployqt --release --compiler-runtime "$binDir/qsnote.exe" "$binDir/VTextEdit.dll"
     if ($LASTEXITCODE -ne 0) { throw 'Qt deployment failed' }
 
+    # windeployqt deploys qwindows.dll but not qoffscreen.dll; the headless
+    # smoke test below runs with QT_QPA_PLATFORM=offscreen, which needs it.
+    # Without it QApplication construction fails and Qt blocks on a modal
+    # "no Qt platform plugin" error dialog, hanging the CI for tens of minutes.
+    $qtRoot = Split-Path -Parent (Split-Path -Parent (Get-Command windeployqt.exe).Source)
+    Copy-Item -LiteralPath (Join-Path $qtRoot 'plugins/platforms/qoffscreen.dll') `
+        -Destination (Join-Path $binDir 'platforms/qoffscreen.dll')
+
     foreach ($file in @(
         'qsnote.exe', 'VTextEdit.dll', 'Qt6Core.dll', 'Qt6WebEngineCore.dll',
-        'QtWebEngineProcess.exe', 'platforms/qwindows.dll',
+        'QtWebEngineProcess.exe', 'platforms/qwindows.dll', 'platforms/qoffscreen.dll',
         'resources/icudtl.dat', 'resources/qtwebengine_resources.pak',
         'translations/qtwebengine_locales/en-US.pak',
         'runtime/plantuml/plantuml.jar', 'runtime/graphviz/bin/dot.exe',
@@ -46,7 +54,11 @@ try {
     $env:QT_COMMAND_LINE_PARSER_NO_GUI_MESSAGE_BOXES = '1'
     $versionLog = Join-Path $buildDir 'package-version.txt'
     $process = Start-Process -FilePath "$binDir/qsnote.exe" -ArgumentList '--version' `
-        -WorkingDirectory $binDir -Wait -PassThru -NoNewWindow -RedirectStandardOutput $versionLog
+        -WorkingDirectory $binDir -PassThru -NoNewWindow -RedirectStandardOutput $versionLog
+    if (-not $process.WaitForExit(60000)) {
+        $process.Kill()
+        throw 'Packaged application failed to exit within 60s'
+    }
     if ($process.ExitCode -ne 0) { throw 'Packaged application failed to start' }
     if ((Get-Content $versionLog -Raw).Trim() -ne "qsnote $Version") { throw 'Package version mismatch' }
 
