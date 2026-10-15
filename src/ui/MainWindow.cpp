@@ -558,6 +558,7 @@ void MainWindow::buildUi() {
     tabs_ = new NoteTabBar(strip);
     tabs_->setObjectName("noteTabs");
     tabs_->setTabsClosable(true);
+    tabs_->setMovable(true);
     tabs_->setExpanding(false);
     tabs_->setElideMode(Qt::ElideRight);
     tabs_->setUsesScrollButtons(true);
