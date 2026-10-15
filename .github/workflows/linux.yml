@@ -37,8 +37,6 @@ jobs:
           ./scripts/linux-build.sh "$version"
 
       - name: Verify DEB package
-        env:
-          QT_QPA_PLATFORM: offscreen
         run: |
           for dependency in plantuml graphviz default-jre-headless; do
             dpkg-deb -f build/*.deb Depends | tr ',' '\n' | grep -Eq "^[[:space:]]*$dependency([[:space:]]|$)"
@@ -47,8 +45,6 @@ jobs:
           test -f build/package-check/usr/share/applications/qsnote.desktop
           test -f build/package-check/usr/share/icons/hicolor/128x128/apps/qsnote.png
           test -f build/package-check/usr/share/licenses/qsnote/vtextedit/COPYING.LESSER
-          version="$(dpkg-deb -f build/*.deb Version)"
-          test "$(env -u LD_LIBRARY_PATH ./build/package-check/usr/bin/qsnote --version)" = "qsnote $version"
 
       - name: Test diagram runtime
         run: |

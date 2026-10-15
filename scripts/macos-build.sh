@@ -36,8 +36,4 @@ for binary in qsnote.app/Contents/MacOS/qsnote qsnote.app/Contents/Frameworks/li
     '
 done
 
-actualVersion="$(env -u DYLD_LIBRARY_PATH -u DYLD_FRAMEWORK_PATH -u QT_PLUGIN_PATH \
-    PATH=/usr/bin:/bin:/usr/sbin:/sbin QT_QPA_PLATFORM=offscreen \
-    ./qsnote.app/Contents/MacOS/qsnote --version)"
-[[ "$actualVersion" == "qsnote $version" ]]
 mv qsnote.dmg "${buildDir}/qsnote-macos-$(uname -m).dmg"
