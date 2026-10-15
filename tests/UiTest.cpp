@@ -16,6 +16,7 @@
 #include <QSignalSpy>
 #include <QScopeGuard>
 #include <QScrollBar>
+#include <QScrollArea>
 #include <QTextBlock>
 #include <QTextLayout>
 #include <QDialog>
@@ -1937,6 +1938,113 @@ st->e
         QVERIFY(QString::fromUtf8(book.readAll()).contains("章节正文"));
     }
 
+    void siteCategoryManagement() {
+        NotebookStore fixture;
+        Notebook site{"site", "分类站点", "site", {}, {{"categories", QJsonArray{"Empty"}}}, fixturePath("categories")};
+        for (const bool draft: {false, true}) {
+            site.notes.append({draft ? "draft" : "post", {}, "文章", "保留正文", false,
+                               {{"category", "Used"}, {"draft", draft}}, {}});
+        }
+        fixture.notebooks.append(site);
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.setFixedSize(420, 800);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QTimer::singleShot(30, &window, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            const auto close = qScopeGuard([dialog] { dialog->accept(); });
+            auto *sections = dialog->findChild<QTabBar *>("siteConfigTabs");
+            QVERIFY(sections);
+            QCOMPARE(sections->currentIndex(), 0);
+            const QStringList cardNames{"siteBasicCard", "siteCommentsCard", "siteThemeCard",
+                                        "siteCategoriesCard", "siteLinksCard", "sitePublishCard"};
+            QCOMPARE(sections->count(), cardNames.size());
+            for (int index = 0; index < sections->count(); ++index) {
+                sections->setCurrentIndex(index);
+                for (int card = 0; card < cardNames.size(); ++card) {
+                    auto *widget = dialog->findChild<QWidget *>(cardNames[card]);
+                    QVERIFY(widget);
+                    QCOMPARE(widget->isVisible(), card == index);
+                }
+            }
+            sections->setCurrentIndex(3);
+            auto *scroll = dialog->findChild<QScrollArea *>();
+            QVERIFY(scroll);
+            QCOMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+            auto *categories = dialog->findChild<QListWidget *>("siteCategories");
+            QVERIFY(categories);
+            QCOMPARE(categories->count(), 3);
+            QCOMPARE(categories->item(0)->text(), QString("default"));
+            auto *rename = dialog->findChild<QPushButton *>("renameSiteCategory");
+            auto *remove = dialog->findChild<QPushButton *>("deleteSiteCategory");
+            QVERIFY(!rename->isEnabled());
+            QVERIFY(!remove->isEnabled());
+            const auto enterName = [dialog](const QString &name) {
+                QTimer::singleShot(0, dialog, [name] {
+                    auto *input = qobject_cast<QInputDialog *>(QApplication::activeModalWidget());
+                    QVERIFY(input);
+                    input->setTextValue(name);
+                    input->accept();
+                });
+            };
+            enterName("  Added  ");
+            dialog->findChild<QPushButton *>("addSiteCategory")->click();
+            QCOMPARE(categories->currentItem()->text(), QString("Added"));
+            QCOMPARE(categories->count(), 4);
+            categories->setCurrentRow(2);
+            QCOMPARE(categories->currentItem()->text(), QString("Used"));
+            enterName("Renamed");
+            rename->click();
+            QCOMPARE(categories->currentItem()->text(), QString("Renamed"));
+            Notebook renamed;
+            QVERIFY2(NotebookStore::readNotebook(site.path, renamed, &error), qPrintable(error));
+            for (const auto &note: renamed.notes) {
+                QCOMPARE(note.metadata["category"].toString(), QString("Renamed"));
+                QVERIFY(note.path.contains("/Renamed/"));
+                QCOMPARE(note.content.trimmed(), QString("保留正文"));
+            }
+            const auto confirmDelete = [dialog](QMessageBox::StandardButton answer) {
+                QTimer::singleShot(0, dialog, [answer] {
+                    auto *message = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+                    QVERIFY(message);
+                    message->button(answer)->click();
+                });
+            };
+            confirmDelete(QMessageBox::Cancel);
+            remove->click();
+            QCOMPARE(categories->currentItem()->text(), QString("Renamed"));
+            confirmDelete(QMessageBox::Yes);
+            remove->click();
+            QCOMPARE(categories->currentItem()->text(), QString("default"));
+            QCOMPARE(categories->count(), 3);
+            QVERIFY(!rename->isEnabled());
+            QVERIFY(!remove->isEnabled());
+            scroll->ensureWidgetVisible(categories);
+            QTest::qWait(50);
+            QCOMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+            dialog->grab().save("site-config-categories-narrow.png");
+        });
+        window.findChild<QPushButton *>("siteConfig")->click();
+        Notebook restored;
+        QVERIFY2(NotebookStore::readNotebook(site.path, restored, &error), qPrintable(error));
+        QCOMPARE(restored.config["categories"].toArray(), QJsonArray({"default", "Empty", "Added"}));
+        QCOMPARE(restored.notes.size(), 2);
+        for (const auto &note: restored.notes) {
+            QCOMPARE(note.metadata["category"].toString(), QString("default"));
+            QVERIFY(note.path.contains("/default/"));
+            QCOMPARE(note.content.trimmed(), QString("保留正文"));
+            QVERIFY(QFileInfo::exists(site.path + "/" + note.path));
+        }
+        QVERIFY(!QDir(site.path + "/source/_posts/Used").exists());
+        QVERIFY(!QDir(site.path + "/source/_drafts/Renamed").exists());
+        auto *tree = window.findChild<QTreeWidget *>("noteTree");
+        QCOMPARE(tree->topLevelItemCount(), 1);
+        QVERIFY(tree->topLevelItem(0)->text(0).startsWith("default"));
+    }
+
     void sitePublishSettings() {
         NotebookStore fixture;
         fixture.notebooks.append({"site", "发布站点", "site", {}, {}, fixturePath("publish-settings")});
@@ -1953,6 +2061,7 @@ st->e
         QTimer::singleShot(30, &window, [&] {
             auto *dialog = QApplication::activeModalWidget();
             QVERIFY(dialog);
+            dialog->findChild<QTabBar *>("siteConfigTabs")->setCurrentIndex(5);
             auto *method = dialog->findChild<QComboBox *>("config_publishMethod");
             QVERIFY(method);
             QCOMPARE(method->currentData().toString(), QString());
@@ -1978,6 +2087,7 @@ st->e
         QTimer::singleShot(30, &window, [&] {
             auto *dialog = QApplication::activeModalWidget();
             QVERIFY(dialog);
+            dialog->findChild<QTabBar *>("siteConfigTabs")->setCurrentIndex(5);
             QCOMPARE(dialog->findChild<QComboBox *>("config_publishMethod")->currentData().toString(), QString("scp"));
             for (const auto &group: groups) {
                 for (const auto &key: group.second) {
@@ -2047,6 +2157,10 @@ st->e
             auto *title = dialog->findChild<QLineEdit *>("config_title");
             title->setText("Edited title");
             emit title->textEdited(title->text());
+            auto *sections = dialog->findChild<QTabBar *>("siteConfigTabs");
+            QVERIFY(sections);
+            QTest::mouseClick(sections, Qt::LeftButton, Qt::NoModifier, sections->tabRect(1).center());
+            QCOMPARE(sections->currentIndex(), 1);
             auto *comments = dialog->findChild<QComboBox *>("config_commentPlatform");
             QVERIFY(comments);
             QVERIFY(comments->findData("valine") >= 0);
@@ -2070,12 +2184,15 @@ st->e
                 QVERIFY(input);
                 QTest::keyClicks(input, QString("test-") + key);
             }
+            QTest::mouseClick(sections, Qt::LeftButton, Qt::NoModifier, sections->tabRect(2).center());
             auto *themes = dialog->findChild<QComboBox *>("config_theme");
             QVERIFY(themes);
             QCOMPARE(themes->currentData().toString(), QString("pure"));
             QVERIFY(themes->findData("stellar") >= 0);
             themes->setCurrentIndex(themes->findData(theme));
             QVERIFY(!dialog->findChild<QLineEdit *>("config_token"));
+            QTest::mouseClick(sections, Qt::LeftButton, Qt::NoModifier, sections->tabRect(0).center());
+            QCOMPARE(title->text(), QString("Edited title"));
             dialog->grab().save("site-config.png");
             QTest::mouseClick(dialog->findChild<QPushButton *>("closeSiteConfig"), Qt::LeftButton);
         });
@@ -2084,6 +2201,7 @@ st->e
             auto *dialog = QApplication::activeModalWidget();
             QVERIFY(dialog);
             QCOMPARE(dialog->findChild<QComboBox *>("config_theme")->currentData().toString(), theme);
+            dialog->findChild<QTabBar *>("siteConfigTabs")->setCurrentIndex(1);
             auto *comments = dialog->findChild<QComboBox *>("config_commentPlatform");
             QVERIFY(comments);
             QCOMPARE(comments->currentData().toString(), QString("valine"));

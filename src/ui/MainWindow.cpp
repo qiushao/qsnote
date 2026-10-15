@@ -34,6 +34,7 @@
 #include <QJsonDocument>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
 #include <QMouseEvent>
@@ -1944,18 +1945,38 @@ void MainWindow::showSiteConfig() {
     auto *close = button("关闭", "closeSiteConfig", bar);
     barLayout->addWidget(close);
     layout->addWidget(bar);
+    auto *navigation = new QWidget(&dialog);
+    navigation->setObjectName("siteConfigNavigation");
+    auto *navigationLayout = row(navigation, 16, 10);
+    auto *sections = new QTabBar(navigation);
+    sections->setObjectName("siteConfigTabs");
+    sections->setExpanding(false);
+    sections->setUsesScrollButtons(true);
+    sections->setElideMode(Qt::ElideNone);
+    sections->setMinimumWidth(0);
+    navigationLayout->addWidget(sections);
+    layout->addWidget(navigation);
     auto *scroll = new QScrollArea(&dialog);
     scroll->setWidgetResizable(true);
     auto *body = new QWidget(scroll);
     body->setObjectName("configBody");
-    auto *form = column(body, 24, 10);
-    auto heading = [&](const QString &text) {
-        auto *title = label(text, body);
+    auto *cards = column(body, 20, 16);
+    QWidget *card = nullptr;
+    QVBoxLayout *form = nullptr;
+    auto section = [&](const QString &name, const QString &text) {
+        card = new QWidget(body);
+        card->setObjectName(name);
+        card->setProperty("configCard", true);
+        card->setAttribute(Qt::WA_StyledBackground, true);
+        form = column(card, 18, 12);
+        auto *title = label(text, card);
         title->setProperty("heading", true);
         form->addWidget(title);
+        cards->addWidget(card);
+        card->setVisible(sections->addTab(text) == 0);
     };
     auto field = [&](const QString &key, const QString &caption, const QStringList &choices = QStringList(), const QStringList &values = QStringList()) {
-        auto *container = new QWidget(body);
+        auto *container = new QWidget(card);
         auto *fieldLayout = new QFormLayout(container);
         fieldLayout->setContentsMargins(0, 0, 0, 0);
         fieldLayout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
@@ -1989,12 +2010,12 @@ void MainWindow::showSiteConfig() {
         form->addWidget(container);
         return container;
     };
-    heading("基本信息");
+    section("siteBasicCard", "基本信息");
     field("title", "站点标题");
     field("description", "站点描述");
     field("author", "作者");
     field("domain", "域名");
-    heading("评论");
+    section("siteCommentsCard", "评论");
     auto *comments = field("commentPlatform", "评论平台", {"关闭", "Valine", "Gitalk", "Disqus"}, {"none", "valine", "gitalk", "disqus"})->findChild<QComboBox *>();
     auto commentField = [&](const QString &key, const QString &caption, const QString &platform) {
         auto *container = field(key, caption);
@@ -2010,8 +2031,77 @@ void MainWindow::showSiteConfig() {
     commentField("disqus", "Disqus Shortname", "disqus");
     commentField("valineAppId", "Valine App ID", "valine");
     commentField("valineAppKey", "Valine App Key", "valine");
-    heading("友链");
-    auto *links = new QWidget(body);
+    section("siteThemeCard", "主题与页脚");
+    field("theme", "站点主题", {"Pure", "Stellar"}, {"pure", "stellar"});
+    field("footer", "页脚文字");
+    section("siteCategoriesCard", "分类管理");
+    auto *categories = new QListWidget(card);
+    categories->setObjectName("siteCategories");
+    categories->setMinimumHeight(120);
+    categories->setMaximumHeight(180);
+    categories->addItems(siteCategories(*book));
+    form->addWidget(categories);
+    auto *categoryActions = new QWidget(card);
+    auto *categoryLayout = row(categoryActions, 0, 0, 8);
+    auto *addCategory = button("新建", "addSiteCategory", categoryActions);
+    auto *renameCategory = button("重命名", "renameSiteCategory", categoryActions);
+    auto *deleteCategory = button("删除", "deleteSiteCategory", categoryActions);
+    categoryLayout->addWidget(addCategory);
+    categoryLayout->addWidget(renameCategory);
+    categoryLayout->addWidget(deleteCategory);
+    categoryLayout->addStretch();
+    form->addWidget(categoryActions);
+    form->addWidget(label("删除分类后，文章将移入 default；默认分类不可重命名或删除。", card, true));
+    connect(categories, &QListWidget::currentTextChanged, &dialog, [renameCategory, deleteCategory](const QString &name) {
+        const bool editable = !name.isEmpty() && name != "default";
+        renameCategory->setEnabled(editable);
+        deleteCategory->setEnabled(editable);
+    });
+    categories->setCurrentRow(0);
+    const auto updateCategories = [this, book, categories](const QStringList &names, const QString &selected) {
+        book->config["categories"] = QJsonArray::fromStringList(names);
+        categories->clear();
+        categories->addItems(siteCategories(*book));
+        categories->setCurrentRow(static_cast<int>(siteCategories(*book).indexOf(selected)));
+        save();
+        refreshTree();
+    };
+    const auto editCategory = [book, categories, updateCategories, &dialog](bool rename) {
+        const auto previous = rename ? categories->currentItem()->text() : QString();
+        bool accepted = false;
+        const auto name = QInputDialog::getText(&dialog, rename ? "重命名分类" : "新建分类", "分类名称：",
+                                              QLineEdit::Normal, previous, &accepted).trimmed();
+        if (!accepted || name.isEmpty() || name == previous) return;
+        auto names = siteCategories(*book);
+        if (names.contains(name)) {
+            QMessageBox::warning(&dialog, "分类已存在", "请使用其他分类名称。");
+            return;
+        }
+        if (rename) {
+            names.replace(names.indexOf(previous), name);
+            for (auto &note: book->notes) {
+                if (note.metadata["category"].toString() == previous) note.metadata["category"] = name;
+            }
+        } else {
+            names.append(name);
+        }
+        updateCategories(names, name);
+    };
+    connect(addCategory, &QPushButton::clicked, &dialog, [editCategory] { editCategory(false); });
+    connect(renameCategory, &QPushButton::clicked, &dialog, [editCategory] { editCategory(true); });
+    connect(deleteCategory, &QPushButton::clicked, &dialog, [book, categories, updateCategories, &dialog] {
+        const auto name = categories->currentItem()->text();
+        if (QMessageBox::question(&dialog, "删除分类", QString("删除分类「%1」？其中的文章将移入 default，不会删除文章。").arg(name),
+                                  QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
+        auto names = siteCategories(*book);
+        names.removeAll(name);
+        for (auto &note: book->notes) {
+            if (note.metadata["category"].toString() == name) note.metadata["category"] = "default";
+        }
+        updateCategories(names, "default");
+    });
+    section("siteLinksCard", "友链");
+    auto *links = new QWidget(card);
     auto *linksLayout = column(links, 0, 6);
     auto appendLink = [this, book, links, linksLayout](const QJsonObject &value) {
         auto *container = new QWidget(links);
@@ -2044,13 +2134,10 @@ void MainWindow::showSiteConfig() {
     };
     for (const auto &entry: book->config["links"].toArray()) appendLink(entry.toObject());
     form->addWidget(links);
-    auto *addLink = button("＋ 添加友链", "addLink", body);
+    auto *addLink = button("＋ 添加友链", "addLink", card);
     form->addWidget(addLink, 0, Qt::AlignLeft);
     connect(addLink, &QPushButton::clicked, &dialog, [appendLink] { appendLink({}); });
-    heading("主题与页脚");
-    field("theme", "站点主题", {"Pure", "Stellar"}, {"pure", "stellar"});
-    field("footer", "页脚文字");
-    heading("生成与发布");
+    section("sitePublishCard", "生成与发布");
     auto *method = field("publishMethod", "发布方式", {"请选择", "GitHub Pages", "SSH SCP"}, {"", "github", "scp"})->findChild<QComboBox *>();
     auto publishField = [&](const QString &key, const QString &caption, const QString &platform, const QString &placeholder) {
         auto *container = field(key, caption);
@@ -2067,7 +2154,7 @@ void MainWindow::showSiteConfig() {
     publishField("sshUser", "SSH 用户名", "scp", "部署用户");
     publishField("sshDirectory", "远程目录", "scp", "/var/www/site（绝对路径，不含空格）");
     publishField("sshIdentityFile", "私钥文件", "scp", "可选，填写本地完整路径；留空使用 SSH 默认配置");
-    auto *publishHint = label({}, body, true);
+    auto *publishHint = label({}, card, true);
     const auto updatePublishHint = [method, publishHint] {
         const auto platform = method->currentData().toString();
         publishHint->setText(platform == "github"
@@ -2079,10 +2166,14 @@ void MainWindow::showSiteConfig() {
     connect(method, &QComboBox::currentIndexChanged, publishHint, updatePublishHint);
     updatePublishHint();
     form->addWidget(publishHint);
-    form->addWidget(label("内置生成器离线生成 public 目录；第三方评论服务需要联网。", body, true));
-    form->addStretch();
+    form->addWidget(label("内置生成器离线生成 public 目录；第三方评论服务需要联网。", card, true));
+    cards->addStretch();
     scroll->setWidget(body);
     layout->addWidget(scroll, 1);
+    connect(sections, &QTabBar::currentChanged, &dialog, [cards, scroll](int index) {
+        for (int i = 0; i < cards->count() - 1; ++i) cards->itemAt(i)->widget()->setVisible(i == index);
+        scroll->verticalScrollBar()->setValue(0);
+    });
     connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
     dialog.exec();
     save();
