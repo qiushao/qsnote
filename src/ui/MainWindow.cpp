@@ -97,39 +97,152 @@ QString defaultExportDirectory() {
     return documents + "/qsnote_exports";
 }
 QIcon icon(const QString &kind) {
-    QPixmap pixmap(32, 32);
+    QPixmap pixmap(48, 48);
     pixmap.fill(Qt::transparent);
     QPainter painter(&pixmap);
     painter.scale(2, 2);
     painter.setRenderHint(QPainter::Antialiasing);
-    painter.setPen(QPen(QColor("#758195"), 1.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    const QColor ink("#5f6b7a");
+    const QPen pen(ink, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+    const auto fillInk = [&] { painter.setPen(Qt::NoPen); painter.setBrush(ink); };
+    const auto outline = [&] { painter.setPen(pen); painter.setBrush(Qt::NoBrush); };
+    const auto drawText = [&](const QString &text, int pixelSize, QFont::Weight weight) {
+        auto font = painter.font();
+        font.setPixelSize(pixelSize);
+        font.setWeight(weight);
+        painter.setFont(font);
+        painter.setPen(ink);
+        painter.drawText(QRectF(0, 0, 24, 24), Qt::AlignCenter, text);
+    };
     if (kind == "left" || kind == "right") {
-        painter.drawRoundedRect(QRectF(1.5, 1.5, 13, 13), 2, 2);
-        painter.drawLine(QPointF(kind == "left" ? 5 : 10, 2), QPointF(kind == "left" ? 5 : 10, 14));
+        outline();
+        painter.drawRoundedRect(QRectF(2.25, 2.25, 19.5, 19.5), 3, 3);
+        painter.drawLine(QPointF(kind == "left" ? 7.5 : 15, 3), QPointF(kind == "left" ? 7.5 : 15, 21));
     } else if (kind == "settings") {
-        painter.drawEllipse(QRectF(4, 4, 8, 8));
-        painter.drawEllipse(QRectF(6.5, 6.5, 3, 3));
+        outline();
+        painter.drawEllipse(QRectF(6, 6, 12, 12));
+        painter.drawEllipse(QRectF(9.75, 9.75, 4.5, 4.5));
         for (int angle = 0; angle < 360; angle += 45) {
             painter.save();
-            painter.translate(8, 8);
+            painter.translate(12, 12);
             painter.rotate(angle);
-            painter.drawLine(QPointF(0, 4), QPointF(0, 6.5));
+            painter.drawLine(QPointF(0, 6), QPointF(0, 9.75));
             painter.restore();
         }
     } else if (kind == "search") {
-        painter.drawEllipse(QRectF(2, 2, 8, 8));
-        painter.drawLine(QPointF(9, 9), QPointF(13, 13));
+        outline();
+        painter.drawEllipse(QRectF(3, 3, 12, 12));
+        painter.drawLine(QPointF(13.5, 13.5), QPointF(19.5, 19.5));
     } else if (kind == "dirty") {
         painter.setPen(Qt::NoPen);
         painter.setBrush(QColor("#3b6fd4"));
-        painter.drawEllipse(QRectF(4.5, 4.5, 7, 7));
+        painter.drawEllipse(QRectF(6.75, 6.75, 10.5, 10.5));
     } else if (kind == "folder") {
+        painter.setPen(Qt::NoPen);
         painter.setBrush(QColor("#e8eef7"));
-        painter.drawPolygon(QPolygonF{QPointF(1, 3), QPointF(6, 3), QPointF(8, 5), QPointF(15, 5), QPointF(15, 13), QPointF(1, 13)});
+        painter.drawPolygon(QPolygonF{QPointF(1.5, 4.5), QPointF(9, 4.5), QPointF(12, 7.5), QPointF(22.5, 7.5), QPointF(22.5, 19.5), QPointF(1.5, 19.5)});
+    } else if (kind == "heading") {
+        drawText("H", 16, QFont::Black);
+    } else if (kind == "bold") {
+        drawText("B", 16, QFont::Black);
+    } else if (kind == "mark") {
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(QColor("#f2c94c"));
+        painter.drawRoundedRect(QRectF(3.5, 10, 17, 7), 2, 2);
+        painter.setBrush(ink);
+        painter.drawRoundedRect(QRectF(5.5, 12.3, 13, 2.4), 1.2, 1.2);
+    } else if (kind == "link") {
+        outline();
+        painter.save();
+        painter.translate(12, 12);
+        painter.rotate(-45);
+        painter.drawRoundedRect(QRectF(-9, -3.4, 10.5, 6.8), 3.2, 3.2);
+        painter.drawRoundedRect(QRectF(-1.5, -3.4, 10.5, 6.8), 3.2, 3.2);
+        painter.restore();
+    } else if (kind == "image") {
+        outline();
+        painter.drawRoundedRect(QRectF(3, 4.5, 18, 15), 2, 2);
+        fillInk();
+        painter.drawEllipse(QRectF(5.5, 6.5, 3.5, 3.5));
+        painter.drawPolygon(QPolygonF{QPointF(5, 16.5), QPointF(10, 10), QPointF(13, 13), QPointF(16, 9), QPointF(18.5, 16.5)});
+    } else if (kind == "list") {
+        fillInk();
+        painter.drawEllipse(QRectF(3.5, 5.2, 3.2, 3.2));
+        painter.drawEllipse(QRectF(3.5, 10.4, 3.2, 3.2));
+        painter.drawEllipse(QRectF(3.5, 15.6, 3.2, 3.2));
+        painter.drawRoundedRect(QRectF(9, 5.9, 12, 2.4), 1.2, 1.2);
+        painter.drawRoundedRect(QRectF(9, 11.1, 12, 2.4), 1.2, 1.2);
+        painter.drawRoundedRect(QRectF(9, 16.3, 12, 2.4), 1.2, 1.2);
+    } else if (kind == "ordered") {
+        auto font = painter.font();
+        font.setPixelSize(7);
+        font.setWeight(QFont::Bold);
+        painter.setFont(font);
+        painter.setPen(ink);
+        painter.drawText(QRectF(0, 3.5, 7, 6), Qt::AlignCenter, "1");
+        painter.drawText(QRectF(0, 9, 7, 6), Qt::AlignCenter, "2");
+        painter.drawText(QRectF(0, 14.5, 7, 6), Qt::AlignCenter, "3");
+        fillInk();
+        painter.drawRoundedRect(QRectF(9, 5.9, 12, 2.4), 1.2, 1.2);
+        painter.drawRoundedRect(QRectF(9, 11.1, 12, 2.4), 1.2, 1.2);
+        painter.drawRoundedRect(QRectF(9, 16.3, 12, 2.4), 1.2, 1.2);
+    } else if (kind == "task") {
+        outline();
+        painter.drawRoundedRect(QRectF(4, 4, 16, 16), 3, 3);
+        painter.drawPolyline(QPolygonF{QPointF(7.5, 12), QPointF(10.5, 15), QPointF(16.5, 8.5)});
+    } else if (kind == "quote") {
+        drawText("“", 17, QFont::Black);
+    } else if (kind == "code") {
+        outline();
+        painter.drawPolyline(QPolygonF{QPointF(10, 5), QPointF(5, 12), QPointF(10, 19)});
+        painter.drawPolyline(QPolygonF{QPointF(14, 5), QPointF(19, 12), QPointF(14, 19)});
+        painter.drawLine(QPointF(11, 18), QPointF(13, 6));
+    } else if (kind == "codeblock") {
+        outline();
+        painter.drawRoundedRect(QRectF(3, 4, 18, 16), 2, 2);
+        painter.drawPolyline(QPolygonF{QPointF(9, 8), QPointF(6, 12), QPointF(9, 16)});
+        painter.drawPolyline(QPolygonF{QPointF(15, 8), QPointF(18, 12), QPointF(15, 16)});
+        painter.drawLine(QPointF(11, 16), QPointF(13, 8));
+    } else if (kind == "math") {
+        drawText("∑", 16, QFont::Bold);
+    } else if (kind == "mathblock") {
+        outline();
+        painter.drawRoundedRect(QRectF(3, 4, 18, 16), 2, 2);
+        drawText("∑", 11, QFont::Bold);
+    } else if (kind == "table") {
+        outline();
+        painter.drawRoundedRect(QRectF(3, 5, 18, 14), 1.5, 1.5);
+        painter.drawLine(QPointF(9, 5), QPointF(9, 19));
+        painter.drawLine(QPointF(15, 5), QPointF(15, 19));
+        painter.drawLine(QPointF(3, 9.7), QPointF(21, 9.7));
+        painter.drawLine(QPointF(3, 14.3), QPointF(21, 14.3));
+    } else if (kind == "more") {
+        fillInk();
+        painter.drawEllipse(QRectF(10, 4, 4, 4));
+        painter.drawEllipse(QRectF(10, 10, 4, 4));
+        painter.drawEllipse(QRectF(10, 16, 4, 4));
+    } else if (kind == "edit") {
+        fillInk();
+        painter.save();
+        painter.translate(12, 12);
+        painter.rotate(-45);
+        painter.drawRoundedRect(QRectF(-2.2, -7.5, 4.4, 11), 1.6, 1.6);
+        painter.drawPolygon(QPolygonF{QPointF(-2.2, -7.5), QPointF(2.2, -7.5), QPointF(0, -11.5)});
+        painter.restore();
+    } else if (kind == "preview") {
+        outline();
+        painter.drawEllipse(QRectF(2, 7, 20, 10));
+        fillInk();
+        painter.drawEllipse(QRectF(9.5, 9.5, 5, 5));
+    } else if (kind == "split") {
+        fillInk();
+        painter.drawRoundedRect(QRectF(3, 5, 8, 14), 2, 2);
+        painter.drawRoundedRect(QRectF(13, 5, 8, 14), 2, 2);
     } else {
-        painter.drawRoundedRect(QRectF(3, 1, 10, 14), 1.5, 1.5);
-        if (kind == "ebook") painter.drawLine(5, 2, 5, 14);
-        for (int y: {5, 8, 11}) painter.drawLine(6, y, 10, y);
+        outline();
+        painter.drawRoundedRect(QRectF(4.5, 1.5, 15, 21), 2.25, 2.25);
+        if (kind == "ebook") painter.drawLine(QPointF(7.5, 3), QPointF(7.5, 21));
+        for (double y: {7.5, 12.0, 16.5}) painter.drawLine(QPointF(9, y), QPointF(15, y));
     }
     pixmap.setDevicePixelRatio(2);
     return {pixmap};
@@ -759,34 +872,58 @@ void MainWindow::buildToolbar() {
     auto *layout = new FlowLayout(toolbar_, 8, 3);
     using Type = vte::TypeAction;
     struct Tool {
-        QString title;
+        QString icon;
+        QString tip;
         Type action = Type::TypeBold;
         QVariant data;
     };
+
+    const auto addSeparator = [&] {
+        auto *separator = new QFrame(toolbar_);
+        separator->setFrameShape(QFrame::VLine);
+        separator->setStyleSheet("color: #e7ebf0; margin: 6px 4px;");
+        separator->setFixedSize(11, 24);
+        layout->addWidget(separator);
+    };
+
+    auto *heading = button({}, "heading", toolbar_);
+    heading->setProperty("tool", true);
+    heading->setIcon(icon("heading"));
+    heading->setIconSize(QSize(24, 24));
+    heading->setToolTip(tr("标题"));
+    heading->setFocusPolicy(Qt::NoFocus);
+    auto *headingMenu = new QMenu(heading);
+    for (int level = 1; level <= 5; ++level) {
+        headingMenu->addAction(QString("H%1").arg(level), this, [this, level] {
+            if (!store_.note(currentNoteId())) return;
+            setPreview(false);
+            markdownEditor_->type(Type::TypeHeading, level);
+        });
+    }
+    heading->setMenu(headingMenu);
+    layout->addWidget(heading);
+    addSeparator();
+
     const QList<Tool> tools = {
-        {"H1", Type::TypeHeading, 1}, {"H2", Type::TypeHeading, 2}, {"H3", Type::TypeHeading, 3}, {},
-        {"B", Type::TypeBold}, {tr("高亮"), Type::TypeMark}, {},
-        {tr("链接"), Type::TypeLink}, {tr("图片"), Type::TypeImage}, {},
-        {tr("列表"), Type::TypeUnorderedList}, {tr("有序"), Type::TypeOrderedList},
-        {tr("任务"), Type::TypeTodoList, false}, {tr("引用"), Type::TypeQuote}, {},
-        {tr("代码"), Type::TypeCode}, {tr("代码块"), Type::TypeCodeBlock},
-        {tr("公式"), Type::TypeMath}, {tr("公式块"), Type::TypeMathBlock}, {tr("表格"), Type::TypeTable}};
+        {"bold", tr("加粗"), Type::TypeBold},
+        {"mark", tr("高亮"), Type::TypeMark}, {},
+        {"link", tr("链接"), Type::TypeLink}, {"image", tr("图片"), Type::TypeImage}, {},
+        {"list", tr("无序列表"), Type::TypeUnorderedList}, {"ordered", tr("有序列表"), Type::TypeOrderedList},
+        {"task", tr("任务列表"), Type::TypeTodoList, false}, {"quote", tr("引用"), Type::TypeQuote}, {},
+        {"code", tr("行内代码"), Type::TypeCode}, {"codeblock", tr("代码块"), Type::TypeCodeBlock},
+        {"math", tr("行内公式"), Type::TypeMath}, {"mathblock", tr("公式块"), Type::TypeMathBlock},
+        {"table", tr("表格"), Type::TypeTable}};
     for (const auto &tool: tools) {
-        if (tool.title.isEmpty()) {
-            auto *separator = new QFrame(toolbar_);
-            separator->setFrameShape(QFrame::VLine);
-            separator->setStyleSheet("color: #e7ebf0; margin: 6px 4px;");
-            separator->setFixedSize(11, 24);
-            layout->addWidget(separator);
+        if (tool.icon.isEmpty()) {
+            addSeparator();
             continue;
         }
-        auto *action = button(tool.title, "tool" + tool.title, toolbar_);
+        auto *action = button({}, "tool" + tool.icon, toolbar_);
         action->setProperty("tool", true);
-        action->setToolTip(tool.title);
+        action->setIcon(icon(tool.icon));
+        action->setIconSize(QSize(24, 24));
+        action->setToolTip(tool.tip);
         action->setFocusPolicy(Qt::NoFocus);
-        auto font = action->font();
-        font.setBold(tool.title == "B");
-        action->setFont(font);
         layout->addWidget(action);
         connect(action, &QPushButton::clicked, this, [this, tool] {
             if (!store_.note(currentNoteId())) return;
@@ -794,15 +931,29 @@ void MainWindow::buildToolbar() {
             markdownEditor_->type(tool.action, tool.data);
         });
     }
-    auto *more = button(tr("更多"), "editorOptions", toolbar_);
+    auto *more = button({}, "editorOptions", toolbar_);
+    more->setProperty("tool", true);
+    more->setIcon(icon("more"));
+    more->setIconSize(QSize(24, 24));
+    more->setToolTip(tr("更多"));
+    more->setFocusPolicy(Qt::NoFocus);
     layout->addWidget(more);
     auto *modes = new QWidget(toolbar_);
     modes->setProperty("alignRight", true);
     modes->setObjectName("viewModes");
     auto *modeLayout = row(modes, 3, 3, 2);
-    editMode_ = button(tr("编辑"), "editMode", modes);
-    previewMode_ = button(tr("预览"), "previewMode", modes);
-    splitMode_ = button(tr("分屏"), "splitMode", modes);
+    editMode_ = button({}, "editMode", modes);
+    editMode_->setIcon(icon("edit"));
+    editMode_->setIconSize(QSize(20, 20));
+    editMode_->setToolTip(tr("编辑"));
+    previewMode_ = button({}, "previewMode", modes);
+    previewMode_->setIcon(icon("preview"));
+    previewMode_->setIconSize(QSize(20, 20));
+    previewMode_->setToolTip(tr("预览"));
+    splitMode_ = button({}, "splitMode", modes);
+    splitMode_->setIcon(icon("split"));
+    splitMode_->setIconSize(QSize(20, 20));
+    splitMode_->setToolTip(tr("分屏"));
     auto *group = new QButtonGroup(modes);
     for (auto *mode: {editMode_, previewMode_, splitMode_}) {
         mode->setProperty("mode", true);

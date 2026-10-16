@@ -1749,7 +1749,7 @@ st->e
         auto selection = editor->textCursor();
         selection.movePosition(QTextCursor::PreviousCharacter, QTextCursor::KeepAnchor, 2);
         editor->setTextCursor(selection);
-        QTest::mouseClick(window.findChild<QPushButton *>("toolB"), Qt::LeftButton);
+        QTest::mouseClick(window.findChild<QPushButton *>("toolbold"), Qt::LeftButton);
         QVERIFY(editor->toPlainText().contains("**粗体**"));
         QTest::mouseClick(window.findChild<QPushButton *>("previewMode"), Qt::LeftButton);
         QCOMPARE(window.findChild<QStackedWidget *>("editorPages")->currentIndex(), 1);
