@@ -31,6 +31,7 @@
 #include <QMimeData>
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QContextMenuEvent>
 #include <QDoubleSpinBox>
 #include <QSettings>
 #include <QSpinBox>
@@ -276,6 +277,48 @@ st->e
         editor.getTextEdit()->selectAll();
         editor.type(vte::TypeAction::TypeBold);
         QCOMPARE(editor.getText(), QString("- 第一行\n- 第二行"));
+    }
+
+    void editorContextOptions() {
+        MarkdownEditor editor;
+        editor.resize(700, 500);
+        editor.setText("# Heading");
+        editor.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&editor));
+        auto *text = editor.getTextEdit();
+        bool invoked = false;
+        QTimer::singleShot(20, &editor, [&] {
+            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            QVERIFY(menu);
+            const auto close = qScopeGuard([menu] { menu->close(); });
+            QMenu *options = nullptr;
+            for (auto *action: menu->actions()) {
+                if (action->text() == "编辑器选项") options = action->menu();
+            }
+            QVERIFY(options);
+            QMenu *headings = nullptr;
+            QAction *lineNumbers = nullptr;
+            for (auto *action: options->actions()) {
+                if (action->text() == "标题级别") headings = action->menu();
+                if (action->text() == "显示行号") lineNumbers = action;
+            }
+            QVERIFY(headings);
+            QVERIFY(lineNumbers);
+            QVERIFY(lineNumbers->isChecked());
+            lineNumbers->trigger();
+            QVERIFY(!lineNumbers->isChecked());
+            QCOMPARE(QSettings().value("editor/lineNumbers").toInt(), 0);
+            QCOMPARE(headings->actions().first()->text(), QString("正文"));
+            headings->actions().first()->trigger();
+            invoked = true;
+        });
+        const auto position = text->cursorRect().center();
+        QContextMenuEvent event(QContextMenuEvent::Mouse, position, text->viewport()->mapToGlobal(position));
+        QApplication::sendEvent(text->viewport(), &event);
+        QVERIFY(invoked);
+        QCOMPARE(editor.getText(), QString("Heading"));
+        text->undo();
+        QCOMPARE(editor.getText(), QString("# Heading"));
     }
 
     void pasteClipboardImage() {

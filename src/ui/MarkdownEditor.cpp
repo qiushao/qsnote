@@ -100,6 +100,13 @@ MarkdownEditor::MarkdownEditor(const QSharedPointer<vte::MarkdownEditorConfig> &
     getTextEdit()->setObjectName("editor");
     getTextEdit()->viewport()->installEventFilter(this);
     enableInternalContextMenu();
+    connect(getTextEdit(), &vte::VTextEdit::contextMenuEventRequested, this,
+            [this](QContextMenuEvent *, bool *, QScopedPointer<QMenu> *menu) {
+        auto *options = createEditorMenu(menu->data());
+        options->setTitle(tr("编辑器选项"));
+        (*menu)->addSeparator();
+        (*menu)->addMenu(options);
+    });
     inplacePreview_ = new InplacePreview(this);
     reloadSettings();
     connect(this, &VMarkdownEditor::spellCheckStateChanged, this, [this] {

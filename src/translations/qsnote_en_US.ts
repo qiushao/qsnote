@@ -1411,6 +1411,10 @@ It will be removed from the list. Files on disk will be kept, and you can add it
     <context>
         <name>MarkdownEditor</name>
         <message>
+            <source>编辑器选项</source>
+            <translation>Editor Options</translation>
+        </message>
+        <message>
             <location filename="../ui/MarkdownEditor.cpp" line="+112" />
             <source>插入链接</source>
             <translation>Insert Link</translation>
