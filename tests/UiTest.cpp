@@ -1537,7 +1537,7 @@ st->e
         auto *editor = window.findChild<MarkdownEditor *>("markdownEditor");
         QVERIFY(editor);
         QCOMPARE(editor->getTextEdit()->placeholderText(), QString("Start writing Markdown..."));
-        QCOMPARE(window.findChild<QPushButton *>("editMode")->text(), QString("Edit"));
+        QCOMPARE(window.findChild<QPushButton *>("editMode")->toolTip(), QString("Edit"));
         QCOMPARE(window.findChild<QTabBar *>("noteTabs")->tabText(0), QString("中文标题"));
         auto *menu = editor->createEditorMenu(&window);
         QCOMPARE(menu->actions().first()->text(), QString("Find and Replace…"));
@@ -2301,7 +2301,7 @@ st->e
         auto *preview = window.findChild<MarkdownPreview *>("preview");
         QTRY_COMPARE_WITH_TIMEOUT(preview->renderedRevision(), preview->revision(), 30000);
         QVERIFY(preview->matchesDocument(b->toPlainText(), "tabs-b"));
-        auto *options = window.findChild<QPushButton *>("editorOptions")->menu();
+        auto *options = window.findChild<MarkdownEditor *>("markdownEditor")->createEditorMenu(&window);
         QVERIFY(options);
         QAction *wrap = nullptr;
         for (auto *action: options->actions()) if (action->text() == "自动换行") wrap = action;
