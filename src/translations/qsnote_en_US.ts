@@ -151,6 +151,26 @@
     <context>
         <name>MainWindow</name>
         <message>
+            <source>清空已完成事项</source>
+            <translation>Clear completed items</translation>
+        </message>
+        <message>
+            <source>确认清空当前笔记本中全部 %1 个已完成事项？包含所有分类和分页中的事项，不受搜索条件限制。该操作不可恢复。</source>
+            <translation>Clear all %1 completed items in the current notebook? This includes all categories and pages, regardless of the search filter. This action cannot be undone.</translation>
+        </message>
+        <message>
+            <source>上一页</source>
+            <translation>Previous</translation>
+        </message>
+        <message>
+            <source>下一页</source>
+            <translation>Next</translation>
+        </message>
+        <message>
+            <source>第 %1 / %2 页，共 %3 项</source>
+            <translation>Page %1 / %2, %3 items</translation>
+        </message>
+        <message>
             <location filename="../ui/MainWindow.cpp" line="+339" />
             <source>无法读取笔记</source>
             <translation>Unable to Read Notes</translation>

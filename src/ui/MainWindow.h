@@ -53,6 +53,7 @@ private:
     void refreshTodoDetails();
     void createTodo();
     void deleteTodo(const QString &noteId);
+    void clearCompletedTodos();
     void createTodoCategory();
     void renameTodoCategory(const QString &name);
     void deleteTodoCategory(const QString &name);
@@ -112,8 +113,15 @@ private:
     QComboBox *groupBy_ = nullptr;
     QComboBox *todoStatus_ = nullptr;
     QWidget *todoListPage_ = nullptr;
+    QPushButton *todoAdd_ = nullptr;
+    QPushButton *todoClearCompleted_ = nullptr;
     QTreeWidget *todoList_ = nullptr;
     QLabel *todoHint_ = nullptr;
+    QWidget *todoPagination_ = nullptr;
+    QPushButton *todoPreviousPage_ = nullptr;
+    QPushButton *todoNextPage_ = nullptr;
+    QLabel *todoPageInfo_ = nullptr;
+    int todoPage_ = 0;
     QWidget *todoDetails_ = nullptr;
     QLineEdit *todoTitle_ = nullptr;
     QComboBox *todoCategory_ = nullptr;

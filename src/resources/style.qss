@@ -91,7 +91,7 @@ QListWidget#siteCategories { background: #ffffff; border: 1px solid #e7ebf0; bor
 QListWidget#siteCategories::item { background: transparent; padding: 7px 10px; }
 QListWidget#siteCategories::item:selected { background: #e5edfb; color: #315fb8; }
 QCheckBox { spacing: 7px; font-size: 13px; }
-QTreeWidget#todoList::item { min-height: 38px; }
+QTreeWidget#todoList::item { min-height: 38px; border: none; border-radius: 0; }
 QCheckBox::indicator, QTreeWidget#todoList::indicator { width: 14px; height: 14px; border: 1px solid #b7c3d4; border-radius: 4px; background: #ffffff; }
 QCheckBox::indicator:checked, QTreeWidget#todoList::indicator:checked { background: #3b6fd4; border-color: #3b6fd4; image: url(:/icons/check.xpm); }
 QCheckBox::indicator:hover, QCheckBox::indicator:focus { border-color: #3b6fd4; }

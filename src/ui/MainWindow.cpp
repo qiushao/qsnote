@@ -825,16 +825,24 @@ void MainWindow::buildUi() {
     connect(add, &QPushButton::clicked, this, &MainWindow::createNotebook);
     connect(notebooks_, &QComboBox::currentIndexChanged, this, [this] {
         currentNotebookId_ = notebooks_->currentData().toString();
+        todoPage_ = 0;
         search_->clear();
         refreshNotebooks();
     });
-    connect(search_, &QLineEdit::textChanged, this, &MainWindow::refreshTree);
+    connect(search_, &QLineEdit::textChanged, this, [this] {
+        todoPage_ = 0;
+        refreshTree();
+    });
     connect(groupBy_, &QComboBox::currentIndexChanged, this, &MainWindow::refreshTree);
-    connect(todoStatus_, &QComboBox::currentIndexChanged, this, [this] { refreshTodoList(); });
+    connect(todoStatus_, &QComboBox::currentIndexChanged, this, [this] {
+        todoPage_ = 0;
+        refreshTodoList();
+    });
     connect(tree_, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *item) {
         const auto *book = store_.notebook(currentNotebookId_);
         if (!book || book->type != "todo" || !item) return;
         todoCategoryFilter_ = item->data(0, Qt::UserRole).toString();
+        todoPage_ = 0;
         refreshTodoList();
     });
     connect(tree_, &QTreeWidget::customContextMenuRequested, this, &MainWindow::showTreeMenu);
@@ -1026,8 +1034,10 @@ void MainWindow::buildTodoUi() {
     todoListPage_ = new QWidget(pages_);
     todoListPage_->setObjectName("todoListPage");
     auto *listLayout = column(todoListPage_, 16, 12);
-    auto *add = button(tr("＋ 新建事项"), "newTodo", todoListPage_);
-    listLayout->addWidget(add);
+    todoAdd_ = button(tr("＋ 新建事项"), "newTodo", todoListPage_);
+    listLayout->addWidget(todoAdd_);
+    todoClearCompleted_ = button(tr("清空已完成事项"), "clearCompletedTodos", todoListPage_);
+    listLayout->addWidget(todoClearCompleted_);
     todoHint_ = label(tr("暂无进行中的事项"), todoListPage_, true);
     listLayout->addWidget(todoHint_);
     todoList_ = new QTreeWidget(todoListPage_);
@@ -1041,6 +1051,25 @@ void MainWindow::buildTodoUi() {
     todoList_->header()->setSectionResizeMode(1, QHeaderView::Fixed);
     todoList_->header()->resizeSection(1, 40);
     listLayout->addWidget(todoList_, 1);
+    todoPagination_ = new QWidget(todoListPage_);
+    auto *paginationLayout = row(todoPagination_, 0, 0);
+    todoPreviousPage_ = button(tr("上一页"), "todoPreviousPage", todoPagination_);
+    todoNextPage_ = button(tr("下一页"), "todoNextPage", todoPagination_);
+    todoPageInfo_ = label({}, todoPagination_, true);
+    todoPageInfo_->setObjectName("todoPageInfo");
+    todoPageInfo_->setAlignment(Qt::AlignCenter);
+    paginationLayout->addWidget(todoPreviousPage_);
+    paginationLayout->addWidget(todoPageInfo_, 1);
+    paginationLayout->addWidget(todoNextPage_);
+    listLayout->addWidget(todoPagination_);
+    connect(todoPreviousPage_, &QPushButton::clicked, this, [this] {
+        --todoPage_;
+        refreshTodoList();
+    });
+    connect(todoNextPage_, &QPushButton::clicked, this, [this] {
+        ++todoPage_;
+        refreshTodoList();
+    });
     pages_->addWidget(todoListPage_);
 
     todoDetails_ = new QWidget(right_);
@@ -1071,7 +1100,8 @@ void MainWindow::buildTodoUi() {
     right_->layout()->addWidget(todoDetails_);
     todoDetails_->hide();
 
-    connect(add, &QPushButton::clicked, this, &MainWindow::createTodo);
+    connect(todoAdd_, &QPushButton::clicked, this, &MainWindow::createTodo);
+    connect(todoClearCompleted_, &QPushButton::clicked, this, &MainWindow::clearCompletedTodos);
     connect(todoList_, &QTreeWidget::currentItemChanged, this, [this] { refreshTodoDetails(); });
     connect(todoTitle_, &QLineEdit::textEdited, this, [this](const QString &text) {
         auto *item = todoList_->currentItem();
@@ -1121,6 +1151,7 @@ void MainWindow::refreshTodoCategories() {
     if (!book || book->type != "todo") return;
     if (todoNotebookId_ != book->id) {
         todoNotebookId_ = book->id;
+        todoPage_ = 0;
         todoCategoryFilter_.clear();
         const QSignalBlocker blocker(todoStatus_);
         todoStatus_->setCurrentIndex(0);
@@ -1155,15 +1186,35 @@ void MainWindow::refreshTodoCategories() {
 void MainWindow::refreshTodoList(const QString &selectedId) {
     const auto *book = store_.notebook(currentNotebookId_);
     if (!book || book->type != "todo") return;
+    const bool completed = todoStatus_->currentIndex() == 1;
+    todoAdd_->setVisible(!completed);
+    todoClearCompleted_->setVisible(completed);
     const auto *current = todoList_->currentItem();
     const auto id = !selectedId.isEmpty() ? selectedId : current ? current->data(0, Qt::UserRole).toString() : QString();
     const QSignalBlocker blocker(todoList_);
     todoList_->clear();
     const auto query = search_->text().trimmed();
+    constexpr int pageSize = 20;
+    QList<const Note *> matches;
+    int completedCount = 0;
     for (const auto &note: book->notes) {
-        if (note.folder || note.metadata["completed"].toBool() != (todoStatus_->currentIndex() == 1)) continue;
+        if (!note.folder && note.metadata["completed"].toBool()) ++completedCount;
+        if (note.folder || note.metadata["completed"].toBool() != completed) continue;
         if (!todoCategoryFilter_.isEmpty() && note.metadata["category"].toString("默认") != todoCategoryFilter_) continue;
         if (!query.isEmpty() && !note.title.contains(query, Qt::CaseInsensitive) && !note.content.contains(query, Qt::CaseInsensitive)) continue;
+        if (note.id == selectedId) todoPage_ = static_cast<int>(matches.size()) / pageSize;
+        matches.append(&note);
+    }
+    const int count = static_cast<int>(matches.size());
+    todoClearCompleted_->setEnabled(completedCount > 0);
+    const int pageCount = qMax(1, (count + pageSize - 1) / pageSize);
+    todoPage_ = qBound(0, todoPage_, pageCount - 1);
+    todoPagination_->setVisible(pageCount > 1);
+    todoPreviousPage_->setEnabled(todoPage_ > 0);
+    todoNextPage_->setEnabled(todoPage_ + 1 < pageCount);
+    todoPageInfo_->setText(tr("第 %1 / %2 页，共 %3 项").arg(todoPage_ + 1).arg(pageCount).arg(count));
+    for (int index = todoPage_ * pageSize; index < qMin(count, (todoPage_ + 1) * pageSize); ++index) {
+        const auto &note = *matches.at(index);
         auto *item = new QTreeWidgetItem(todoList_, {note.title});
         item->setData(0, Qt::UserRole, note.id);
         item->setToolTip(0, note.title);
@@ -1229,6 +1280,27 @@ void MainWindow::deleteTodo(const QString &noteId) {
     refreshTodoList();
 }
 
+void MainWindow::clearCompletedTodos() {
+    auto *book = store_.notebook(currentNotebookId_);
+    if (!book || book->type != "todo") return;
+    int count = 0;
+    for (const auto &note: book->notes) {
+        if (!note.folder && note.metadata["completed"].toBool()) ++count;
+    }
+    if (count == 0) return;
+    const auto hint = tr("确认清空当前笔记本中全部 %1 个已完成事项？包含所有分类和分页中的事项，不受搜索条件限制。该操作不可恢复。").arg(count);
+    if (QMessageBox::question(this, tr("清空已完成事项"), hint, QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
+    for (int index = static_cast<int>(book->notes.size()) - 1; index >= 0; --index) {
+        const auto &note = book->notes.at(index);
+        if (note.folder || !note.metadata["completed"].toBool()) continue;
+        NotebookStore::removeNoteFiles(*book, note);
+        book->notes.removeAt(index);
+    }
+    save();
+    todoPage_ = 0;
+    refreshTodoCategories();
+}
+
 void MainWindow::createTodoCategory() {
     auto *book = store_.notebook(currentNotebookId_);
     if (!book || book->type != "todo") return;
@@ -1243,6 +1315,7 @@ void MainWindow::createTodoCategory() {
     categories.append(name);
     book->config["categories"] = categories;
     todoCategoryFilter_ = name;
+    todoPage_ = 0;
     save();
     refreshTodoCategories();
 }
@@ -1288,7 +1361,10 @@ void MainWindow::deleteTodoCategory(const QString &name) {
     for (auto &note: book->notes) {
         if (note.metadata["category"].toString() == name) note.metadata["category"] = QStringLiteral("默认");
     }
-    if (todoCategoryFilter_ == name) todoCategoryFilter_.clear();
+    if (todoCategoryFilter_ == name) {
+        todoCategoryFilter_.clear();
+        todoPage_ = 0;
+    }
     save();
     refreshTodoCategories();
 }

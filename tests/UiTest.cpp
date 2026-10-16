@@ -1597,6 +1597,208 @@ st->e
         for (const auto &book: reloaded.notebooks) QVERIFY(book.notes.isEmpty());
     }
 
+    void todoPaginationBoundaries_data() { // NOLINT(readability-identifier-naming): Qt Test data provider.
+        QTest::addColumn<int>("count");
+        for (int count: {0, 20, 21, 40, 41}) QTest::newRow(qPrintable(QString::number(count))) << count;
+    }
+
+    void todoPaginationBoundaries() {
+        QFETCH(int, count);
+        NotebookStore fixture;
+        Notebook book{"todo", "待办", "todo", {}, {}, fixturePath("todo-pages")};
+        for (int index = 0; index < count; ++index) {
+            book.notes.append({QString::number(index), {}, QString("事项 %1").arg(index), {}});
+        }
+        fixture.notebooks.append(book);
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *list = window.findChild<QTreeWidget *>("todoList");
+        auto *previous = window.findChild<QPushButton *>("todoPreviousPage");
+        auto *next = window.findChild<QPushButton *>("todoNextPage");
+        auto *info = window.findChild<QLabel *>("todoPageInfo");
+        QVERIFY(previous && next && info);
+        QCOMPARE(next->isVisible(), count > 20);
+        QVERIFY(!previous->isEnabled());
+        const int pages = qMax(1, (count + 19) / 20);
+        QStringList visibleIds;
+        for (int page = 0; page < pages; ++page) {
+            QCOMPARE(list->topLevelItemCount(), qMin(20, count - page * 20));
+            QCOMPARE(info->text(), QString("第 %1 / %2 页，共 %3 项").arg(page + 1).arg(pages).arg(count));
+            QCOMPARE(previous->isEnabled(), page > 0);
+            QCOMPARE(next->isEnabled(), page + 1 < pages);
+            for (int index = 0; index < list->topLevelItemCount(); ++index) {
+                visibleIds << list->topLevelItem(index)->data(0, Qt::UserRole).toString();
+            }
+            if (page + 1 < pages) QTest::mouseClick(next, Qt::LeftButton);
+        }
+        QStringList expectedIds;
+        for (int index = 0; index < count; ++index) expectedIds << QString::number(index);
+        QCOMPARE(visibleIds, expectedIds);
+        for (int page = pages - 1; page > 0; --page) QTest::mouseClick(previous, Qt::LeftButton);
+        QCOMPARE(list->topLevelItemCount(), qMin(20, count));
+        if (count) QCOMPARE(list->currentItem()->data(0, Qt::UserRole).toString(), QString("0"));
+    }
+
+    void todoPaginationFilteringAndChanges() {
+        NotebookStore fixture;
+        Notebook book{"todo", "待办", "todo", {}, {{"categories", QJsonArray{"工作"}}}, fixturePath("todo-pages")};
+        for (int index = 0; index < 41; ++index) {
+            book.notes.append({QString::number(index), {}, QString("事项 %1").arg(index), "匹配正文", false,
+                               {{"category", "工作"}}});
+        }
+        book.notes.append({"done", {}, "已完成事项", {}, false, {{"completed", true}}});
+        fixture.notebooks.append(book);
+        fixture.notebooks.append({"other", "其他待办", "todo", {}, {}, fixturePath("todo-other")});
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *list = window.findChild<QTreeWidget *>("todoList");
+        auto *next = window.findChild<QPushButton *>("todoNextPage");
+        auto *previous = window.findChild<QPushButton *>("todoPreviousPage");
+        auto *search = window.findChild<QLineEdit *>("search");
+        auto *tree = window.findChild<QTreeWidget *>("noteTree");
+        auto *status = window.findChild<QComboBox *>("todoStatus");
+        auto *title = window.findChild<QLineEdit *>("todoTitle");
+        QVERIFY(next && previous);
+
+        QTest::mouseClick(next, Qt::LeftButton);
+        QCOMPARE(title->text(), QString("事项 20"));
+        search->setText("匹配正文");
+        QCOMPARE(title->text(), QString("事项 0"));
+        QVERIFY(!previous->isEnabled());
+        QTest::mouseClick(next, Qt::LeftButton);
+        search->setText("不存在");
+        QCOMPARE(list->topLevelItemCount(), 0);
+        QVERIFY(!next->isVisible());
+        QVERIFY(!window.findChild<QWidget *>("todoDetails")->isEnabled());
+        search->clear();
+        QTest::mouseClick(next, Qt::LeftButton);
+        tree->setCurrentItem(tree->topLevelItem(2));
+        QCOMPARE(title->text(), QString("事项 0"));
+        QTest::mouseClick(next, Qt::LeftButton);
+        tree->setCurrentItem(tree->topLevelItem(0));
+        QCOMPARE(title->text(), QString("事项 0"));
+        QTest::mouseClick(next, Qt::LeftButton);
+        status->setCurrentIndex(1);
+        QCOMPARE(title->text(), QString("已完成事项"));
+        status->setCurrentIndex(0);
+        QCOMPARE(title->text(), QString("事项 0"));
+        QTest::mouseClick(next, Qt::LeftButton);
+        auto *books = window.findChild<QComboBox *>("notebooks");
+        books->setCurrentIndex(1);
+        QCOMPARE(list->topLevelItemCount(), 0);
+        books->setCurrentIndex(0);
+        QCOMPARE(title->text(), QString("事项 0"));
+
+        QTest::mouseClick(next, Qt::LeftButton);
+        QTest::mouseClick(next, Qt::LeftButton);
+        QCOMPARE(list->topLevelItemCount(), 1);
+        list->currentItem()->setCheckState(0, Qt::Checked);
+        QTRY_COMPARE(list->topLevelItemCount(), 20);
+        QCOMPARE(title->text(), QString("事项 20"));
+        QVERIFY(!next->isEnabled());
+
+        QTest::mouseClick(previous, Qt::LeftButton);
+        QTimer::singleShot(20, &window, [] {
+            auto *dialog = qobject_cast<QInputDialog *>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            dialog->setTextValue("新增事项");
+            dialog->accept();
+        });
+        QTest::mouseClick(window.findChild<QPushButton *>("newTodo"), Qt::LeftButton);
+        QCOMPARE(list->topLevelItemCount(), 1);
+        QCOMPARE(title->text(), QString("新增事项"));
+        QTimer::singleShot(20, &window, [] {
+            auto *dialog = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            dialog->button(QMessageBox::Yes)->click();
+        });
+        auto *remove = qobject_cast<QPushButton *>(list->itemWidget(list->currentItem(), 1));
+        QVERIFY(remove);
+        QTest::mouseClick(remove, Qt::LeftButton);
+        QCOMPARE(list->topLevelItemCount(), 20);
+        QCOMPARE(title->text(), QString("事项 20"));
+        QVERIFY(!next->isEnabled());
+    }
+
+    void clearCompletedTodos() {
+        NotebookStore fixture;
+        Notebook book{"todo", "待办", "todo", {}, {{"categories", QJsonArray{"工作"}}}, fixturePath("todo-clear")};
+        for (int index = 0; index < 22; ++index) {
+            book.notes.append({QString::number(index), {}, QString("已完成 %1").arg(index), {}, false,
+                               {{"completed", true}, {"category", index < 21 ? "工作" : "默认"}}});
+        }
+        book.notes.append({"pending", {}, "进行中事项", {}});
+        fixture.notebooks.append(book);
+        fixture.notebooks.append({"other", "其他待办", "todo",
+                                  {{"other-done", {}, "其他已完成", {}, false, {{"completed", true}}}}, {}, fixturePath("todo-clear-other")});
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        QStringList completedFiles;
+        for (const auto &note: fixture.notebooks.first().notes) {
+            if (note.metadata["completed"].toBool()) completedFiles << QDir(book.path).filePath(note.path);
+        }
+        MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *add = window.findChild<QPushButton *>("newTodo");
+        auto *clear = window.findChild<QPushButton *>("clearCompletedTodos");
+        auto *status = window.findChild<QComboBox *>("todoStatus");
+        auto *list = window.findChild<QTreeWidget *>("todoList");
+        auto *next = window.findChild<QPushButton *>("todoNextPage");
+        QVERIFY(clear);
+        QVERIFY(add->isVisible());
+        QVERIFY(!clear->isVisible());
+        status->setCurrentIndex(1);
+        QVERIFY(!add->isVisible());
+        QVERIFY(clear->isVisible());
+        QVERIFY(clear->isEnabled());
+        QCOMPARE(clear->text(), QString("清空已完成事项"));
+        auto *tree = window.findChild<QTreeWidget *>("noteTree");
+        tree->setCurrentItem(tree->topLevelItem(2));
+        auto *search = window.findChild<QLineEdit *>("search");
+        search->setText("已完成");
+        QTest::mouseClick(next, Qt::LeftButton);
+        QCOMPARE(list->topLevelItemCount(), 1);
+        QTimer::singleShot(20, &window, [] {
+            auto *dialog = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            QVERIFY(dialog->text().contains("22"));
+            dialog->button(QMessageBox::Cancel)->click();
+        });
+        QTest::mouseClick(clear, Qt::LeftButton);
+        QCOMPARE(list->topLevelItemCount(), 1);
+        for (const auto &path: completedFiles) QVERIFY(QFile::exists(path));
+        QTimer::singleShot(20, &window, [] {
+            auto *dialog = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            dialog->button(QMessageBox::Yes)->click();
+        });
+        QTest::mouseClick(clear, Qt::LeftButton);
+        QCOMPARE(list->topLevelItemCount(), 0);
+        QVERIFY(!clear->isEnabled());
+        QVERIFY(!next->isVisible());
+        QVERIFY(!window.findChild<QWidget *>("todoDetails")->isEnabled());
+        for (const auto &path: completedFiles) QVERIFY(!QFile::exists(path));
+        NotebookStore reloaded;
+        QVERIFY2(reloaded.load(&error), qPrintable(error));
+        QCOMPARE(reloaded.notebook("todo")->notes.size(), 1);
+        QVERIFY(reloaded.note("pending"));
+        QVERIFY(reloaded.note("other-done"));
+        search->clear();
+        tree->setCurrentItem(tree->topLevelItem(0));
+        status->setCurrentIndex(0);
+        QVERIFY(add->isVisible());
+        QVERIFY(add->isEnabled());
+        QVERIFY(!clear->isVisible());
+        QCOMPARE(list->topLevelItemCount(), 1);
+    }
+
     void todoCategoriesEditingAndPersistence() {
         NotebookStore fixture;
         fixture.notebooks.append({"todo", "待办", "todo", {}, {}, fixturePath("todo")});
@@ -1704,9 +1906,12 @@ st->e
         QVERIFY(details->isVisible());
         QCOMPARE(list->topLevelItemCount(), 2);
         status->setCurrentIndex(1);
-        addTodo("从已完成中新建");
+        QVERIFY(!window.findChild<QPushButton *>("newTodo")->isVisible());
+        QVERIFY(window.findChild<QPushButton *>("clearCompletedTodos")->isVisible());
+        status->setCurrentIndex(0);
+        addTodo("新增事项");
         QCOMPARE(status->currentIndex(), 0);
-        QCOMPARE(title->text(), QString("从已完成中新建"));
+        QCOMPARE(title->text(), QString("新增事项"));
         QVERIFY(!completed->isChecked());
         window.grab().save("todo-list.png");
         const auto completedId = list->currentItem()->data(0, Qt::UserRole).toString();
