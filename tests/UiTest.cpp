@@ -28,6 +28,9 @@
 #include <QDialog>
 #include <QCheckBox>
 #include <QClipboard>
+#include <QMimeData>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QDoubleSpinBox>
 #include <QSettings>
 #include <QSpinBox>
@@ -318,6 +321,70 @@ st->e
         QApplication::clipboard()->setImage(original);
         text->paste();
         QCOMPARE(editor.getText(), QString("plain text"));
+    }
+
+    void insertImageFiles_data() { // NOLINT(readability-identifier-naming): Qt Test data slot.
+        QTest::addColumn<bool>("drop");
+        QTest::newRow("paste") << false;
+        QTest::newRow("drop") << true;
+    }
+
+    void insertImageFiles() {
+        QFETCH(bool, drop);
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QImage image(12, 9, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        const auto first = directory.filePath("first image.png");
+        const auto second = directory.filePath("第二张.png");
+        QVERIFY(image.save(first));
+        QVERIFY(image.save(second));
+        MarkdownEditor editor;
+        editor.resize(700, 500);
+        editor.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&editor));
+        editor.setText("before\n");
+        auto *text = editor.getTextEdit();
+        text->moveCursor(QTextCursor::End);
+        auto *mime = new QMimeData;
+        mime->setUrls({QUrl::fromLocalFile(first), QUrl::fromLocalFile(second)});
+        QApplication::clipboard()->setMimeData(mime);
+        const auto clearClipboard = qScopeGuard([] { QApplication::clipboard()->clear(); });
+        if (drop) {
+            const auto point = text->cursorRect().center();
+            QDragEnterEvent enter(point, Qt::CopyAction, mime, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(text->viewport(), &enter);
+            QVERIFY(enter.isAccepted());
+            QDropEvent event(point, Qt::CopyAction, mime, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(text->viewport(), &event);
+            QVERIFY(event.isAccepted());
+        } else {
+            QVERIFY(text->canPaste());
+            text->paste();
+        }
+        const auto markdown = editor.getText();
+        QCOMPARE(markdown.count("data:image/png;base64,"), 2);
+        QVERIFY(markdown.contains("![first image]("));
+        QVERIFY(markdown.contains("![第二张]("));
+        QVERIFY(!markdown.contains(directory.path()));
+        QVERIFY(QFile::remove(first));
+        QVERIFY(QFile::remove(second));
+        text->undo();
+        QCOMPARE(editor.getText(), QString("before\n"));
+        text->redo();
+        QCOMPARE(editor.getText(), markdown);
+        MarkdownPreview preview;
+        preview.setMarkdown(markdown, "dropped-images");
+        QTRY_COMPARE_WITH_TIMEOUT(javascript(preview,
+            "Array.from(document.querySelectorAll('img')).filter(img => img.naturalWidth === 12 && img.naturalHeight === 9).length").toInt(), 2, 10000);
+
+        auto *plainFile = new QMimeData;
+        plainFile->setUrls({QUrl::fromLocalFile(directory.filePath("document.txt"))});
+        QApplication::clipboard()->setMimeData(plainFile);
+        text->selectAll();
+        text->paste();
+        QVERIFY(editor.getText().contains("document.txt"));
+        QVERIFY(!editor.getText().contains("data:image"));
     }
 
     void fencedCodeSyntaxHighlighting_data() { // NOLINT(readability-identifier-naming): Qt Test data slot.

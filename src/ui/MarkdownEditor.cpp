@@ -8,6 +8,7 @@
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QFontComboBox>
 #include <QImageReader>
@@ -22,6 +23,7 @@
 #include <QShortcut>
 #include <QSpinBox>
 #include <QTabWidget>
+#include <QUrl>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 #include <functional>
@@ -31,6 +33,15 @@
 #include <vtextedit/vtextedit.h>
 
 namespace {
+QStringList imagePaths(const QMimeData *source) {
+    QStringList paths;
+    for (const auto &url: source->urls()) {
+        if (!url.isLocalFile() || !QImageReader(url.toLocalFile()).canRead()) return {};
+        paths.append(url.toLocalFile());
+    }
+    return paths;
+}
+
 QString imageLink(const QImage &image, const QString &description) {
     QByteArray bytes;
     QBuffer buffer(&bytes);
@@ -102,18 +113,32 @@ MarkdownEditor::MarkdownEditor(const QSharedPointer<vte::MarkdownEditorConfig> &
     connect(this, &VMarkdownEditor::imageInsertionRequested, this, &MarkdownEditor::insertImage);
     connect(getTextEdit(), &vte::VTextEdit::canInsertFromMimeDataRequested, this,
             [this](const QMimeData *source, bool *handled, bool *allowed) {
-        if (!source->hasImage()) return;
+        if (!source->hasImage() && imagePaths(source).isEmpty()) return;
         *handled = true;
-        *allowed = !getTextEdit()->isReadOnly() && !qvariant_cast<QImage>(source->imageData()).isNull();
+        *allowed = !getTextEdit()->isReadOnly()
+            && (!source->hasImage() || !qvariant_cast<QImage>(source->imageData()).isNull());
     });
     connect(getTextEdit(), &vte::VTextEdit::insertFromMimeDataRequested, this,
             [this](const QMimeData *source, bool *handled) {
-        if (!source->hasImage()) return;
+        const auto paths = imagePaths(source);
+        if (!source->hasImage() && paths.isEmpty()) return;
         *handled = true;
-        const auto image = qvariant_cast<QImage>(source->imageData());
-        if (!getTextEdit()->isReadOnly() && !image.isNull()) {
-            insertText(imageLink(image, getTextEdit()->textCursor().selectedText()));
+        if (getTextEdit()->isReadOnly()) return;
+        if (source->hasImage()) {
+            const auto image = qvariant_cast<QImage>(source->imageData());
+            if (!image.isNull()) insertText(imageLink(image, getTextEdit()->textCursor().selectedText()));
+            return;
         }
+        QStringList links;
+        for (const auto &path: paths) {
+            const auto image = QImageReader(path).read();
+            if (image.isNull()) {
+                QMessageBox::warning(this, tr("无法插入图片"), tr("无法读取所选图片。"));
+                return;
+            }
+            links.append(imageLink(image, QFileInfo(path).completeBaseName()));
+        }
+        insertText(links.join('\n'));
     });
     const QList<QPair<QKeySequence, vte::TypeAction>> shortcuts = {
             {QKeySequence::Bold, vte::TypeAction::TypeBold},
