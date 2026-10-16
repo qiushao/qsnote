@@ -27,6 +27,7 @@
 #include <QTextStream>
 #include <QDialog>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QDoubleSpinBox>
 #include <QSettings>
 #include <QSpinBox>
@@ -272,6 +273,51 @@ st->e
         editor.getTextEdit()->selectAll();
         editor.type(vte::TypeAction::TypeBold);
         QCOMPARE(editor.getText(), QString("- 第一行\n- 第二行"));
+    }
+
+    void pasteClipboardImage() {
+        MarkdownEditor editor;
+        editor.setText("before selected after");
+        auto *text = editor.getTextEdit();
+        auto cursor = text->textCursor();
+        cursor.setPosition(7);
+        cursor.setPosition(15, QTextCursor::KeepAnchor);
+        text->setTextCursor(cursor);
+        QImage original(8, 6, QImage::Format_ARGB32);
+        original.fill(QColor(20, 80, 120, 160));
+        QApplication::clipboard()->setImage(original);
+        const auto clearClipboard = qScopeGuard([] { QApplication::clipboard()->clear(); });
+        QVERIFY(text->canPaste());
+        text->paste();
+        const auto markdown = editor.getText();
+        QVERIFY(markdown.startsWith("before ![selected](data:image/png;base64,"));
+        QVERIFY(markdown.endsWith(") after"));
+        const auto encoded = markdown.section("base64,", 1).section(')', 0, 0).toLatin1();
+        QImage restored;
+        QVERIFY(restored.loadFromData(QByteArray::fromBase64(encoded), "PNG"));
+        QCOMPARE(restored, original);
+        text->undo();
+        QCOMPARE(editor.getText(), QString("before selected after"));
+        text->redo();
+        QCOMPARE(editor.getText(), markdown);
+
+        NotebookStore store;
+        store.notebooks.append({"images", "Images", "normal",
+                                {{"image", {}, "Image.md", markdown, false, {}, {}}}, {}, fixturePath("clipboard-images")});
+        QString error;
+        QVERIFY2(store.save(&error), qPrintable(error));
+        NotebookStore reloaded;
+        QVERIFY2(reloaded.load(&error), qPrintable(error));
+        QCOMPARE(reloaded.note("image")->content, markdown);
+
+        QApplication::clipboard()->setText("plain text");
+        text->selectAll();
+        text->paste();
+        QCOMPARE(editor.getText(), QString("plain text"));
+        text->setReadOnly(true);
+        QApplication::clipboard()->setImage(original);
+        text->paste();
+        QCOMPARE(editor.getText(), QString("plain text"));
     }
 
     void fencedCodeSyntaxHighlighting_data() { // NOLINT(readability-identifier-naming): Qt Test data slot.

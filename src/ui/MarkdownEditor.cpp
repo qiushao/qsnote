@@ -15,6 +15,7 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QPushButton>
 #include <QScopedValueRollback>
 #include <QSettings>
@@ -30,6 +31,14 @@
 #include <vtextedit/vtextedit.h>
 
 namespace {
+QString imageLink(const QImage &image, const QString &description) {
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::WriteOnly);
+    image.save(&buffer, "PNG");
+    return vte::MarkdownUtils::generateImageLink(description, "data:image/png;base64," + QString::fromLatin1(bytes.toBase64()), {});
+}
+
 QSharedPointer<vte::MarkdownEditorConfig> editorConfig() {
     vte::VTextEditor::addSyntaxCustomSearchPaths({":/demo/data"});
     QSettings settings;
@@ -91,6 +100,21 @@ MarkdownEditor::MarkdownEditor(const QSharedPointer<vte::MarkdownEditorConfig> &
         emit settingsChanged();
     });
     connect(this, &VMarkdownEditor::imageInsertionRequested, this, &MarkdownEditor::insertImage);
+    connect(getTextEdit(), &vte::VTextEdit::canInsertFromMimeDataRequested, this,
+            [this](const QMimeData *source, bool *handled, bool *allowed) {
+        if (!source->hasImage()) return;
+        *handled = true;
+        *allowed = !getTextEdit()->isReadOnly() && !qvariant_cast<QImage>(source->imageData()).isNull();
+    });
+    connect(getTextEdit(), &vte::VTextEdit::insertFromMimeDataRequested, this,
+            [this](const QMimeData *source, bool *handled) {
+        if (!source->hasImage()) return;
+        *handled = true;
+        const auto image = qvariant_cast<QImage>(source->imageData());
+        if (!getTextEdit()->isReadOnly() && !image.isNull()) {
+            insertText(imageLink(image, getTextEdit()->textCursor().selectedText()));
+        }
+    });
     const QList<QPair<QKeySequence, vte::TypeAction>> shortcuts = {
             {QKeySequence::Bold, vte::TypeAction::TypeBold},
             {QKeySequence::Italic, vte::TypeAction::TypeItalic},
@@ -165,11 +189,7 @@ void MarkdownEditor::insertImage(quint64 requestId, const QString &selectedText)
         QMessageBox::warning(this, tr("无法插入图片"), tr("无法读取所选图片。"));
         return;
     }
-    QByteArray bytes;
-    QBuffer buffer(&bytes);
-    buffer.open(QIODevice::WriteOnly);
-    image.save(&buffer, "PNG");
-    const auto link = vte::MarkdownUtils::generateImageLink(selectedText, "data:image/png;base64," + QString::fromLatin1(bytes.toBase64()), {});
+    const auto link = imageLink(image, selectedText);
     if (requestId) completeImageInsertion(requestId, link);
     else
         insertText(link);
