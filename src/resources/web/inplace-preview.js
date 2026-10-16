@@ -50,7 +50,7 @@
     }
 
     async function graph(request) {
-        root.style.cssText = 'display:block;width:800px;padding:0;background:white;color:black';
+        root.style.cssText = `display:block;width:${request.graphWidth}px;padding:0;background:white;color:black`;
         const id = `inplace-${++serial}`;
         if (request.language === 'mermaid') {
             // Render inside the sized host: the hidden page has no viewport width.

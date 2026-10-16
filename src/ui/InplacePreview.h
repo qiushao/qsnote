@@ -27,7 +27,11 @@ signals:
     void stylesheetReady(const QString &css);
     void highlightRequested(int index, quint64 timeStamp, const QString &text);
 
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
+    int graphWidth() const;
     struct Request {
         QSharedPointer<const vte::Preview> preview;
         QString language;
@@ -56,6 +60,7 @@ private:
     quint64 revision_ = 0;
     int generation_ = 0;
     int next_ = 0;
+    int graphWidth_ = 0;
     bool ready_ = false;
     bool busy_ = false;
 };

@@ -10,6 +10,8 @@
 #include <QJsonObject>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QEvent>
+#include <QScrollBar>
 #include <QWebChannel>
 #include <QWebEnginePage>
 #include <QWebEngineSettings>
@@ -46,6 +48,8 @@ QString graphLanguage(const QString &info) {
 }// namespace
 
 InplacePreview::InplacePreview(MarkdownEditor *editor) : QObject(editor), editor_(editor) {
+    graphWidth_ = graphWidth();
+    editor_->getTextEdit()->viewport()->installEventFilter(this);
     renderTimer_.setSingleShot(true);
     renderTimer_.setInterval(150);
     publishTimer_.setSingleShot(true);
@@ -69,6 +73,25 @@ InplacePreview::InplacePreview(MarkdownEditor *editor) : QObject(editor), editor
                 ensurePage();
                 if (ready_) emit highlightRequested(index, timeStamp, text);
             });
+}
+
+int InplacePreview::graphWidth() const {
+    // Reserve scrollbar space even when hidden, so preview layout cannot
+    // alternate between two widths as the scrollbar appears and disappears.
+    const auto *edit = editor_->getTextEdit();
+    return qMax(1, edit->contentsRect().width() - edit->verticalScrollBar()->sizeHint().width()
+            - static_cast<int>(2 * editor_->document()->documentMargin()) - 16);
+}
+
+bool InplacePreview::eventFilter(QObject *watched, QEvent *event) {
+    if (watched == editor_->getTextEdit()->viewport() && event->type() == QEvent::Resize) {
+        const int width = graphWidth();
+        if (width != graphWidth_) {
+            graphWidth_ = width;
+            QTimer::singleShot(0, this, &InplacePreview::refresh);
+        }
+    }
+    return QObject::eventFilter(watched, event);
 }
 
 void InplacePreview::invalidate() {
@@ -124,7 +147,7 @@ void InplacePreview::update(const QVector<QSharedPointer<const vte::Preview>> &p
         } else {
             continue;
         }
-        const QJsonObject identity{{"language", request.language}, {"text", request.text}, {"display", request.display}, {"font", fontSize}, {"baseFont", editor_->baseEditorFontPointSize()}, {"dpi", editor_->logicalDpiY()}, {"color", color}, {"scale", scale}};
+        const QJsonObject identity{{"language", request.language}, {"text", request.text}, {"display", request.display}, {"font", fontSize}, {"baseFont", editor_->baseEditorFontPointSize()}, {"dpi", editor_->logicalDpiY()}, {"color", color}, {"scale", scale}, {"graphWidth", graphWidth()}};
         request.key = QString::fromLatin1(QCryptographicHash::hash(QJsonDocument(identity).toJson(QJsonDocument::Compact), QCryptographicHash::Sha256).toHex());
         requests_.append(request);
         if (const auto image = cache_.object(request.key)) attach(static_cast<int>(requests_.size()) - 1, *image);
@@ -220,7 +243,7 @@ void InplacePreview::renderNext() {
     ensurePage();
     if (!ready_) return;
     busy_ = true;
-    const QJsonObject data{{"generation", generation_}, {"index", next_}, {"language", request.language}, {"text", request.text}, {"display", request.display}, {"fontSize", editor_->editorFontPointSize() * editor_->logicalDpiY() / 72.0}, {"zoom", static_cast<double>(editor_->editorFontPointSize()) / editor_->baseEditorFontPointSize()}, {"color", QColor(editor_->theme()->editorStyle(vte::Theme::Text).m_textColor).name()}, {"scale", editor_->devicePixelRatioF()}};
+    const QJsonObject data{{"generation", generation_}, {"index", next_}, {"language", request.language}, {"text", request.text}, {"display", request.display}, {"fontSize", editor_->editorFontPointSize() * editor_->logicalDpiY() / 72.0}, {"zoom", static_cast<double>(editor_->editorFontPointSize()) / editor_->baseEditorFontPointSize()}, {"color", QColor(editor_->theme()->editorStyle(vte::Theme::Text).m_textColor).name()}, {"scale", editor_->devicePixelRatioF()}, {"graphWidth", graphWidth()}};
     emit renderRequested(QString::fromUtf8(QJsonDocument(data).toJson(QJsonDocument::Compact)));
 }
 
@@ -261,7 +284,13 @@ void InplacePreview::attach(int index, const Image &image) {
     item->m_name = "inplace-" + request.key;
     item->m_image = image.pixmap;
     item->m_logicalSize = image.size;
-    if (preview->type() == vte::PreviewElementType::Code && request.language != "mathjax") item->m_backgroundColor = qRgb(255, 255, 255);
+    if (preview->type() == vte::PreviewElementType::Code && request.language != "mathjax") {
+        const int width = qMax(1, graphWidth() - item->m_padding);
+        if (item->m_logicalSize.width() > width) {
+            item->m_logicalSize.scale(width, item->m_logicalSize.height(), Qt::KeepAspectRatio);
+        }
+        item->m_backgroundColor = qRgb(255, 255, 255);
+    }
     request.item = item;
 }
 

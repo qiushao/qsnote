@@ -601,6 +601,28 @@ int ordinary_code = 1;
         QCOMPARE(editor.getText(), source);
     }
 
+    void inplaceDiagramWidthFollowsEditor() {
+        MarkdownEditor editor;
+        editor.resize(1200, 700);
+        editor.show();
+        const QString source = "```mermaid\ngantt\n    dateFormat YYYY-MM-DD\n    section Development\n    Design :a, 2026-01-01, 2d\n    Implementation :after a, 3d\n```";
+        editor.setText(source);
+        const auto width = [&] {
+            const auto images = previewImages(editor, vte::PreviewData::CodeBlock);
+            return images.size() == 1 ? images.first().m_imageSize.width() : 0;
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(width() > 1000, 30000);
+        QVERIFY(width() < editor.getTextEdit()->viewport()->width());
+        editor.resize(600, 700);
+        QTRY_VERIFY_WITH_TIMEOUT(width() > 400 && width() < 600, 30000);
+        QVERIFY(width() < editor.getTextEdit()->viewport()->width());
+        editor.resize(1400, 700);
+        QTRY_VERIFY_WITH_TIMEOUT(width() > 1200, 30000);
+        QVERIFY(width() < editor.getTextEdit()->viewport()->width());
+        QCOMPARE(editor.getText(), source);
+        QVERIFY(!editor.document()->isModified());
+    }
+
     void inplacePreviewSettingsAndStaleResults() {
         MarkdownEditor editor;
         editor.resize(700, 500);
