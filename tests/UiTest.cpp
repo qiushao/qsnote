@@ -1382,6 +1382,45 @@ st->e
         window.close();
     }
 
+    void toolbarDiagramExamples() {
+        NotebookStore fixture;
+        fixture.notebooks.append({"book", "笔记本", "normal",
+            {{"note", {}, "示例", "前文后文", false, {}}}, {}, fixturePath("diagrams")});
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        QSettings().setValue("session/openNotes", QStringList{"note"});
+        MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *editor = window.findChild<MarkdownEditor *>("markdownEditor");
+        QVERIFY(editor);
+        auto *more = window.findChild<QPushButton *>("editorOptions");
+        QVERIFY(more->menu());
+        const auto actions = more->menu()->actions();
+        QCOMPARE(actions.size(), 8);
+        QString examples;
+        for (auto *action: actions) {
+            auto cursor = editor->getTextEdit()->textCursor();
+            cursor.setPosition(2);
+            editor->getTextEdit()->setTextCursor(cursor);
+            action->trigger();
+            const auto text = editor->getText();
+            const auto language = action == actions.last() ? QString("wavedrom") : QString("mermaid");
+            QVERIFY(text.startsWith("前文\n\n```" + language + "\n"));
+            QVERIFY(text.endsWith("\n```\n\n后文"));
+            QTRY_COMPARE_WITH_TIMEOUT(previewImages(*editor, vte::PreviewData::CodeBlock).size(), 1, 10000);
+            examples += text + "\n\n";
+            editor->getTextEdit()->undo();
+            QCOMPARE(editor->getText(), QString("前文后文"));
+            QTRY_COMPARE(previewImages(*editor, vte::PreviewData::CodeBlock).size(), 0);
+        }
+        MarkdownPreview preview;
+        preview.setMarkdown(examples, "toolbar-diagrams");
+        QTRY_COMPARE_WITH_TIMEOUT(preview.renderedRevision(), preview.revision(), 30000);
+        QCOMPARE(javascript(preview, "document.querySelectorAll('.render-error').length").toInt(), 0);
+        QCOMPARE(javascript(preview, "document.querySelectorAll('.diagram svg').length").toInt(), 8);
+    }
+
     void globalSettingsUpdateOpenEditors() {
         NotebookStore fixture;
         Notebook book{"book", "笔记本", "normal", {}, {}, fixturePath("settings")};

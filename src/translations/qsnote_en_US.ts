@@ -363,8 +363,40 @@
         </message>
         <message>
             <location line="+24" />
-            <source>更多</source>
-            <translation>More</translation>
+            <source>更多 Markdown 语法</source>
+            <translation>More Markdown Syntax</translation>
+        </message>
+        <message>
+            <source>流程图</source>
+            <translation>Flowchart</translation>
+        </message>
+        <message>
+            <source>时序图</source>
+            <translation>Sequence Diagram</translation>
+        </message>
+        <message>
+            <source>甘特图</source>
+            <translation>Gantt Chart</translation>
+        </message>
+        <message>
+            <source>类图</source>
+            <translation>Class Diagram</translation>
+        </message>
+        <message>
+            <source>饼图</source>
+            <translation>Pie Chart</translation>
+        </message>
+        <message>
+            <source>脑图</source>
+            <translation>Mind Map</translation>
+        </message>
+        <message>
+            <source>坐标轴图</source>
+            <translation>XY Chart</translation>
+        </message>
+        <message>
+            <source>数字时序图</source>
+            <translation>Digital Timing Diagram</translation>
         </message>
         <message>
             <location line="+6" />

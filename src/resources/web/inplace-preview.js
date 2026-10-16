@@ -53,7 +53,8 @@
         root.style.cssText = 'display:block;width:800px;padding:0;background:white;color:black';
         const id = `inplace-${++serial}`;
         if (request.language === 'mermaid') {
-            const result = await mermaid.render(id, request.text);
+            // Render inside the sized host: the hidden page has no viewport width.
+            const result = await mermaid.render(id, request.text, root);
             root.innerHTML = result.svg;
         } else if (['flow', 'flowchart'].includes(request.language)) {
             const host = document.createElement('div');

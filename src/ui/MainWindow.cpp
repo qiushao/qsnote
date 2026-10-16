@@ -955,8 +955,43 @@ void MainWindow::buildToolbar() {
     more->setProperty("tool", true);
     more->setIcon(icon("more"));
     more->setIconSize(QSize(24, 24));
-    more->setToolTip(tr("更多"));
+    more->setToolTip(tr("更多 Markdown 语法"));
     more->setFocusPolicy(Qt::NoFocus);
+    auto *diagramMenu = new QMenu(more);
+    struct Diagram {
+        QString title;
+        QString source;
+        QString language = "mermaid";
+    };
+    const QList<Diagram> diagrams = {
+        {tr("流程图"), "flowchart TD\n    A[开始] --> B{是否完成？}\n    B -->|是| C[结束]\n    B -->|否| D[继续处理]\n    D --> B"},
+        {tr("时序图"), "sequenceDiagram\n    participant U as 用户\n    participant S as 系统\n    U->>S: 发送请求\n    S-->>U: 返回结果"},
+        {tr("甘特图"), "gantt\n    title 项目计划\n    dateFormat YYYY-MM-DD\n    section 开发\n    需求分析 :a, 2026-01-01, 2d\n    功能实现 :b, after a, 3d\n    测试验收 :after b, 2d"},
+        {tr("类图"), "classDiagram\n    Animal <|-- Cat\n    class Animal {\n        +String name\n        +eat()\n    }\n    class Cat {\n        +meow()\n    }"},
+        {tr("饼图"), "pie title 时间分配\n    \"工作\" : 8\n    \"休息\" : 8\n    \"其他\" : 8"},
+        {tr("脑图"), "mindmap\n    root((项目计划))\n        需求\n            用户调研\n            功能列表\n        开发\n            编码\n            测试"},
+        {tr("坐标轴图"), "xychart\n    title \"月度销售额\"\n    x-axis [\"一月\", \"二月\", \"三月\", \"四月\"]\n    y-axis \"销售额\" 0 --> 100\n    bar [30, 50, 70, 90]\n    line [20, 40, 60, 80]"},
+        {tr("数字时序图"), R"({
+  "signal": [
+    { "name": "clk",  "wave": "p........" },
+    { "name": "addr", "wave": "x.====x.", "data": ["A0", "A1"] },
+    { "name": "wr",   "wave": "0.1..0.." },
+    { "name": "data", "wave": "x..===x.", "data": ["D0"] }
+  ]
+})", "wavedrom"}};
+    for (const auto &diagram: diagrams) {
+        diagramMenu->addAction(diagram.title, this, [this, diagram] {
+            if (!store_.note(currentNoteId())) return;
+            setPreview(false);
+            auto cursor = editor_->textCursor();
+            cursor.beginEditBlock();
+            cursor.insertText("\n\n```" + diagram.language + "\n" + diagram.source + "\n```\n\n");
+            cursor.endEditBlock();
+            editor_->setTextCursor(cursor);
+            editor_->setFocus();
+        });
+    }
+    more->setMenu(diagramMenu);
     layout->addWidget(more);
     auto *modes = new QWidget(toolbar_);
     modes->setProperty("alignRight", true);
@@ -1432,8 +1467,6 @@ void MainWindow::activateEditor(const QString &id) {
         textEdit->setPlaceholderText(tr("开始书写 Markdown..."));
         textEdit->setProperty("noteId", id);
         session.editor = documentEditor;
-        session.menu = documentEditor->createEditorMenu(documentEditor);
-        connect(session.menu, &QMenu::aboutToShow, this, [this] { setPreview(false); });
         editors_->addWidget(documentEditor);
         editorSessions_.insert(id, session);
         connect(documentEditor, &MarkdownEditor::settingsChanged, this, [this, documentEditor] {
@@ -1480,7 +1513,6 @@ void MainWindow::activateEditor(const QString &id) {
     markdownEditor_->setObjectName("markdownEditor");
     editor_->setObjectName("editor");
     editors_->setCurrentWidget(markdownEditor_);
-    findChild<QPushButton *>("editorOptions")->setMenu(session.menu);
     setViewMode(session.mode);
     // Layout changes on show can scroll QTextEdit to its caret. Restore the
     // viewport after that layout without moving the retained cursor/selection.
@@ -1502,7 +1534,6 @@ void MainWindow::removeEditor(const QString &id) {
         activeEditorId_.clear();
         markdownEditor_ = nullptr;
         editor_ = nullptr;
-        findChild<QPushButton *>("editorOptions")->setMenu(nullptr);
     }
     editors_->removeWidget(session.editor);
     disconnect(session.editor, nullptr, this, nullptr);

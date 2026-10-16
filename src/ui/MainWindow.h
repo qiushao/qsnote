@@ -13,7 +13,6 @@ class QCheckBox;
 class QComboBox;
 class QLabel;
 class QLineEdit;
-class QMenu;
 namespace vte {
 class VTextEdit;
 }
@@ -76,7 +75,6 @@ private:
     };
     struct EditorSession {
         MarkdownEditor *editor = nullptr;
-        QMenu *menu = nullptr;
         QVector<Heading> headings;
         ViewMode mode = ViewMode::Edit;
         int verticalScroll = 0;
