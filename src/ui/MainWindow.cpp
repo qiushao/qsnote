@@ -238,6 +238,21 @@ QIcon icon(const QString &kind) {
         fillInk();
         painter.drawRoundedRect(QRectF(3, 5, 8, 14), 2, 2);
         painter.drawRoundedRect(QRectF(13, 5, 8, 14), 2, 2);
+    } else if (kind == "minimize") {
+        outline();
+        painter.drawLine(QPointF(5, 17), QPointF(19, 17));
+    } else if (kind == "maximize") {
+        outline();
+        painter.drawRoundedRect(QRectF(5, 5, 14, 14), 1.5, 1.5);
+    } else if (kind == "restore") {
+        outline();
+        painter.drawRoundedRect(QRectF(8.5, 5, 10.5, 10.5), 1.5, 1.5);
+        painter.setBrush(QColor("#ffffff"));
+        painter.drawRoundedRect(QRectF(5, 8.5, 10.5, 10.5), 1.5, 1.5);
+    } else if (kind == "close") {
+        outline();
+        painter.drawLine(QPointF(6, 6), QPointF(18, 18));
+        painter.drawLine(QPointF(18, 6), QPointF(6, 18));
     } else {
         outline();
         painter.drawRoundedRect(QRectF(4.5, 1.5, 15, 21), 2.25, 2.25);
@@ -556,6 +571,7 @@ void MainWindow::buildUi() {
     auto *settings = button({}, "settings", headerLeft);
     settings->setProperty("iconButton", true);
     settings->setIcon(icon("settings"));
+    settings->setIconSize(QSize(20, 20));
     settings->setToolTip(tr("设置"));
     settings->setAccessibleName(settings->toolTip());
     headerLeftLayout->addWidget(settings);
@@ -609,19 +625,23 @@ void MainWindow::buildUi() {
     toggleLeft_ = button({}, "toggleLeft", headerRight);
     toggleLeft_->setProperty("iconButton", true);
     toggleLeft_->setIcon(icon("left"));
+    toggleLeft_->setIconSize(QSize(20, 20));
     toggleLeft_->setToolTip(tr("收起/展开笔记本栏"));
     toggleLeft_->setAccessibleName(toggleLeft_->toolTip());
     headerRightLayout->addWidget(toggleLeft_);
     toggleRight_ = button({}, "toggleRight", headerRight);
     toggleRight_->setProperty("iconButton", true);
     toggleRight_->setIcon(icon("right"));
+    toggleRight_->setIconSize(QSize(20, 20));
     toggleRight_->setToolTip(tr("收起/展开右侧栏"));
     toggleRight_->setAccessibleName(toggleRight_->toolTip());
     headerRightLayout->addWidget(toggleRight_);
-    const QList<QPair<QString, QString>> windowButtons = {{"–", "windowMinimize"}, {"□", "windowMaximize"}, {"×", "windowClose"}};
+    const QList<QPair<QString, QString>> windowButtons = {{"minimize", "windowMinimize"}, {"maximize", "windowMaximize"}, {"close", "windowClose"}};
     for (const auto &entry: windowButtons) {
-        auto *windowButton = button(entry.first, entry.second, headerRight);
+        auto *windowButton = button({}, entry.second, headerRight);
         windowButton->setProperty("windowButton", true);
+        windowButton->setIcon(icon(entry.first));
+        windowButton->setIconSize(QSize(20, 20));
         windowButton->setToolTip(entry.second == "windowMinimize" ? tr("最小化") : entry.second == "windowMaximize" ? tr("最大化") : tr("关闭"));
         windowButton->setAccessibleName(windowButton->toolTip());
         headerRightLayout->addWidget(windowButton);
@@ -1674,7 +1694,7 @@ void MainWindow::changeEvent(QEvent *event) {
     QMainWindow::changeEvent(event);
     if (event->type() == QEvent::WindowStateChange) updateResizeHandles();
     if (event->type() == QEvent::WindowStateChange && maximize_) {
-        maximize_->setText(isMaximized() ? "❐" : "□");
+        maximize_->setIcon(icon(isMaximized() ? "restore" : "maximize"));
         maximize_->setToolTip(isMaximized() ? tr("还原") : tr("最大化"));
         maximize_->setAccessibleName(maximize_->toolTip());
     }
