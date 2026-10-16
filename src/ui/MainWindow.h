@@ -63,7 +63,7 @@ private:
     void createNotebook();
     void openNotebook();
     void closeNotebook();
-    void createNote(const QString &parentId, bool folder);
+    void createNote(const QString &parentId, bool folder, const QString &category = {});
     static QStringList siteCategories(const Notebook &book);
     void showTreeMenu(const QPoint &position);
     void openNote(const QString &id);

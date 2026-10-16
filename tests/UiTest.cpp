@@ -1698,7 +1698,7 @@ st->e
             });
             QTest::mouseClick(window.findChild<QPushButton *>("newNotebook"), Qt::LeftButton);
             QCOMPARE(window.findChild<QComboBox *>("notebooks")->count(), type + 1);
-            QCOMPARE(window.findChild<QTreeWidget *>("noteTree")->topLevelItemCount(), type == 3 ? 2 : 0);
+            QCOMPARE(window.findChild<QTreeWidget *>("noteTree")->topLevelItemCount(), type == 3 ? 2 : type == 1 ? 1 : 0);
             QCOMPARE(window.findChild<QPushButton *>("siteConfig")->isVisible(), type == 1);
             QCOMPARE(window.findChild<QPushButton *>("exportNotebook")->isVisible(), type == 1 || type == 2);
         }
@@ -2604,6 +2604,65 @@ st->e
         QVERIFY(QString::fromUtf8(book.readAll()).contains("章节正文"));
     }
 
+    void siteCategoryTreeCreation() {
+        NotebookStore fixture;
+        fixture.notebooks.append({"site", "分类站点", "site", {}, {}, fixturePath("category-tree")});
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.resize(1280, 800);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *tree = window.findChild<QTreeWidget *>("noteTree");
+        const auto runAction = [&window, tree](QTreeWidgetItem *item, const QString &name, const std::function<void()> &fillDialog) {
+            QTimer::singleShot(20, &window, [name, fillDialog] {
+                auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+                QVERIFY(menu);
+                const auto close = qScopeGuard([menu] { menu->close(); });
+                for (auto *action: menu->actions()) {
+                    if (action->text() != name) continue;
+                    QTimer::singleShot(20, menu, fillDialog);
+                    QTest::mouseClick(menu, Qt::LeftButton, Qt::NoModifier, menu->actionGeometry(action).center());
+                    return;
+                }
+                QFAIL("Missing site context action");
+            });
+            emit tree->customContextMenuRequested(item ? tree->visualItemRect(item).center() : QPoint(20, tree->height() - 20));
+        };
+        runAction(nullptr, "新建分类", [] {
+            auto *dialog = qobject_cast<QInputDialog *>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            dialog->setTextValue("New category");
+            dialog->accept();
+        });
+        auto groups = tree->findItems("New category（0）", Qt::MatchExactly);
+        QCOMPARE(groups.size(), 1);
+        runAction(groups.first(), "新建文章", [] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            const auto close = qScopeGuard([dialog] { dialog->accept(); });
+            QCOMPARE(dialog->findChild<QComboBox *>()->currentText(), QString("New category"));
+            dialog->findChild<QLineEdit *>()->setText("分类文章");
+        });
+        groups = tree->findItems("New category（1）", Qt::MatchExactly);
+        QCOMPARE(groups.size(), 1);
+        QCOMPARE(groups.first()->childCount(), 1);
+        QCOMPARE(groups.first()->child(0)->text(0), QString("分类文章"));
+        Notebook restored;
+        QVERIFY2(NotebookStore::readNotebook(fixturePath("category-tree"), restored, &error), qPrintable(error));
+        QCOMPARE(restored.notes.size(), 1);
+        QCOMPARE(restored.notes.first().metadata["category"].toString(), QString("New category"));
+        QVERIFY(restored.notes.first().parentId.isEmpty());
+        QVERIFY(QFileInfo::exists(restored.path + '/' + restored.notes.first().path));
+        auto *groupBy = window.findChild<QComboBox *>("groupBy");
+        groupBy->setCurrentIndex(1);
+        QVERIFY(tree->findItems("default（0）", Qt::MatchExactly).isEmpty());
+        groupBy->setCurrentIndex(0);
+        QCOMPARE(tree->findItems("default（0）", Qt::MatchExactly).size(), 1);
+        MainWindow reopened;
+        QCOMPARE(reopened.findChild<QTreeWidget *>("noteTree")->findItems("default（0）", Qt::MatchExactly).size(), 1);
+    }
+
     void siteCategoryManagement() {
         NotebookStore fixture;
         Notebook site{"site", "分类站点", "site", {}, {{"categories", QJsonArray{"Empty"}}}, fixturePath("categories")};
@@ -2723,8 +2782,10 @@ st->e
         QVERIFY(!QDir(site.path + "/source/_posts/Used").exists());
         QVERIFY(!QDir(site.path + "/source/_drafts/Renamed").exists());
         auto *tree = window.findChild<QTreeWidget *>("noteTree");
-        QCOMPARE(tree->topLevelItemCount(), 1);
-        QVERIFY(tree->topLevelItem(0)->text(0).startsWith("default"));
+        QCOMPARE(tree->topLevelItemCount(), 3);
+        QCOMPARE(tree->topLevelItem(0)->text(0), QString("default（2）"));
+        QCOMPARE(tree->topLevelItem(1)->text(0), QString("Empty（0）"));
+        QCOMPARE(tree->topLevelItem(2)->text(0), QString("Added（0）"));
     }
 
     void sitePublishSettings() {

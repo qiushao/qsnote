@@ -1450,6 +1450,7 @@ void MainWindow::refreshTree() {
                     auto *groupItem = new QTreeWidgetItem(tree_);
                     groupItem->setIcon(0, icon("folder"));
                     groupItem->setData(0, Qt::UserRole, "group:" + group);
+                    if (groupBy_->currentIndex() == 0) groupItem->setData(0, Qt::UserRole + 4, group);
                     nodes.insert(group, groupItem);
                 }
                 nodes[group]->addChild(item);
@@ -1462,6 +1463,15 @@ void MainWindow::refreshTree() {
             if (note.id == currentNoteId()) tree_->setCurrentItem(item);
         }
         ++matches;
+    }
+    if (book->type == "site" && query.isEmpty() && groupBy_->currentIndex() == 0) {
+        for (const auto &category: siteCategories(*book)) {
+            if (nodes.contains(category)) continue;
+            auto *item = new QTreeWidgetItem(tree_, {category + QStringLiteral("（0）")});
+            item->setIcon(0, icon("folder"));
+            item->setData(0, Qt::UserRole, "group:" + category);
+            item->setData(0, Qt::UserRole + 4, category);
+        }
     }
     if (book->type != "site" && query.isEmpty()) {
         for (const auto &note: book->notes) {
@@ -2225,7 +2235,7 @@ QStringList MainWindow::siteCategories(const Notebook &book) {
 }
 
 
-void MainWindow::createNote(const QString &parentId, bool folder) {
+void MainWindow::createNote(const QString &parentId, bool folder, const QString &category) {
     auto *book = store_.notebook(currentNotebookId_);
     if (!book) return;
     if (book->type == "site") {
@@ -2237,6 +2247,7 @@ void MainWindow::createNote(const QString &parentId, bool folder) {
         layout->addRow(tr("名称："), titleInput);
         auto *categoryInput = new QComboBox(&dialog);
         categoryInput->addItems(siteCategories(*book));
+        if (!category.isEmpty()) categoryInput->setCurrentText(category);
         layout->addRow(tr("分类："), categoryInput);
         auto *tagsInput = new QLineEdit(&dialog);
         tagsInput->setPlaceholderText(tr("逗号分隔"));
@@ -2308,9 +2319,10 @@ void MainWindow::showTreeMenu(const QPoint &position) {
         return;
     }
     if (book && (!note || note->folder)) {
+        const auto category = item ? item->data(0, Qt::UserRole + 4).toString() : QString();
         menu.addAction(book->type == "site" ? tr("新建文章") : book->type == "ebook" ? tr("添加章节")
                                                                                  : tr("新建笔记"),
-                       this, [this, id, note] { createNote(note ? id : QString(), false); });
+                       this, [this, id, note, category] { createNote(note ? id : QString(), false, category); });
         if (book->type == "normal") menu.addAction(tr("新建文件夹"), this, [this, id, note] { createNote(note ? id : QString(), true); });
         if (book->type == "site") {
             menu.addAction(tr("新建分类"), this, [this, book] {
@@ -2324,6 +2336,7 @@ void MainWindow::showTreeMenu(const QPoint &position) {
                 categories.append(name);
                 book->config["categories"] = categories;
                 save();
+                refreshTree();
             });
             menu.addAction(tr("站点配置"), this, &MainWindow::showSiteConfig);
         }
