@@ -96,6 +96,7 @@ private:
     void exportNotebook();
     bool save();
     QString currentNoteId() const;
+    QString noteDirectory(const QString &id);
     bool generateSite(const Notebook &book);
 
     QSystemTrayIcon *tray_ = nullptr;

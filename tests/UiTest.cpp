@@ -430,6 +430,80 @@ st->e
         QVERIFY(!editor.getText().contains("data:image"));
     }
 
+    void localImagesInEditorAndReader() {
+        NotebookStore fixture;
+        const QString markdown = "# Local image\n\n![local](assets/image.png)\n";
+        for (const auto &id: {QString("one"), QString("two")}) {
+            fixture.notebooks.append({id, id, "normal", {{"folder-" + id, {}, "图片 文件夹", {}, true, {}, {}},
+                                      {id, "folder-" + id, "Image.md", markdown, false, {}, {}}},
+                                      {}, fixturePath("local images/" + id)});
+        }
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        for (int index = 0; index < fixture.notebooks.size(); ++index) {
+            const auto &book = fixture.notebooks.at(index);
+            const auto directory = QFileInfo(book.path + '/' + book.notes.last().path).absolutePath();
+            QVERIFY(QDir(directory).mkpath("assets"));
+            QImage image(30 + index * 10, 20, QImage::Format_RGB32);
+            image.fill(index == 0 ? Qt::red : Qt::blue);
+            QVERIFY(image.save(directory + "/assets/image.png"));
+        }
+        MainWindow window;
+        window.resize(1280, 800);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *books = window.findChild<QComboBox *>("notebooks");
+        auto *tree = window.findChild<QTreeWidget *>("noteTree");
+        auto *preview = window.findChild<MarkdownPreview *>("preview");
+        for (int index: {0, 1, 0}) {
+            books->setCurrentIndex(index);
+            openTreeNote(tree, tree->topLevelItem(0)->child(0));
+            window.findChild<QPushButton *>("editMode")->click();
+            auto *editor = window.findChild<MarkdownEditor *>("markdownEditor");
+            QVERIFY(editor);
+            QTRY_COMPARE_WITH_TIMEOUT(previewImages(*editor, vte::PreviewData::ImageLink).size(), 1, 5000);
+            window.findChild<QPushButton *>("previewMode")->click();
+            QTRY_COMPARE_WITH_TIMEOUT(javascript(*preview, "document.querySelector('.qsnote-article img')?.naturalWidth").toInt(),
+                                     30 + index * 10, 5000);
+            QCOMPARE(editor->getText(), markdown);
+            QVERIFY(!editor->document()->isUndoAvailable());
+        }
+        const auto oldDirectory = window.findChild<MarkdownEditor *>("markdownEditor")->getBasePath();
+        const int previousRevision = preview->revision();
+        QTimer::singleShot(20, &window, [&window] {
+            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            QVERIFY(menu);
+            const auto close = qScopeGuard([menu] { menu->close(); });
+            for (auto *action: menu->actions()) {
+                if (action->text() != "重命名") continue;
+                QTimer::singleShot(20, &window, [] {
+                    auto *dialog = qobject_cast<QInputDialog *>(QApplication::activeModalWidget());
+                    QVERIFY(dialog);
+                    dialog->setTextValue("Moved folder");
+                    dialog->accept();
+                });
+                action->trigger();
+                return;
+            }
+            QFAIL("Missing folder rename action");
+        });
+        emit tree->customContextMenuRequested(tree->visualItemRect(tree->topLevelItem(0)).center());
+        QVERIFY(!QFileInfo::exists(oldDirectory));
+        Notebook restored;
+        QVERIFY2(NotebookStore::readNotebook(fixture.notebooks.first().path, restored, &error), qPrintable(error));
+        const auto directory = QFileInfo(restored.path + '/' + restored.notes.last().path).absolutePath();
+        auto *editor = window.findChild<MarkdownEditor *>("markdownEditor");
+        QCOMPARE(editor->getBasePath(), directory);
+        QVERIFY(QFileInfo::exists(directory + "/assets/image.png"));
+        QVERIFY(preview->revision() > previousRevision);
+        QTRY_COMPARE_WITH_TIMEOUT(preview->renderedRevision(), preview->revision(), 5000);
+        QTRY_COMPARE_WITH_TIMEOUT(javascript(*preview, "document.querySelector('.qsnote-article img')?.naturalWidth").toInt(), 30, 5000);
+        window.findChild<QPushButton *>("editMode")->click();
+        QTRY_COMPARE_WITH_TIMEOUT(previewImages(*editor, vte::PreviewData::ImageLink).size(), 1, 5000);
+        QCOMPARE(editor->getText(), markdown);
+        QVERIFY(!editor->document()->isUndoAvailable());
+    }
+
     void fencedCodeSyntaxHighlighting_data() { // NOLINT(readability-identifier-naming): Qt Test data slot.
         QTest::addColumn<QString>("language");
         QTest::addColumn<QString>("code");

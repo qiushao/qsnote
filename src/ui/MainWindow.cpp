@@ -47,6 +47,7 @@
 #include <QPainterPath>
 #include <vtextedit/vtextedit.h>
 #include <vtextedit/vmarkdowneditor.h>
+#include <vtextedit/previewmgr.h>
 #include <vtextedit/texteditutils.h>
 #include <QPushButton>
 #include <QPlainTextEdit>
@@ -767,7 +768,7 @@ void MainWindow::buildUi() {
     previewTimer_->setSingleShot(true);
     previewTimer_->setInterval(180);
     connect(previewTimer_, &QTimer::timeout, this, [this] {
-        if (const auto *note = store_.note(currentNoteId())) preview_->setMarkdown(note->content, note->id);
+        if (const auto *note = store_.note(currentNoteId())) preview_->setMarkdown(note->content, note->id, noteDirectory(note->id));
     });
     connect(preview_, &MarkdownPreview::sourceLineChanged, this, [this](int line) {
         if (!editor_ || !preview_->matchesDocument(editor_->toPlainText(), currentNoteId())) return;
@@ -1503,6 +1504,13 @@ QString MainWindow::currentNoteId() const {
     return tabs_->tabData(tabs_->currentIndex()).toString();
 }
 
+QString MainWindow::noteDirectory(const QString &id) {
+    const auto *note = store_.note(id);
+    const auto *book = store_.owner(id);
+    if (!note || !book) return {};
+    return note->path.isEmpty() ? book->path : QFileInfo(book->path + '/' + note->path).absolutePath();
+}
+
 void MainWindow::openNote(const QString &id) {
     const auto *owner = store_.owner(id);
     if (owner && owner->type == "todo") return;
@@ -1569,6 +1577,7 @@ void MainWindow::activateEditor(const QString &id) {
             }
             if (activeEditorId_ == id) refreshOutline();
         });
+        documentEditor->setBasePath(noteDirectory(id));
         documentEditor->setText(store_.note(id)->content);
         connect(textEdit, &QTextEdit::textChanged, this, [this, id, textEdit] {
             auto *note = store_.note(id);
@@ -1687,7 +1696,7 @@ void MainWindow::setViewMode(ViewMode mode) {
     editorSessions_[activeEditorId_].mode = mode;
     preview_->setVisible(mode != ViewMode::Edit);
     pages_->setCurrentIndex(1);
-    if (mode != ViewMode::Edit) preview_->setMarkdown(note->content, note->id);
+    if (mode != ViewMode::Edit) preview_->setMarkdown(note->content, note->id, noteDirectory(note->id));
     else previewTimer_->stop();
     if (mode == ViewMode::Split && oldMode != ViewMode::Split) {
         editorSplitter_->setSizes({editorSplitter_->width() / 2, editorSplitter_->width() / 2});
@@ -1849,6 +1858,15 @@ bool MainWindow::save() {
     if (!store_.save(&error)) {
         QMessageBox::warning(this, tr("无法保存笔记"), error);
         return false;
+    }
+    for (auto it = editorSessions_.cbegin(); it != editorSessions_.cend(); ++it) {
+        const auto directory = noteDirectory(it.key());
+        if (it->editor->getBasePath() == directory) continue;
+        it->editor->setBasePath(directory);
+        it->editor->getPreviewMgr()->refreshPreview();
+    }
+    if (viewMode_ != ViewMode::Edit) {
+        if (const auto *note = store_.note(currentNoteId())) preview_->setMarkdown(note->content, note->id, noteDirectory(note->id));
     }
     for (int index = 0; index < tabs_->count(); ++index) {
         if (const auto *note = store_.note(tabs_->tabData(index).toString())) {

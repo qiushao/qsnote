@@ -122,6 +122,19 @@
                 if (request.reset) collapsedSections.clear();
                 else if (content.querySelector('.vx-heading-fold-toggle')) collapsedSections = foldedHeadings();
                 const root = qsnoteArticle.markdown(request.text);
+                if (request.baseUrl) {
+                    await Promise.all(Array.from(root.querySelectorAll('img[src]'), async image => {
+                        try {
+                            const url = new URL(image.getAttribute('src'), request.baseUrl);
+                            if (url.protocol === 'file:') {
+                                const data = await new Promise(resolve => bridge.localImage(url.href, resolve));
+                                if (data) image.src = data;
+                                else image.removeAttribute('src');
+                            } else image.src = url.href;
+                        } catch (_) { /* Keep invalid image links as written. */ }
+                    }));
+                }
+                if (request.revision !== requestedRevision) continue;
                 ignoreScroll = true;
                 content.replaceChildren(root);
                 lineCount = request.text.split('\n').length;
@@ -184,10 +197,10 @@
     });
     new QWebChannel(qt.webChannelTransport, channel => {
         bridge = channel.objects.previewBridge;
-        bridge.documentChanged.connect((text, generation, reset) => {
+        bridge.documentChanged.connect((text, generation, reset, baseUrl) => {
             requestedRevision = generation;
             if (reset) requestedLine = 0;
-            pending = {text, revision: generation, reset: reset || !!pending?.reset};
+            pending = {text, revision: generation, reset: reset || !!pending?.reset, baseUrl};
             renderLatest();
         });
         bridge.scrollRequested.connect((generation, line) => {

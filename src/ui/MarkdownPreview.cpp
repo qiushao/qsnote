@@ -9,6 +9,9 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFontDatabase>
+#include <QFile>
+#include <QImageReader>
+#include <QMimeDatabase>
 #include <QFormLayout>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -45,6 +48,17 @@ protected:
 };
 }// namespace
 
+QString PreviewBridge::localImage(const QString &url) { // NOLINT(readability-convert-member-functions-to-static): WebChannel slot.
+    const QUrl location(url);
+    if (!location.isLocalFile()) return {};
+    const auto path = location.toLocalFile();
+    if (!QImageReader(path).canRead()) return {};
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return {};
+    const auto mime = QMimeDatabase().mimeTypeForFile(path, QMimeDatabase::MatchContent).name();
+    return "data:" + mime + ";base64," + QString::fromLatin1(file.readAll().toBase64());
+}
+
 void PreviewBridge::renderPlantUml(const QString &source, int revision, int id) {
     auto *renderer = new PlantUmlRenderer(this);
     connect(renderer, &PlantUmlRenderer::finished, this, [this, renderer, revision, id](const QByteArray &png, const QString &error) {
@@ -67,7 +81,7 @@ MarkdownPreview::MarkdownPreview(QWidget *parent) : QWebEngineView(parent), brid
         ready_ = true;
         applyReaderSettings();
         setHeadingFoldingEnabled(QSettings().value("reader/headingFolding", false).toBool());
-        emit bridge_->documentChanged(markdown_, revision_, true);
+        emit bridge_->documentChanged(markdown_, revision_, true, baseUrl_);
         if (pendingLine_ >= 0) scrollToLine(pendingLine_);
     });
     connect(bridge_, &PreviewBridge::renderedReceived, this, [this](int revision) {
@@ -318,20 +332,22 @@ void MarkdownPreview::hideEvent(QHideEvent *event) {
     QWebEngineView::hideEvent(event);
 }
 
-void MarkdownPreview::setMarkdown(const QString &markdown, const QString &documentId) {
-    if (loading_ && markdown == markdown_ && documentId == documentId_) return;
+void MarkdownPreview::setMarkdown(const QString &markdown, const QString &documentId, const QString &directory) {
+    const auto baseUrl = directory.isEmpty() ? QString() : QUrl::fromLocalFile(directory + '/').toString(QUrl::FullyEncoded);
+    if (loading_ && markdown == markdown_ && documentId == documentId_ && baseUrl == baseUrl_) return;
     if (headingDialog_) headingDialog_->close();
     const bool reset = documentId != documentId_;
     if (reset) pendingLine_ = -1;
     markdown_ = markdown;
     documentId_ = documentId;
+    baseUrl_ = baseUrl;
     ++revision_;
     ++findRequest_;
     if (!loading_) {
         loading_ = true;
         load(QUrl("qrc:/web/preview.html"));
     } else if (ready_) {
-        emit bridge_->documentChanged(markdown_, revision_, reset);
+        emit bridge_->documentChanged(markdown_, revision_, reset, baseUrl_);
     }
 }
 
