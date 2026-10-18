@@ -552,11 +552,11 @@ void MainWindow::buildUi() {
     auto *header = new QWidget(root);
     header_ = header;
     header->setObjectName("header");
-    header->setMinimumHeight(56);
+    header->setMinimumHeight(42);
     header->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     header->installEventFilter(this);
     auto *headerLayout = new QGridLayout(header);
-    headerLayout->setContentsMargins(16, 10, 16, 10);
+    headerLayout->setContentsMargins(16, 3, 16, 3);
     headerLayout->setSpacing(8);
     headerLayout->setColumnStretch(0, 1);
     headerLayout->setColumnStretch(2, 1);
@@ -900,6 +900,7 @@ void MainWindow::buildUi() {
 
 void MainWindow::buildToolbar() {
     auto *layout = new FlowLayout(toolbar_, 8, 3);
+    layout->setContentsMargins(8, 1, 8, 1);
     using Type = vte::TypeAction;
     struct Tool {
         QString icon;
@@ -1437,7 +1438,7 @@ void MainWindow::refreshTree() {
             auto *item = new QTreeWidgetItem;
             item->setText(0, titles.value(note.id));
             if (!note.folder) item->setFlags(item->flags() & ~Qt::ItemIsDropEnabled);
-            item->setIcon(0, icon(note.folder ? "folder" : book->type));
+            if (book->type != "ebook") item->setIcon(0, icon(note.folder ? "folder" : book->type));
             item->setData(0, Qt::UserRole, note.id);
             item->setToolTip(0, note.title);
             if (!query.isEmpty()) {

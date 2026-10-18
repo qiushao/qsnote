@@ -64,7 +64,7 @@ QTabBar::tab:hover { background: #eef2f8; color: #526176; }
 QTabBar::tab:selected { background: #ffffff; color: #315fb8; border-color: #dfe5ed; }
 QTabBar::close-button { image: url(:/icons/close.xpm); subcontrol-position: right; width: 16px; height: 16px; border-radius: 4px; }
 QTabBar::close-button:hover { background: #e8eef7; }
-QTextEdit#editor, QTextEdit#inactiveEditor { border: none; background: #ffffff; padding: 20px 24px; selection-background-color: #e8effc; }
+QTextEdit#editor, QTextEdit#inactiveEditor { border: none; background: #ffffff; padding: 2px 2px; selection-background-color: #e8effc; }
 QTextBrowser { border: none; background: #ffffff; padding: 20px 24px; selection-background-color: #e8effc; }
 QScrollBar:vertical { background: transparent; width: 8px; margin: 0; }
 QScrollBar:horizontal { background: transparent; height: 8px; margin: 0; }
