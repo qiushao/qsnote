@@ -65,7 +65,7 @@ if (QSNOTE_BUILD_TESTS)
             third_party/vnote-web.qrc
     )
     target_include_directories(qsnote_site_tests PRIVATE src)
-    target_link_libraries(qsnote_site_tests PRIVATE Qt6::Core Qt6::Test Qt6::WebEngineWidgets Qt6::Xml)
+    target_link_libraries(qsnote_site_tests PRIVATE Qt6::Core Qt6::Test Qt6::WebEngineWidgets Qt6::Xml VTextEdit)
     add_test(NAME qsnote_site COMMAND qsnote_site_tests)
     set_tests_properties(qsnote_site PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu")
     add_executable(qsnote_ebook_tests
@@ -82,7 +82,7 @@ if (QSNOTE_BUILD_TESTS)
             src/resources/ui.qrc
     )
     target_include_directories(qsnote_ebook_tests PRIVATE src)
-    target_link_libraries(qsnote_ebook_tests PRIVATE Qt6::Widgets Qt6::GuiPrivate Qt6::Test Qt6::WebEngineWidgets Qt6::Network Qt6::Xml)
+    target_link_libraries(qsnote_ebook_tests PRIVATE Qt6::Widgets Qt6::GuiPrivate Qt6::Test Qt6::WebEngineWidgets Qt6::Network Qt6::Xml VTextEdit)
     add_test(NAME qsnote_ebook COMMAND qsnote_ebook_tests)
     set_tests_properties(qsnote_ebook PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software;QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu")
     add_executable(qsnote_publish_tests

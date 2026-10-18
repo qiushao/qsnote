@@ -462,6 +462,151 @@ st->e
         QVERIFY(QFile::exists(directory.filePath("resources/images/first image.png")));
     }
 
+    void movedNotesKeepInsertedImages_data() { // NOLINT(readability-identifier-naming): Qt Test data slot.
+        QTest::addColumn<QString>("kind");
+        QTest::addColumn<bool>("collision");
+        QTest::newRow("normal") << QString("normal") << false;
+        QTest::newRow("normal-collision") << QString("normal") << true;
+        QTest::newRow("ebook-indent") << QString("ebook") << false;
+        QTest::newRow("site-category") << QString("site") << false;
+        QTest::newRow("publish-draft") << QString("draft") << false;
+    }
+
+    void movedNotesKeepInsertedImages() {
+        QFETCH(QString, kind);
+        QFETCH(bool, collision);
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const bool site = kind == "site" || kind == "draft";
+        NotebookStore store;
+        store.notebooks.append({"book", "Book", site ? "site" : kind,
+            {{"parent", {}, "Folder", {}, kind == "normal"}, {"note", {}, "Note", {}, false},
+             {"shared", {}, "Shared", {}, false}}, {}, directory.filePath("book")});
+        auto &book = store.notebooks.first();
+        auto &note = book.notes[1];
+        if (kind == "draft") {
+            note.metadata["draft"] = true;
+            book.notes[2].metadata["draft"] = true;
+        }
+        QString error;
+        QVERIFY2(store.save(&error), qPrintable(error));
+        const auto oldDirectory = QFileInfo(book.path + '/' + note.path).absolutePath();
+        MarkdownEditor editor;
+        editor.setBasePath(oldDirectory);
+        QImage image(12, 9, QImage::Format_RGB32);
+        image.fill(Qt::green);
+        const auto source = directory.filePath("图 片.png");
+        QVERIFY(image.save(source));
+        auto *mime = new QMimeData;
+        mime->setUrls({QUrl::fromLocalFile(source)});
+        QApplication::clipboard()->setMimeData(mime);
+        const auto clearClipboard = qScopeGuard([] { QApplication::clipboard()->clear(); });
+        editor.getTextEdit()->paste();
+        const auto original = editor.getText();
+        QVERIFY(original.startsWith("![图 片](resources/images/"));
+        const auto code = "\n```markdown\n" + original + "\n```\n";
+        note.content = original + '\n' + original + code;
+        note.contentDirty = true;
+        book.notes[2].content = original;
+        book.notes[2].contentDirty = true;
+        QVERIFY2(store.save(&error), qPrintable(error));
+
+        QString newDirectory;
+        if (site) {
+            note.metadata["category"] = "New category";
+            note.metadata["draft"] = false;
+            newDirectory = book.path + "/source/_posts/New category";
+        } else {
+            note.parentId = "parent";
+            newDirectory = book.path + "/Folder";
+        }
+        QImage other(12, 9, QImage::Format_RGB32);
+        other.fill(Qt::red);
+        if (collision) {
+            QVERIFY(QDir().mkpath(newDirectory + "/resources/images"));
+            QVERIFY(other.save(newDirectory + "/resources/images/图 片.png"));
+        }
+        QVERIFY2(store.save(&error), qPrintable(error));
+        QCOMPARE(QFileInfo(book.path + '/' + note.path).absolutePath(), newDirectory);
+        const auto url = note.content.section("](", 1).section(')', 0, 0);
+        const auto relative = QUrl::fromPercentEncoding(url.toUtf8());
+        QCOMPARE(QImage(newDirectory + '/' + relative), image);
+        QCOMPARE(QImage(oldDirectory + "/resources/images/图 片.png"), image);
+        QCOMPARE(book.notes[2].content, original);
+        QVERIFY(note.content.endsWith(code));
+        QCOMPARE(note.content.section('\n', 0, 0), note.content.section('\n', 1, 1));
+        if (collision) {
+            QVERIFY(relative != "resources/images/图 片.png");
+            QCOMPARE(QImage(newDirectory + "/resources/images/图 片.png"), other);
+        }
+        const auto migrated = note.content;
+        QVERIFY2(store.save(&error), qPrintable(error));
+        QCOMPARE(note.content, migrated);
+        QCOMPARE(QDir(newDirectory + "/resources/images").entryList(QDir::Files).size(), collision ? 2 : 1);
+        Notebook restored;
+        QVERIFY2(NotebookStore::readNotebook(book.path, restored, &error), qPrintable(error));
+        QCOMPARE(restored.notes[1].content, migrated);
+        if (site) {
+            QVERIFY2(StaticSite::generate(book, &error), qPrintable(error));
+            QVERIFY(QFileInfo::exists(book.path + "/public/assets/posts/New category/" + relative));
+        }
+    }
+
+    void movedImageCollisionUpdatesOpenEditor() {
+        NotebookStore fixture;
+        const QString markdown = "![image](resources/images/image.png)";
+        fixture.notebooks.append({"book", "Book", "ebook",
+            {{"parent", {}, "Parent", {}, false}, {"note", {}, "Note", markdown, false}}, {}, fixturePath("moving-images")});
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        const auto root = fixture.notebooks.first().path;
+        QImage original(12, 9, QImage::Format_RGB32);
+        original.fill(Qt::green);
+        QImage existing(12, 9, QImage::Format_RGB32);
+        existing.fill(Qt::red);
+        QVERIFY(QDir().mkpath(root + "/resources/images"));
+        QVERIFY(QDir().mkpath(root + "/Parent/resources/images"));
+        QVERIFY(original.save(root + "/resources/images/image.png"));
+        QVERIFY(existing.save(root + "/Parent/resources/images/image.png"));
+        MainWindow window;
+        window.resize(1280, 800);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *tree = window.findChild<QTreeWidget *>("noteTree");
+        openTreeNote(tree, tree->topLevelItem(1));
+        auto *editor = window.findChild<MarkdownEditor *>("markdownEditor");
+        QVERIFY(editor);
+        auto selection = editor->getTextEdit()->textCursor();
+        selection.setPosition(2);
+        selection.setPosition(5, QTextCursor::KeepAnchor);
+        editor->getTextEdit()->setTextCursor(selection);
+        QTimer::singleShot(20, &window, [] {
+            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            QVERIFY(menu);
+            const auto close = qScopeGuard([menu] { menu->close(); });
+            for (auto *action: menu->actions()) {
+                if (action->text() == "缩进为子章节") {
+                    action->trigger();
+                    return;
+                }
+            }
+            QFAIL("Missing chapter indent action");
+        });
+        emit tree->customContextMenuRequested(tree->visualItemRect(tree->topLevelItem(1)).center());
+        QCOMPARE(editor->getBasePath(), root + "/Parent");
+        QCOMPARE(editor->getText(), QString("![image](resources/images/image-1.png)"));
+        QCOMPARE(editor->getTextEdit()->textCursor().anchor(), 2);
+        QCOMPARE(editor->getTextEdit()->textCursor().position(), 5);
+        editor->getTextEdit()->moveCursor(QTextCursor::End);
+        editor->getTextEdit()->insertPlainText("\nAfter move");
+        QTest::keyClick(&window, Qt::Key_S, Qt::ControlModifier);
+        NotebookStore saved;
+        QVERIFY2(saved.load(&error), qPrintable(error));
+        QCOMPARE(saved.note("note")->content, editor->getText());
+        QCOMPARE(QImage(root + "/Parent/resources/images/image-1.png"), original);
+        QCOMPARE(QImage(root + "/Parent/resources/images/image.png"), existing);
+    }
+
     void localImagesInEditorAndReader() {
         NotebookStore fixture;
         const QString markdown = "# Local image\n\n![local](assets/image.png)\n";

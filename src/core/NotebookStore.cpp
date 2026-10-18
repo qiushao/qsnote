@@ -11,8 +11,10 @@
 #include <QSet>
 #include <QStandardPaths>
 #include <QUuid>
+#include <QUrl>
 #include <algorithm>
 #include <functional>
+#include <vtextedit/markdownutils.h>
 
 namespace {
 QString storageDir() { return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation); }
@@ -30,6 +32,42 @@ bool writeFile(const QString &path, const QByteArray &data, QString *error) {
     if (!file.open(QIODevice::WriteOnly) || file.write(data) == -1 || !file.commit()) {
         *error = file.errorString();
         return false;
+    }
+    return true;
+}
+
+bool copyInsertedImages(QString &content, const QString &oldDirectory, const QString &newDirectory, QString *error) {
+    if (oldDirectory == newDirectory) return true;
+    const auto images = vte::MarkdownUtils::fetchImageLinks(content, oldDirectory, vte::MarkdownLink::LocalRelativeInternal);
+    for (const auto &image: images) {
+        const QFileInfo sourceInfo(image.m_path);
+        // Images inserted by the editor live directly in resources/images. Use
+        // parser spans so code examples and unrelated links remain untouched.
+        if (!image.hasUrlSpan() || !image.m_exists
+            || sourceInfo.absolutePath() != QDir(oldDirectory).filePath("resources/images")) continue;
+        QFile source(image.m_path);
+        if (!source.open(QIODevice::ReadOnly)) {
+            *error = source.fileName() + ": " + source.errorString();
+            return false;
+        }
+        const auto bytes = source.readAll();
+        if (source.error() != QFileDevice::NoError) {
+            *error = source.fileName() + ": " + source.errorString();
+            return false;
+        }
+        const QDir destination(QDir(newDirectory).filePath("resources/images"));
+        auto name = sourceInfo.fileName();
+        for (int index = 1; QFileInfo::exists(destination.filePath(name)); ++index) {
+            QFile existing(destination.filePath(name));
+            if (existing.open(QIODevice::ReadOnly) && existing.readAll() == bytes) break;
+            name = sourceInfo.completeBaseName() + '-' + QString::number(index) + '.' + sourceInfo.suffix();
+        }
+        // Keep the source: other notes in the old directory may still use it.
+        if (!QFileInfo::exists(destination.filePath(name)) && !writeFile(destination.filePath(name), bytes, error)) return false;
+        if (name != sourceInfo.fileName()) {
+            const auto url = "resources/images/" + QString::fromLatin1(QUrl::toPercentEncoding(name));
+            content.replace(image.m_urlStart, image.m_urlEnd - image.m_urlStart, url);
+        }
     }
     return true;
 }
@@ -200,9 +238,16 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
         if (!oldPath.isEmpty() && oldPath != expected) {
             const QString oldAbsolute = root.absoluteFilePath(oldPath);
             const QString newAbsolute = root.absoluteFilePath(expected);
+            auto content = note->content;
+            if (!note->folder && !copyInsertedImages(content, QFileInfo(oldAbsolute).absolutePath(),
+                                                     QFileInfo(newAbsolute).absolutePath(), error)) return false;
             if (QFileInfo::exists(oldAbsolute) && (!QDir().mkpath(QFileInfo(newAbsolute).absolutePath()) || !QDir().rename(oldAbsolute, newAbsolute))) {
                 *error = QCoreApplication::translate("NotebookStore", "无法将 %1 移动到 %2").arg(oldAbsolute, newAbsolute);
                 return false;
+            }
+            if (content != note->content) {
+                note->content = content;
+                note->contentDirty = true;
             }
             // 电子书章节附带同名子章节目录；普通笔记本文件夹本身即目录。
             QString oldPrefix = oldPath + "/";

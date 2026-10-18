@@ -1889,6 +1889,18 @@ bool MainWindow::save() {
     }
     for (auto it = editorSessions_.cbegin(); it != editorSessions_.cend(); ++it) {
         const auto directory = noteDirectory(it.key());
+        const auto *note = store_.note(it.key());
+        if (note && it->editor->getText() != note->content) {
+            const auto previous = it->editor->getTextEdit()->textCursor();
+            const int anchor = previous.anchor();
+            const int position = previous.position();
+            it->editor->setText(note->content);
+            auto cursor = it->editor->getTextEdit()->textCursor();
+            const int end = it->editor->document()->characterCount() - 1;
+            cursor.setPosition(qMin(anchor, end));
+            cursor.setPosition(qMin(position, end), QTextCursor::KeepAnchor);
+            it->editor->getTextEdit()->setTextCursor(cursor);
+        }
         if (it->editor->getBasePath() == directory) continue;
         it->editor->setBasePath(directory);
         it->editor->getPreviewMgr()->refreshPreview();
