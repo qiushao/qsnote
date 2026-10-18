@@ -29,6 +29,7 @@ private slots:
         QTest::addColumn<QString>("theme");
         QTest::newRow("pure") << QString("pure");
         QTest::newRow("next") << QString("next");
+        QTest::newRow("yilia") << QString("yilia");
     }
     void generateWithoutExternalPrograms() {
         QFETCH(QString, theme);
@@ -63,13 +64,27 @@ private slots:
         const auto article = read(directory.path() + "/public/article/index.html");
         for (const auto &content: {"<strong>加粗</strong>", "<table>", "language-cpp", "自定义页脚", "作者", "正文标题", "id=\"正文标题\"", "2026-10-09"})
             QVERIFY2(article.contains(content), content);
-        QVERIFY(article.contains(theme == "pure" ? "class=\"main-center\"" : "class=\"main-inner post posts-expand\""));
+        QVERIFY(article.contains(theme == "pure" ? "class=\"main-center\"" : theme == "yilia" ? "class=\"article article-type-post\"" : "class=\"main-inner post posts-expand\""));
         QVERIFY(article.contains(theme == "pure" ? "/blog/css/style.css" : "/blog/css/main.css"));
         // Fingerprints of the original themes' compiled CSS: preserve layout, colors and breakpoints.
         const auto css = read(directory.path() + "/public/css/" + (theme == "pure" ? "style.css" : "main.css"));
         QCOMPARE(QCryptographicHash::hash(css, QCryptographicHash::Sha256).toHex(), theme == "pure"
             ? QByteArray("2aab838134abc02a55c42e3afcee6e867155aca4b0c28c7d66d1e1f74d0b9c10")
+            : theme == "yilia" ? QByteArray("b0d7ccb28e00e916f5b7ea2c3e6c3fa3e204fef3a447f4de8415f8d7c9d869cd")
             : QByteArray("d5d3280e2cb167a84fca9c4459d6a5db0603b2512f201ce85bd79b6148d9d71e"));
+        if (theme == "yilia") {
+            for (const auto &asset: {"js/qsnote-yilia.js", "css/qsnote-yilia.css", "css/fonts/iconfont.8c627f.woff", "theme-THIRD-PARTY-NOTICES.md"})
+                QVERIFY2(!read(directory.path() + "/public/" + asset).isEmpty(), asset);
+            QVERIFY(article.contains("class=\"toc-article\""));
+            QVERIFY(article.contains("class=\"left-col\""));
+            QVERIFY(article.contains("id=\"mobile-nav\""));
+            QVERIFY(!article.contains("{{"));
+            const auto content = QJsonDocument::fromJson(read(directory.path() + "/public/content.json")).object()["posts"].toArray();
+            QCOMPARE(content.size(), 1);
+            QCOMPARE(content.first().toObject()["path"].toString(), QString("article/"));
+            QCOMPARE(content.first().toObject()["tags"].toArray().size(), 2);
+            QVERIFY(read(directory.path() + "/public/archives/index.html").contains("class=\"archives-wrap\""));
+        }
         QVERIFY(!article.contains("PRIVATE-DEPLOY-TOKEN"));
         QVERIFY(!article.contains("new Valine"));
         QVERIFY(read(directory.path() + "/public/links/index.html").contains("https://example.org"));
@@ -89,6 +104,10 @@ private slots:
         QVERIFY2(store.save(&error), qPrintable(error));
         QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
         QVERIFY(read(directory.path() + "/public/about/index.html").contains("Custom about page"));
+        if (theme == "yilia") {
+            QVERIFY(!QFile::exists(directory.path() + "/public/js/qsnote-yilia.js"));
+            QVERIFY(!QFile::exists(directory.path() + "/public/css/qsnote-yilia.css"));
+        }
         QVERIFY(read(directory.path() + "/public/index.html").contains(theme == "pure" ? "class=\"main-inner index posts-expand\"" : "class=\"main-center\""));
         QTemporaryDir exported;
         QVERIFY2(StaticSite::copyDirectory(directory.path() + "/public", exported.path(), &error), qPrintable(error));

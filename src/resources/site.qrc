@@ -58,5 +58,24 @@
     <file>site/next/templates/page.html</file>
     <file>site/next/templates/post.html</file>
     <file>site/next/templates/shell.html</file>
+    <file>site/yilia/LICENSE</file>
+    <file>site/yilia/THIRD-PARTY-NOTICES.md</file>
+    <file>site/yilia/assets/css/fonts/default-skin.b257fa.svg</file>
+    <file>site/yilia/assets/css/fonts/iconfont.16acc2.ttf</file>
+    <file>site/yilia/assets/css/fonts/iconfont.45d7ee.svg</file>
+    <file>site/yilia/assets/css/fonts/iconfont.8c627f.woff</file>
+    <file>site/yilia/assets/css/fonts/iconfont.b322fa.eot</file>
+    <file>site/yilia/assets/css/fonts/tooltip.4004ff.svg</file>
+    <file>site/yilia/assets/css/img/default-skin.png</file>
+    <file>site/yilia/assets/css/img/preloader.gif</file>
+    <file>site/yilia/assets/css/img/scrollbar_arrow.png</file>
+    <file>site/yilia/assets/css/main.css</file>
+    <file>site/yilia/assets/css/qsnote-yilia.css</file>
+    <file>site/yilia/assets/js/qsnote-yilia.js</file>
+    <file>site/yilia/templates/archive.html</file>
+    <file>site/yilia/templates/card.html</file>
+    <file>site/yilia/templates/page.html</file>
+    <file>site/yilia/templates/post.html</file>
+    <file>site/yilia/templates/shell.html</file>
   </qresource>
 </RCC>

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{headTitle}}</title>
+<meta name="description" content="{{description}}">
+<link rel="stylesheet" href="{{root}}css/main.css">
+<link rel="stylesheet" href="{{root}}css/qsnote-yilia.css">
+<script src="{{root}}js/qsnote-yilia.js" defer></script>
+</head>
+<body>
+<div id="container" data-root="{{root}}">
+<div class="left-col"><div class="overlay" style="background:#4d4d4d"></div><div class="intrude-less">
+<header id="header" class="inner header">
+<a href="{{root}}" class="profilepic" aria-label="{{siteTitle}}"></a>
+<h1 class="header-author"><a href="{{root}}">{{siteTitle}}</a></h1>
+<p class="header-subtitle">{{author}}</p><p class="header-subtitle">{{description}}</p>
+<nav class="header-menu"><ul>{{menu}}</ul></nav>
+<nav class="header-smart-menu"><a href="#site-search" class="search-trigger" aria-controls="site-search" aria-expanded="false">所有文章 / 搜索</a></nav>
+</header></div></div>
+<div class="mid-col">
+<nav id="mobile-nav"><div class="overlay"></div>
+<div class="btnctn"><a href="#site-search" class="slider-trigger list search-trigger" aria-label="所有文章 / 搜索" aria-controls="site-search" aria-expanded="false"><i class="icon icon-sort"></i></a></div>
+<div class="intrude-less"><header class="inner header">
+<a href="{{root}}" class="profilepic" aria-label="{{siteTitle}}"></a>
+<h1 class="header-author">{{siteTitle}}</h1><p class="header-subtitle">{{description}}</p>
+<nav class="header-menu"><ul>{{menu}}</ul></nav>
+</header></div></nav>
+<div id="wrapper" class="body-wrap"><div class="menu-l"><div id="js-content" class="content-ll">{{content}}</div></div></div>
+<footer id="footer"><div class="outer"><div id="footer-info"><div class="footer-left">{{footer}}</div><div class="footer-right">Theme <a href="https://github.com/litten/hexo-theme-yilia" rel="noopener" target="_blank">Yilia</a> by Litten</div></div></div></footer>
+</div>
+<aside id="site-search" class="tools-col" aria-hidden="true">
+<div class="tools-wrap"><section class="tools-section tools-section-all">
+<div class="search-wrap"><input class="search-ipt" type="search" aria-label="搜索文章" placeholder="搜索标题、正文或 #标签"><a href="#" class="search-close icon-close icon" aria-label="关闭搜索"></a></div>
+<ul class="search-ul" aria-live="polite"></ul>
+</section></div>
+</aside>
+<aside class="wrap-side-operation"><div class="mod-side-operation">
+<div class="jump-container" id="js-jump-container" hidden><a href="#" class="mod-side-operation__jump-to-top" aria-label="返回顶部"><i class="icon-font icon-back"></i></a></div>
+{{toc}}
+</div></aside>
+</div>
+</body>
+</html>

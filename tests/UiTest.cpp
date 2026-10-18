@@ -231,7 +231,7 @@ st->e
             QCOMPARE(file.write(bytes), bytes.size());
         }
         outputs.append(epubDirectory + "/book.xhtml");
-        for (const auto &theme: {"pure", "next"}) {
+        for (const auto &theme: {"pure", "next", "yilia"}) {
             Notebook site{"site", "网站", "site", {}, {{"theme", theme}, {"domain", "https://example.org/blog/"}}, directory.path() + "/" + theme};
             QVERIFY2(StaticSite::prepare(site, &error), qPrintable(error));
             QFile file(site.path + "/source/_posts/article.md");
@@ -3395,6 +3395,7 @@ st->e
         QTest::addColumn<QString>("theme");
         QTest::newRow("pure") << QString("pure");
         QTest::newRow("next") << QString("next");
+        QTest::newRow("yilia") << QString("yilia");
     }
 
     void siteMetadataConfigAndPreview() {
@@ -3476,6 +3477,7 @@ st->e
             QVERIFY(themes);
             QCOMPARE(themes->currentData().toString(), QString("pure"));
             QVERIFY(themes->findData("next") >= 0);
+            QVERIFY(themes->findData("yilia") >= 0);
             QCOMPARE(themes->findData("stellar"), -1);
             themes->setCurrentIndex(themes->findData(theme));
             QVERIFY(!dialog->findChild<QLineEdit *>("config_token"));
@@ -3515,7 +3517,7 @@ st->e
             QSignalSpy loaded(browser, &QWebEngineView::loadFinished);
             if (browser->title().isEmpty()) QVERIFY(loaded.wait(15000));
             QTRY_VERIFY_WITH_TIMEOUT(browser->title().contains("Edited title"), 15000);
-            QTRY_VERIFY_WITH_TIMEOUT(javascript(*browser, theme == "pure" ? "document.readyState === 'complete' && !!document.querySelector('body.main-center > header.header')" : "document.readyState === 'complete' && !!document.querySelector('.main .column .header')").toBool(), 15000);
+            QTRY_VERIFY_WITH_TIMEOUT(javascript(*browser, theme == "pure" ? "document.readyState === 'complete' && !!document.querySelector('body.main-center > header.header')" : theme == "yilia" ? "document.readyState === 'complete' && !!document.querySelector('.left-col .header')" : "document.readyState === 'complete' && !!document.querySelector('.main .column .header')").toBool(), 15000);
             QCOMPARE(browser->url().path(), QString("/blog/"));
             javascript(*browser, "fetch('/blog/search.json').then(r => window.searchIndexReady = r.ok)");
             QTRY_VERIFY_WITH_TIMEOUT(javascript(*browser, "window.searchIndexReady === true").toBool(), 10000);
@@ -3523,12 +3525,24 @@ st->e
             QVERIFY(javascript(*browser, QString("Array.from(document.styleSheets).some(s => s.href && s.href.includes('/css/%1.css') && s.cssRules.length > 0)").arg(theme == "pure" ? "style" : "main")).toBool());
             if (theme == "next") QTRY_VERIFY_WITH_TIMEOUT(javascript(*browser, "typeof LocalSearch === 'function' && !!document.querySelector('.search-input')").toBool(), 10000);
             if (theme == "pure") javascript(*browser, "document.querySelector('.search-form-input').click(); const input=document.querySelector('.ins-search-input'); input.value='真实输入'; input.dispatchEvent(new Event('input', {bubbles:true})); input.dispatchEvent(new KeyboardEvent('keyup', {bubbles:true}));");
+            else if (theme == "yilia") javascript(*browser, "document.querySelector('.search-trigger').click(); const input=document.querySelector('.search-ipt'); input.value='真实输入'; input.dispatchEvent(new Event('input', {bubbles:true}));");
             else javascript(*browser, "document.querySelector('.popup-trigger').click(); const input=document.querySelector('.search-input'); input.value='真实输入'; input.dispatchEvent(new Event('input', {bubbles:true}));");
-            QTRY_VERIFY_WITH_TIMEOUT(javascript(*browser, "!!document.querySelector('.ins-section-container .ins-search-item[data-url=\"/blog/article/\"], .search-result-list a[href*=\"/blog/article/\"]')").toBool(), 10000);
+            QTRY_VERIFY_WITH_TIMEOUT(javascript(*browser, "!!document.querySelector('.ins-section-container .ins-search-item[data-url=\"/blog/article/\"], .search-result-list a[href*=\"/blog/article/\"], .search-ul a[href=\"/blog/article/\"]')").toBool(), 10000);
             if (theme == "next") {
                 QVERIFY(javascript(*browser, "document.body.classList.contains('search-active')").toBool());
                 javascript(*browser, "document.querySelector('.popup-btn-close').click()");
                 QVERIFY(javascript(*browser, "!document.body.classList.contains('search-active')").toBool());
+            }
+            if (theme == "yilia") {
+                QVERIFY(javascript(*browser, "document.querySelector('#container').classList.contains('show')").toBool());
+                javascript(*browser, "{ const input=document.querySelector('.search-ipt'); input.value='没有这样的文章'; input.dispatchEvent(new Event('input', {bubbles:true})); }");
+                QTRY_VERIFY(javascript(*browser, "document.querySelector('.search-ul').textContent.includes('没有找到') && !document.querySelector('.search-ul a')").toBool());
+                javascript(*browser, "{ const input=document.querySelector('.search-ipt'); input.value='#标签一'; input.dispatchEvent(new Event('input', {bubbles:true})); }");
+                QTRY_VERIFY(javascript(*browser, "!!document.querySelector('.search-ul a[href=\"/blog/article/\"]')").toBool());
+                javascript(*browser, "document.querySelector('.search-close').click()");
+                QVERIFY(javascript(*browser, "!document.querySelector('#container').classList.contains('show')").toBool());
+                QTest::qWait(900);
+                dialog->grab().save("site-preview-yilia-home.png");
             }
             const auto homeUrl = browser->url();
             if (theme == "next") dialog->grab().save("site-preview-next-home.png");
@@ -3571,6 +3585,11 @@ st->e
                 QTRY_COMPARE(browser->url().fragment(), QString("内容"));
                 javascript(*browser, "window.scrollTo(0, 0)");
             }
+            if (theme == "yilia") {
+                QVERIFY(javascript(*browser, "!!document.querySelector('.toc-article .toc-child .toc-link')").toBool());
+                javascript(*browser, "document.querySelector('.toc-article .toc-child .toc-link').click()");
+                QTRY_COMPARE(browser->url().fragment(), QString("内容"));
+            }
             QTest::qWait(500);
             dialog->grab().save("site-preview-" + theme + ".png");
             dialog->resize(420, 800);
@@ -3582,12 +3601,17 @@ st->e
             }
             QTest::qWait(500);
             dialog->grab().save("site-preview-" + theme + "-mobile.png");
-            const auto menu = theme == "pure" ? ".navbar-toggle" : ".site-nav-toggle";
+            const auto menu = theme == "pure" ? ".navbar-toggle" : theme == "yilia" ? "#mobile-nav .slider-trigger" : ".site-nav-toggle";
             QTRY_VERIFY(javascript(*browser, QString("document.querySelector('%1').getBoundingClientRect().width > 0").arg(menu)).toBool());
             javascript(*browser, QString("document.querySelector('%1').click()").arg(menu));
-            QTRY_VERIFY(javascript(*browser, theme == "pure" ? "document.querySelector('#main-navbar').classList.contains('in')" : "document.body.classList.contains('site-nav-on')").toBool());
-            javascript(*browser, QString("document.querySelector('%1').click()").arg(menu));
-            QTRY_VERIFY(javascript(*browser, theme == "pure" ? "!document.querySelector('#main-navbar').classList.contains('in')" : "!document.body.classList.contains('site-nav-on')").toBool());
+            QTRY_VERIFY(javascript(*browser, theme == "pure" ? "document.querySelector('#main-navbar').classList.contains('in')" : theme == "yilia" ? "document.querySelector('#container').classList.contains('show')" : "document.body.classList.contains('site-nav-on')").toBool());
+            if (theme == "yilia") {
+                QTest::qWait(900);
+                QVERIFY(javascript(*browser, "Math.abs(document.querySelector('.tools-col').getBoundingClientRect().left) < 1").toBool());
+                dialog->grab().save("site-preview-yilia-mobile-search.png");
+                javascript(*browser, "document.querySelector('.search-close').click()");
+            } else javascript(*browser, QString("document.querySelector('%1').click()").arg(menu));
+            QTRY_VERIFY(javascript(*browser, theme == "pure" ? "!document.querySelector('#main-navbar').classList.contains('in')" : theme == "yilia" ? "!document.querySelector('#container').classList.contains('show')" : "!document.body.classList.contains('site-nav-on')").toBool());
             QTest::mouseClick(dialog->findChild<QPushButton *>("closeSitePreview"), Qt::LeftButton);
         });
         previewTimer.start();

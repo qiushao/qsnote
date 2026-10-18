@@ -2,6 +2,7 @@
 
 Pure 来自 QSNote 提交 `9752f93` 中内置的版本（package 版本 0.0.1）。
 NexT 来自 [next-theme/hexo-theme-next](https://github.com/next-theme/hexo-theme-next)，版本 8.29.0，固定提交 `d25776ea38ddc7269fe9c3b94b6fd5cfcaae20e3`，使用 Muse 布局。
+Yilia 来自 [litten/hexo-theme-yilia](https://github.com/litten/hexo-theme-yilia)，版本 4.0.0，固定提交 `5cd9ba5a98fa4aad18a82e2344390dab1aae7685`。
 
 - `templates/`：按上游模板的 DOM 和类名适配的 HTML 片段，`{{name}}` 由 C++ 生成器填充。NexT 对应 `_layout.njk`、`_macro/post.njk`、`_macro/sidebar.njk` 及导航、搜索、独立页面模板；归档、分类、分页由生成器按上游结构输出。
 - `assets/`：原 CSS、字体、图片和浏览器脚本。Pure 的 `style.css` 直接复制；NexT 的 `main.css`、`noscript.css` 由上游 Stylus 预编译，程序构建和运行均不需要 Stylus、Hexo、Node.js 或 npm。
@@ -41,5 +42,15 @@ menu:
 | --- | --- |
 | `pure/assets/css/style.css` | `2aab838134abc02a55c42e3afcee6e867155aca4b0c28c7d66d1e1f74d0b9c10` |
 | `next/assets/css/main.css` | `d5d3280e2cb167a84fca9c4459d6a5db0603b2512f201ce85bd79b6148d9d71e` |
+
+## Yilia 的接入方式
+
+- `yilia/assets/css/main.css` 原样复制自固定提交的 `source/main.0cf68a.css`，相对引用的 `fonts/` 与 `img/` 一并复制到 CSS 目录，不需要重新运行旧版 webpack/node-sass。
+- `templates/` 依据上游 `layout.ejs`、`left-col.ejs`、`mobile-nav.ejs`、`article.ejs`、`archive.ejs`、`archive-post.ejs` 和 `aside.ejs` 适配。C++ 提供文章、分类标签、分页、目录、友链及 QSNote 评论。
+- `qsnote-yilia.js` 使用原侧栏 DOM 与 CSS 动画接入本地 `content.json`，提供标题/正文/标签搜索、手机侧栏、关闭操作和返回顶部。它使用 DOM 文本节点显示搜索结果；不加载上游带访问上报的 JS bundles。`qsnote-yilia.css` 仅补充无 canvas 时的侧栏背景、可见性、手机标题容器及键盘目录交互。
+- 上游未配置头像时为蓝色圆形占位，内置版本也保留此表现。站点设置通过 QSNote 界面维护，不读取 Hexo `_config.yml`。
+- 上游 `package.json` 声明 ISC（原文件保存在 `yilia/upstream-package.json`），仓库未单独附 LICENSE；`yilia/LICENSE` 记录 ISC 条款和作者归属。PhotoSwipe 样式/皮肤资源的 MIT 许可见 `yilia/THIRD-PARTY-NOTICES.md`。这两个文件随生成站点输出。
+
+Yilia 原 CSS SHA-256：`b0d7ccb28e00e916f5b7ea2c3e6c3fa3e204fef3a447f4de8415f8d7c9d869cd`。
 
 持续测试覆盖离线生成、CSS 指纹、配置迁移、分页、页面结构、搜索、目录和手机菜单。预览测试保存桌面与移动尺寸的截图供检查。

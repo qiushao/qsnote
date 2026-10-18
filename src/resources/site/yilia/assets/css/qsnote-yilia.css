@@ -1,0 +1,8 @@
+/* QSNote integration: the original main.css is kept unchanged. */
+#container.show { background: #88acdb; }
+.tools-col { visibility: hidden; background: #88acdb; }
+.tools-col.show { visibility: visible; }
+.tools-col .search-wrap .search-ipt { width: 100%; padding-right: 28px; box-sizing: border-box; }
+#mobile-nav .inner { padding-top: 10px; }
+#mobile-nav .profilepic { position: relative; z-index: 3; }
+.toc-container:focus-within .tooltip-content { opacity: 1; pointer-events: auto; transform: translate(0); }
