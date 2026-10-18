@@ -322,6 +322,7 @@ bool NotebookStore::loadNotebook(Notebook &book, QString *error) {
     book.name = object["name"].toString(book.name);
     book.type = object["type"].toString(book.type);
     if (object.contains("config")) book.config = object["config"].toObject();
+    if (book.type == "site" && book.config["theme"].toString() == "stellar") book.config["theme"] = "next";
     QList<Note> loaded;
     for (const auto &entry: object["notes"].toArray()) {
         const auto item = entry.toObject();

@@ -199,7 +199,7 @@ public:
                 archives[date.toString("yyyy") + "/"].append(post);
                 archives[date.toString("yyyy/MM") + "/"].append(post);
             }
-            search.append(QJsonObject{{"title", post->title}, {"url", href(post->route)}, {"text", post->text}, {"path", href(post->route)}, {"content", post->text}});
+            search.append(QJsonObject{{"title", nextTheme() ? escaped(post->title) : post->title}, {"url", href(post->route)}, {"text", post->text}, {"path", href(post->route)}, {"content", nextTheme() ? escaped(post->text) : post->text}});
         }
         allPosts_ = posts;
         categories_ = categories;
@@ -212,7 +212,7 @@ public:
                 if (!listing(group.first + "/" + it.key() + "/", it.key(), it.value())) return false;
         for (const auto &page: pages_) {
             QString body;
-            if (page.post) body = article(page) + postNavigation(page);
+            if (page.post) body = article(page) + (nextTheme() ? QString() : postNavigation(page));
             else if (page.route == "categories/" || page.route == "tags/") body = taxonomy(page.route.section('/', 0, 0)) + page.html;
             else {
                 auto content = page.html;
@@ -222,14 +222,12 @@ public:
                         const auto item = entry.toObject();
                         const QUrl url(item["url"].toString());
                         if (url.scheme() != "http" && url.scheme() != "https") continue;
-                        friends += stellar() ? "<li><a href=\"" + escaped(url.toString()) + "\">" + escaped(item["name"].toString()) + "</a></li>"
+                        friends += nextTheme() ? "<li><a href=\"" + escaped(url.toString()) + "\">" + escaped(item["name"].toString()) + "</a></li>"
                             : themeTemplate("friend", {{"url", escaped(url.toString())}, {"title", escaped(item["name"].toString())}});
                     }
-                    content += stellar() ? "<ul>" + friends + "</ul>" : themeTemplate("links", {{"links", friends}});
+                    content += nextTheme() ? "<ul>" + friends + "</ul>" : themeTemplate("links", {{"links", friends}});
                 }
-                if (stellar()) body = themeTemplate("banner", {{"title", escaped(page.title)}, {"meta", meta(page)},
-                    {"breadcrumb", link({}, "主页", "cap breadcrumb") + "<span class=\"sep\"></span>" + link(page.route, page.title, "cap breadcrumb")}}) + "<article class=\"md-text content\">" + content + "</article>";
-                else body = page.route == "links/" ? content : themeTemplate("page", {{"title", escaped(page.title)}, {"body", content}});
+                body = !nextTheme() && page.route == "links/" ? content : themeTemplate("page", {{"title", escaped(page.title)}, {"body", content}});
             }
             if (!html(page.route, page.title, body, &page)) return false;
         }
@@ -247,7 +245,7 @@ public:
         }
         if (!write("content.json", QJsonDocument(QJsonObject{{"posts", insightPosts}, {"pages", insightPages}}).toJson(QJsonDocument::Compact))) return false;
         if (!write("css/qsnote-article.css", ArticleRenderer::stylesheet().toUtf8())) return false;
-        const auto assets = ":/site/" + QString(stellar() ? "stellar" : "pure") + "/assets";
+        const auto assets = ":/site/" + QString(nextTheme() ? "next" : "pure") + "/assets";
         QDirIterator resources(assets, QDir::Files, QDirIterator::Subdirectories);
         while (resources.hasNext()) {
             const auto path = resources.next();
@@ -341,9 +339,9 @@ private:
         page.html = ArticleRenderer::html(document);
         return true;
     }
-    [[nodiscard]] bool stellar() const { return book_.config["theme"].toString() == "stellar"; }
+    [[nodiscard]] bool nextTheme() const { return book_.config["theme"].toString() == "next"; }
     [[nodiscard]] QString themeTemplate(const QString &name, QMap<QString, QString> values = {}) const {
-        QFile file(":/site/" + QString(stellar() ? "stellar" : "pure") + "/templates/" + name + ".html");
+        QFile file(":/site/" + QString(nextTheme() ? "next" : "pure") + "/templates/" + name + ".html");
         if (!file.open(QIODevice::ReadOnly)) return {};
         const auto source = QString::fromUtf8(file.readAll());
         values["root"] = escaped(href({}));
@@ -362,26 +360,24 @@ private:
         }
         return result + source.mid(offset);
     }
-    static QString icon(const QString &name) {
-        return R"(<svg class="icon" aria-hidden="true" data-icon="default:)" + name + "\"></svg>";
-    }
     [[nodiscard]] QString link(const QString &route, const QString &title, const QString &classes = {}) const {
         return "<a class=\"" + classes + "\" href=\"" + escaped(href(route)) + "\">" + escaped(title) + "</a>";
     }
     [[nodiscard]] QString taxonomyLinks(const Page &page, bool tags = false) const {
         QString result;
         for (const auto &name: tags ? page.tags : page.categories) {
-            if (stellar() && tags) result += R"(<a class="tag" href=")" + escaped(href("tags/" + name + "/")) + "\">" + icon("hashtag") + escaped(name) + "</a>";
+            if (nextTheme() && tags) result += link("tags/" + name + "/", "# " + name);
             else result += link((tags ? "tags/" : "categories/") + name + "/", name, tags ? "article-tag-link-link" : "article-category-link");
         }
         return result;
     }
     [[nodiscard]] QString meta(const Page &page, bool card = false) const {
         const auto date = escaped(page.date.left(10));
-        if (stellar()) {
-            if (card) return R"(<span class="cap" id="post-meta">)" + icon("calendar") + "<time datetime=\"" + escaped(page.date) + "\">" + date + "</time></span>" +
-                (page.categories.isEmpty() ? QString() : "<span class=\"cap breadcrumb\">" + icon("category") + "<span>" + escaped(page.categories.join(" / ")) + "</span></span>");
-            return R"(<span class="text created">发布于：<time datetime=")" + escaped(page.date) + "\">" + date + R"(</time></span><span class="sep updated"></span><span class="text updated">更新于：<time datetime=")" + escaped(page.updated) + "\">" + escaped(page.updated.left(10)) + "</time></span>";
+        if (nextTheme()) {
+            QString result = R"(<span class="post-meta-item">发表于 <time datetime=")" + escaped(page.date) + "\">" + date + "</time></span>";
+            if (!card) result += R"(<span class="post-meta-item">更新于 <time datetime=")" + escaped(page.updated) + "\">" + escaped(page.updated.left(10)) + "</time></span>";
+            if (!page.categories.isEmpty()) result += R"(<span class="post-meta-item">分类于 )" + taxonomyLinks(page) + "</span>";
+            return result;
         }
         const auto displayDate = card ? QDate::fromString(page.date.left(10), Qt::ISODate).toString("M月 d") : page.date.left(10);
         QString result = R"(<span class="article-date"><i class="icon icon-calendar-check"></i> <a class="article-date" href=")" + escaped(href(page.route)) + "\"><time datetime=\"" + escaped(page.date) + R"(" itemprop="datePublished">)" + escaped(displayDate) + "</time></a></span>\n";
@@ -395,24 +391,23 @@ private:
         return domain.scheme() + "://" + domain.authority() + href(route);
     }
     [[nodiscard]] QString article(const Page &page, bool index = false) const {
-        if (!stellar()) {
+        if (!nextTheme()) {
             auto result = themeTemplate("post", {{"articleId", escaped("post-" + page.route)}, {"title", escaped(page.title)}, {"meta", meta(page)}, {"body", page.html},
                 {"url", escaped(href(page.route))}, {"permalink", escaped(permalink(page.route))}, {"comments", index ? QString() : comments(book_, page)}});
             if (index) result.replace(R"(<h1 class="article-title" itemprop="name">)" + escaped(page.title) + "</h1>", "<h1 itemprop=\"name\">" + link(page.route, page.title, "article-title") + "</h1>");
             return result;
         }
-        const auto breadcrumb = link({}, "主页", "cap breadcrumb") + "<span class=\"sep\"></span>" + link({}, "文章", "cap breadcrumb") +
-            (page.categories.isEmpty() ? QString() : "<span class=\"sep\"></span>" + taxonomyLinks(page));
-        return themeTemplate("banner", {{"title", escaped(page.title)}, {"breadcrumb", breadcrumb}, {"meta", meta(page)}}) +
-            "<article class=\"md-text content\">" + page.html + "</article><div class=\"article-tags\">" + taxonomyLinks(page, true) + "</div>" + themeTemplate("license") + comments(book_, page);
+        return themeTemplate("post", {{"title", escaped(page.title)}, {"meta", meta(page)}, {"body", page.html},
+            {"tags", taxonomyLinks(page, true)}, {"navigation", postNavigation(page)}, {"comments", comments(book_, page)}});
     }
     [[nodiscard]] QString postNavigation(const Page &page) const {
         const auto index = allPosts_.indexOf(&page);
         const auto *previous = index > 0 ? allPosts_[index - 1] : nullptr;
         const auto *next = index + 1 < allPosts_.size() ? allPosts_[index + 1] : nullptr;
-        if (stellar()) return R"(<div class="related-wrap" id="read-next"><section class="body"><div class="item" id="prev">)" +
-            (previous ? "<div class=\"note\">较新文章</div>" + link(previous->route, previous->title) : QString()) + R"(</div><div class="item" id="next">)" +
-            (next ? "<div class=\"note\">较早文章</div>" + link(next->route, next->title) : QString()) + "</div></section></div>";
+        if (nextTheme() && !previous && !next) return {};
+        if (nextTheme()) return R"(<div class="post-nav"><div class="post-nav-item">)" +
+            (previous ? link(previous->route, "‹ " + previous->title) : QString()) + R"(</div><div class="post-nav-item">)" +
+            (next ? link(next->route, next->title + " ›") : QString()) + "</div></div>";
         QString result = R"(<nav class="bar bar-footer clearfix" data-stick-bottom><div class="bar-inner"><ul class="pager pull-left">)";
         if (previous) result += R"(<li class="prev"><a href=")" + escaped(href(previous->route)) + "\" title=\"" + escaped(previous->title) + "\"><i class=\"icon icon-angle-left\"></i><span>  上一篇</span></a></li>";
         if (next) result += R"(<li class="next"><a href=")" + escaped(href(next->route)) + "\" title=\"" + escaped(next->title) + "\"><span>下一篇  </span><i class=\"icon icon-angle-right\"></i></a></li>";
@@ -432,9 +427,10 @@ private:
             nav += "<li>" + link(url, it.key()) + "</li>";
             if (!selected.isEmpty() && it.key() != selected) continue;
             const auto &posts = selected.isEmpty() ? it.value() : subset;
-            if (stellar()) {
-                body += kind == "categories" ? R"(<div class="cat-item"><a class="cat" href=")" + escaped(href(url)) + R"("><span class="name">)" + icon("category") + escaped(it.key()) + "</span><span class=\"badge\">(" + QString::number(posts.size()) + ")</span></a></div>"
-                    : R"(<a class="tag" href=")" + escaped(href(url)) + "\">" + icon("hashtag") + "<span class=\"name\">" + escaped(it.key()) + "</span></a>";
+            if (nextTheme()) {
+                body += kind == "categories" ? R"(<li class="category-list-item">)" + link(url, it.key(), "category-list-link") +
+                    R"(<span class="category-list-count">)" + QString::number(posts.size()) + "</span></li>"
+                    : link(url, it.key()) + " ";
             } else if (kind == "categories") {
                 const auto id = "collapse" + escaped(it.key());
                 body += R"(<div class="panel panel-default b-no"><div class="panel-heading" role="tab"><h3 class="panel-title"><a data-toggle="collapse" href="#)" + id + R"(" aria-expanded="true"><i class="icon icon-folder text-active"></i><i class="icon icon-folder-open text"></i> )" + escaped(it.key()) + "</a> <small class=\"text-muted\">(Total " + QString::number(posts.size()) + " articles)</small></h3></div><div id=\"" + id + R"(" class="panel-collapse collapse in" role="tabpanel"><div class="panel-body"><div class="collection">)" + collection(posts) + "</div></div></div></div>";
@@ -444,7 +440,8 @@ private:
                 body += "</div>";
             }
         }
-        if (stellar()) return themeNav(kind + "/") + R"(<div class="post-list"><article id=")" + (kind == "categories" ? "cats" : "tags") + "\">" + body + "</article></div>";
+        if (nextTheme()) return themeTemplate("page", {{"title", title}, {"body", kind == "categories" ?
+            R"(<ul class="category-list">)" + body + "</ul>" : R"(<div class="tag-cloud"><div class="tag-cloud-tags">)" + body + "</div></div>"}});
         return "<article class=\"article article-" + kind + R"( article-type-list"><header class="article-header"><h1 class="hidden-xs" itemprop="name">)" + title + (selected.isEmpty() ? QString() : ": " + escaped(selected)) + "</h1><p class=\"text-muted hidden-xs\">共 " + QString::number(selected.isEmpty() ? groups.size() : subset.size()) + (selected.isEmpty() ? " 个" + QString(title) : " 篇文章") + R"(</p><nav role="navigation" id="nav-main" class="okayNav"><ul>)" + nav + "</ul></nav></header><div class=\"article-body\">" + body + "</div></article>";
     }
     [[nodiscard]] QString tagLabels(const Page &page) const {
@@ -452,24 +449,11 @@ private:
         for (const auto &tag: page.tags.mid(0, 3)) result += link("tags/" + tag + "/", tag, "label label-default mb") + " ";
         return result;
     }
-    [[nodiscard]] QString themeNav(const QString &route, const QString &title = {}) const {
-        auto result = themeTemplate("nav");
-        const auto section = route.section('/', 0, 0);
-        const auto target = section == "categories" || section == "tags" || section == "archives" ? section + "/" : QString();
-        result.replace("<a href=\"" + escaped(href(target)) + "\">", R"(<a class="active" href=")" + escaped(href(target)) + "\">");
-        if (!title.isEmpty() && (section == "categories" || section == "tags")) {
-            const auto caption = section == "categories" ? "分类" : "标签";
-            result.replace(QString(caption) + "</a>", QString(caption) + "：" + escaped(title) + "</a>");
-        }
-        return result;
-    }
     [[nodiscard]] QString sidebarRecent() const {
         QString result;
         auto recent = allPosts_;
-        if (stellar()) std::stable_sort(recent.begin(), recent.end(), [](const Page *a, const Page *b) { return a->updated > b->updated; });
-        for (const auto *page: recent.mid(0, stellar() ? 10 : 5)) {
-            if (stellar()) result += R"(<a class="ui-collection__item card-hover card-hover--spotlight" href=")" + escaped(href(page->route)) + "\" title=\"" + escaped(page->title) + R"("><span class="ui-collection__content"><span class="ui-collection__title">)" + escaped(page->title) + "</span></span></a>";
-            else result += R"(<li><div class="item-inner"><p class="item-category">)" + taxonomyLinks(*page).replace("article-category-link", "category-link") + "</p><p class=\"item-title\">" + link(page->route, page->title, "title") + R"(</p><p class="item-date"><time datetime=")" + escaped(page->date) + R"(" itemprop="datePublished">)" + escaped(page->date.left(10)) + "</time></p></div></li>";
+        for (const auto *page: recent.mid(0, 5)) {
+            result += R"(<li><div class="item-inner"><p class="item-category">)" + taxonomyLinks(*page).replace("article-category-link", "category-link") + "</p><p class=\"item-title\">" + link(page->route, page->title, "title") + R"(</p><p class="item-date"><time datetime=")" + escaped(page->date) + R"(" itemprop="datePublished">)" + escaped(page->date.left(10)) + "</time></p></div></li>";
         }
         return result;
     }
@@ -483,12 +467,19 @@ private:
         return result;
     }
     bool html(QString route, const QString &title, const QString &body, const Page *page = nullptr) {
-        const bool content = page && (page->post || (route != "categories/" && route != "tags/"));
         QMap<QString, QString> values{{"headTitle", escaped(title + " | " + book_.config["title"].toString(book_.name))}, {"content", body},
             {"title", escaped(title)}, {"permalink", escaped(permalink(route))}, {"sidebarRecent", sidebarRecent()},
             {"sidebarCategories", sidebarTerms(categories_, "category")}, {"sidebarTags", sidebarTerms(tags_, "tag")}, {"sidebarCloud", sidebarTerms(tags_, "tag", true)},
-            {"pageType", content ? "content" : "index"}, {"layout", page && page->post ? "post" : content ? "page" : "index"}, {"articleType", content ? "tech" : "undefined"},
-            {"mobile", content ? QString() : themeTemplate("mobile")}, {"rightbar", content && page->post && !page->toc.isEmpty() ? themeTemplate("toc", {{"toc", "<ol class=\"toc ui-collection-adapter\">" + page->toc + "</ol>"}}) : QString()}};
+            {"layout", route.startsWith("archives/") || (!page && (route.startsWith("categories/") || route.startsWith("tags/"))) ? "archive posts-collapse" : page ? (page->post ? "post posts-expand" : "page posts-expand") : "index posts-expand"},
+            {"sidebarClass", page && page->post && !page->toc.isEmpty() ? "sidebar-nav-active sidebar-toc-active" : "sidebar-overview-active"},
+            {"toc", page && page->post && !page->toc.isEmpty() ? R"(<div class="post-toc animated"><ol class="nav">)" + QString(page->toc).replace("class=\"toc-", "class=\"nav-") + "</ol></div>" : QString()},
+            {"postCount", QString::number(allPosts_.size())}, {"categoryCount", QString::number(categories_.size())}, {"tagCount", QString::number(tags_.size())},
+            {"config", json({{"root", href({})}, {"path", href("search.json")}, {"scheme", "Muse"},
+                {"sidebar", QJsonObject{{"position", "left"}, {"display", "post"}}}, {"motion", QJsonObject{{"enable", false}}},
+                {"codeblock", QJsonObject{{"fold", QJsonObject{{"enable", false}}}, {"copy_button", QJsonObject{{"enable", false}}}}},
+                {"comments", QJsonObject{{"lazyload", false}}}, {"localsearch", QJsonObject{{"preload", true}, {"top_n_per_article", 1}, {"unescape", false}}},
+                {"i18n", QJsonObject{{"hits", "找到 ${hits} 个搜索结果"}}}})},
+            {"pageConfig", json({{"isHome", route.isEmpty()}, {"isPost", page && page->post}, {"lang", "zh-CN"}, {"sidebar", ""}})}};
         const QStringList months{"一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"};
         QString archives;
         for (auto it = archives_.cend(); it != archives_.cbegin();) {
@@ -497,7 +488,7 @@ private:
             archives += "<li class=\"archive-list-item\">" + link("archives/" + it.key(), months.value(it.key().mid(5, 2).toInt() - 1) + " " + it.key().left(4), "archive-list-link") + "<span class=\"archive-list-count\">" + QString::number(it.value().size()) + "</span></li>";
         }
         values["sidebarArchives"] = archives;
-        if (!stellar()) {
+        if (!nextTheme()) {
             values["noticeWidget"] = route == "about/" ? QString() : themeTemplate("noticeWidget");
             values["categoryWidget"] = route == "about/" || categories_.isEmpty() ? QString() : themeTemplate("categoryWidget", values);
             values["tagWidget"] = route == "about/" || tags_.isEmpty() ? QString() : themeTemplate("tagWidget", values);
@@ -507,52 +498,47 @@ private:
         }
         auto markup = themeTemplate("shell", values);
         markup.replace("</head>", R"(<link rel="stylesheet" href=")" + escaped(href("css/qsnote-article.css")) + "\"></head>");
-        if (stellar()) {
-            const auto menu = route.startsWith("links/") ? "links" : route.startsWith("about/") ? "about" : "post";
-            markup.replace(QString("data-menu=\"") + menu + "\"", QString(R"(aria-current="page" data-menu=")") + menu + "\"");
-            // The upstream menu uses is-active for the selected surface and indicator.
-            markup.replace("card-hover--spotlight\" aria-current", "card-hover--spotlight is-active\" aria-current");
-        }
         if (route.isEmpty() || route.endsWith('/')) route += "index.html";
         return write(route, markup.toUtf8());
     }
     [[nodiscard]] QString pagination(const QString &route, int page, int count) const {
-        if (stellar()) {
-            QString result = "<div class=\"paginator-wrap dis-select\">";
-            result += page > 1 ? R"(<a class="extend prev" rel="prev" href=")" + escaped(href(route + (page == 2 ? QString() : "page/" + QString::number(page - 1) + "/"))) + "\">" + icon("arrow-left") + "</a>" : R"(<span class="extend prev" rel="prev">)" + icon("arrow-left") + "</span>";
+        if (nextTheme()) {
+            if (count == 1) return {};
+            QString result = R"(<nav class="pagination">)";
+            if (page > 1) result += link(route + (page == 2 ? QString() : "page/" + QString::number(page - 1) + "/"), "‹", "extend prev");
             for (int i = 1; i <= count; ++i) result += i == page ? "<span class=\"page-number current\">" + QString::number(i) + "</span>" : link(route + (i == 1 ? QString() : "page/" + QString::number(i) + "/"), QString::number(i), "page-number");
-            result += page < count ? R"(<a class="extend next" rel="next" href=")" + escaped(href(route + "page/" + QString::number(page + 1) + "/")) + "\">" + icon("arrow-right") + "</a>" : R"(<span class="extend next" rel="next">)" + icon("arrow-right") + "</span>";
-            return result + "</div>";
+            if (page < count) result += link(route + "page/" + QString::number(page + 1) + "/", "›", "extend next");
+            return result + "</nav>";
         }
         return R"(<nav class="bar bar-footer clearfix" data-stick-bottom><div class="bar-inner"><ul class="pager pull-left"><li class="prev)" + QString(page == 1 ? " disabled" : "") + "\"><a href=\"" + (page == 1 ? "javascript:;" : escaped(href(route + (page == 2 ? QString() : "page/" + QString::number(page - 1) + "/")))) + "\"><i class=\"icon icon-angle-left\"></i> 上一页</a></li><li class=\"next" + QString(page == count ? " disabled" : "") + "\"><a href=\"" + (page == count ? "javascript:;" : escaped(href(route + "page/" + QString::number(page + 1) + "/"))) + "\">下一页 <i class=\"icon icon-angle-right\"></i></a></li></ul><div class=\"total-article bar-right\">Page " + QString::number(page) + " of " + QString::number(count) + "</div></div></nav>";
     }
     bool listing(const QString &route, const QString &title, const QList<const Page *> &posts) {
         constexpr int pageSize = 10;
-        const bool archive = stellar() && route.startsWith("archives/");
-        const auto count = archive ? 1 : qMax(1, int((posts.size() + pageSize - 1) / pageSize));
+        const auto count = qMax(1, int((posts.size() + pageSize - 1) / pageSize));
         for (int page = 1; page <= count; ++page) {
-            const auto subset = archive ? posts : posts.mid((page - 1) * pageSize, pageSize);
+            const auto subset = posts.mid((page - 1) * pageSize, pageSize);
             QString body;
-            if (route.startsWith("archives/")) {
+            if (route.startsWith("archives/") || (nextTheme() && (route.startsWith("categories/") || route.startsWith("tags/")))) {
                 QString sections;
                 QMap<QString, QList<const Page *>> years;
                 for (const auto *post: subset) years[post->date.left(4)].append(post);
                 for (auto it = years.cend(); it != years.cbegin();) {
                     --it;
-                    if (stellar()) {
-                        sections += "<div class=\"archive-header h4\">" + escaped(it.key()) + "</div>";
-                        for (const auto *post: it.value()) sections += R"(<div class="archive-list"><a class="post fs14" href=")" + escaped(href(post->route)) + "\"><time>" + escaped(post->date.mid(5, 5)) + "</time><span>" + escaped(post->title) + "</span></a></div>";
+                    if (nextTheme()) {
+                        sections += R"(<div class="collection-year"><span class="collection-header">)" + escaped(it.key()) + "</span></div>";
+                        for (const auto *post: it.value()) sections += R"(<article><header class="post-header"><div class="post-meta-container"><time>)" + escaped(post->date.mid(5, 5)) +
+                            R"(</time></div><div class="post-title">)" + link(post->route, post->title, "post-title-link") + "</div></header></article>";
                     } else sections += R"(<section class="panel panel-default b-no"><div class="panel-heading" role="tab"><h3 class="panel-title"><a data-toggle="collapse" href="#collapse)" + escaped(it.key()) + R"(" aria-expanded="true"><i class="icon icon-calendar-plus text-active"></i><i class="icon icon-calendar-minus text"></i> )" + escaped(it.key()) + R"(</a></h3></div><div class="panel-collapse collapse in" id="collapse)" + escaped(it.key()) + R"("><div class="panel-body"><div class="collection">)" + collection(it.value()) + "</div></div></div></section>";
                 }
-                body = stellar() ? themeNav(route) + R"(<div class="post-list archives"><article id="archive">)" + sections + "</article></div>" : R"(<article class="content article article-archives article-type-list"><header class="article-header"><h1 itemprop="title">)" + escaped(title) + "</h1><p class=\"text-muted\">共 " + QString::number(posts.size()) + " 篇文章</p></header><div class=\"article-body\">" + sections + "</div></article>";
-            } else if (!stellar() && (route.startsWith("categories/") || route.startsWith("tags/"))) body = taxonomy(route.section('/', 0, 0), title, subset);
-            else if (!stellar() && subset.size() == 1) body = article(*subset.first(), true);
+                body = nextTheme() ? R"(<div class="post-block"><div class="post-content"><div class="collection-title"><span class="collection-header">)" + escaped(title) + " · 共 " + QString::number(posts.size()) + " 篇文章</span></div>" + sections + "</div></div>" : R"(<article class="content article article-archives article-type-list"><header class="article-header"><h1 itemprop="title">)" + escaped(title) + "</h1><p class=\"text-muted\">共 " + QString::number(posts.size()) + " 篇文章</p></header><div class=\"article-body\">" + sections + "</div></article>";
+            } else if (!nextTheme() && (route.startsWith("categories/") || route.startsWith("tags/"))) body = taxonomy(route.section('/', 0, 0), title, subset);
+            else if (!nextTheme() && subset.size() == 1) body = article(*subset.first(), true);
             else {
-                body = stellar() ? themeNav(route, route.isEmpty() ? QString() : title) + "<div class=\"post-list post\">" : "<div class=\"content article-list\">";
+                body = nextTheme() ? QString() : "<div class=\"content article-list\">";
                 for (const auto *post: subset) body += themeTemplate("card", {{"title", escaped(post->title)}, {"url", escaped(href(post->route))}, {"meta", meta(*post, true)}, {"excerpt", escaped(post->text.size() > 128 ? post->text.left(125) + "..." : post->text)}});
-                body += "</div>";
+                if (!nextTheme()) body += "</div>";
             }
-            if (!html(route + (page == 1 ? QString() : "page/" + QString::number(page) + "/"), title, body + (archive || (stellar() && count == 1) ? QString() : pagination(route, page, count)))) return false;
+            if (!html(route + (page == 1 ? QString() : "page/" + QString::number(page) + "/"), title, body + pagination(route, page, count))) return false;
         }
         return true;
     }

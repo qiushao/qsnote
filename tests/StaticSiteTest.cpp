@@ -28,7 +28,7 @@ private slots:
     void generateWithoutExternalPrograms_data() { // NOLINT(readability-identifier-naming): Qt Test data-provider convention.
         QTest::addColumn<QString>("theme");
         QTest::newRow("pure") << QString("pure");
-        QTest::newRow("stellar") << QString("stellar");
+        QTest::newRow("next") << QString("next");
     }
     void generateWithoutExternalPrograms() {
         QFETCH(QString, theme);
@@ -58,18 +58,18 @@ private slots:
         QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
         for (const auto &file: {"index.html", "article/index.html", "archives/index.html", "archives/2026/index.html", "archives/2026/10/index.html",
                                 "categories/index.html", "categories/分类/index.html", "tags/index.html", "tags/标签一/index.html",
-                                "links/index.html", "about/index.html", "js/highlight.js", "theme-LICENSE", "search.json"})
+                                "links/index.html", "about/index.html", "theme-LICENSE", "search.json"})
             QVERIFY2(QFile::exists(directory.path() + "/public/" + file), file);
         const auto article = read(directory.path() + "/public/article/index.html");
         for (const auto &content: {"<strong>加粗</strong>", "<table>", "language-cpp", "自定义页脚", "作者", "正文标题", "id=\"正文标题\"", "2026-10-09"})
             QVERIFY2(article.contains(content), content);
-        QVERIFY(article.contains(theme == "pure" ? "class=\"main-center\"" : "class=\"l_body content\""));
+        QVERIFY(article.contains(theme == "pure" ? "class=\"main-center\"" : "class=\"main-inner post posts-expand\""));
         QVERIFY(article.contains(theme == "pure" ? "/blog/css/style.css" : "/blog/css/main.css"));
         // Fingerprints of the original themes' compiled CSS: preserve layout, colors and breakpoints.
         const auto css = read(directory.path() + "/public/css/" + (theme == "pure" ? "style.css" : "main.css"));
         QCOMPARE(QCryptographicHash::hash(css, QCryptographicHash::Sha256).toHex(), theme == "pure"
             ? QByteArray("2aab838134abc02a55c42e3afcee6e867155aca4b0c28c7d66d1e1f74d0b9c10")
-            : QByteArray("f98026219c14ce4edfa2b80f76d01bb1349ae6c5c7a37557d8d2eb66f9aa0e73"));
+            : QByteArray("d5d3280e2cb167a84fca9c4459d6a5db0603b2512f201ce85bd79b6148d9d71e"));
         QVERIFY(!article.contains("PRIVATE-DEPLOY-TOKEN"));
         QVERIFY(!article.contains("new Valine"));
         QVERIFY(read(directory.path() + "/public/links/index.html").contains("https://example.org"));
@@ -85,11 +85,11 @@ private slots:
         QVERIFY2(store.save(&error), qPrintable(error));
         QCOMPARE(read(directory.path() + "/" + site.notes.first().path).count("\"qsnote\""), 1);
         QVERIFY(write(directory.path() + "/source/about/index.md", "---\n{\"title\":\"关于我们\"}\n---\nCustom about page"));
-        site.config["theme"] = theme == "pure" ? "stellar" : "pure";
+        site.config["theme"] = theme == "pure" ? "next" : "pure";
         QVERIFY2(store.save(&error), qPrintable(error));
         QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
         QVERIFY(read(directory.path() + "/public/about/index.html").contains("Custom about page"));
-        QVERIFY(read(directory.path() + "/public/index.html").contains(theme == "pure" ? "class=\"l_body index\"" : "class=\"main-center\""));
+        QVERIFY(read(directory.path() + "/public/index.html").contains(theme == "pure" ? "class=\"main-inner index posts-expand\"" : "class=\"main-center\""));
         QTemporaryDir exported;
         QVERIFY2(StaticSite::copyDirectory(directory.path() + "/public", exported.path(), &error), qPrintable(error));
         QCOMPARE(read(exported.path() + "/article/index.html"), read(directory.path() + "/public/article/index.html"));
@@ -100,6 +100,26 @@ private slots:
         QVERIFY(!QFile::exists(directory.path() + "/public/article/index.html"));
         QVERIFY(!QFile::exists(directory.path() + "/public/categories/分类/index.html"));
         QCOMPARE(QJsonDocument::fromJson(read(directory.path() + "/public/search.json")).array().size(), 0);
+    }
+
+    void migrateRemovedTheme() {
+        QTemporaryDir directory;
+        NotebookStore store;
+        store.notebooks.append({"site", "站点", "site", {}, {{"theme", "stellar"}}, directory.path()});
+        auto &site = store.notebooks.first();
+        QString error;
+        QVERIFY2(store.save(&error), qPrintable(error));
+        QCOMPARE(site.config["theme"].toString(), QString("next"));
+        const auto index = directory.path() + "/" + NotebookStore::indexFileName();
+        QVERIFY(write(index, read(index).replace("\"next\"", "\"stellar\"")));
+        Notebook restored;
+        QVERIFY2(NotebookStore::readNotebook(directory.path(), restored, &error), qPrintable(error));
+        QCOMPARE(restored.config["theme"].toString(), QString("next"));
+        QVERIFY(write(directory.path() + "/public/js/stellar-icons.js", "obsolete"));
+        QVERIFY2(StaticSite::generate(restored, &error), qPrintable(error));
+        QVERIFY(read(directory.path() + "/public/index.html").contains("NexT.Muse"));
+        QVERIFY(!QFile::exists(directory.path() + "/public/js/stellar-icons.js"));
+        QVERIFY(!QFile::exists(":/site/stellar/assets/css/main.css"));
     }
 
     void invalidDiagramPreservesPublishedOutput() {
@@ -119,9 +139,11 @@ private slots:
         QCOMPARE(read(directory.path() + "/public/article/index.html"), previous);
     }
 
+    void paginationLinksAndFrontMatter_data() { generateWithoutExternalPrograms_data(); } // NOLINT(readability-identifier-naming)
     void paginationLinksAndFrontMatter() {
+        QFETCH(QString, theme);
         QTemporaryDir directory;
-        Notebook site{"site", "测试", "site", {}, {{"domain", "https://example.com/中文/"}}, directory.path()};
+        Notebook site{"site", "测试", "site", {}, {{"theme", theme}, {"domain", "https://example.com/中文/"}}, directory.path()};
         QString error;
         QVERIFY2(StaticSite::prepare(site, &error), qPrintable(error));
         for (int i = 1; i <= 12; ++i) {
@@ -151,10 +173,12 @@ private slots:
         QVERIFY(!QFile::exists(directory.path() + "/public/hidden"));
     }
 
+    void commentsAndEscaping_data() { generateWithoutExternalPrograms_data(); } // NOLINT(readability-identifier-naming)
     void commentsAndEscaping() {
+        QFETCH(QString, theme);
         QTemporaryDir directory;
         Notebook site{"site", "<script>title</script>", "site", {},
-            {{"footer", "<b>footer</b>"}, {"valineAppId", "</script><script>alert('x')</script>"},
+            {{"theme", theme}, {"footer", "<b>footer</b>"}, {"valineAppId", "</script><script>alert('x')</script>"},
              {"valineAppKey", "key"}, {"clientSecret", "secret"}, {"disqus", "example-comments"}}, directory.path()};
         QString error;
         QVERIFY2(StaticSite::prepare(site, &error), qPrintable(error));

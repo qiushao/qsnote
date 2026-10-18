@@ -57,7 +57,8 @@ QString StaticSite::rootPath(const Notebook &book) {
 }
 
 bool StaticSite::prepare(Notebook &book, QString *error) {
-    if (book.config["theme"].toString() != "stellar") book.config["theme"] = "pure";
+    if (book.config["theme"].toString() == "stellar") book.config["theme"] = "next";
+    if (book.config["theme"].toString() != "next") book.config["theme"] = "pure";
     if (!book.config.contains("commentPlatform")) book.config["commentPlatform"] = "none";
     for (const auto &directory: {"source/_posts", "source/_drafts", "public"}) {
         if (!QDir().mkpath(book.path + "/" + directory)) {

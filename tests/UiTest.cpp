@@ -231,7 +231,7 @@ st->e
             QCOMPARE(file.write(bytes), bytes.size());
         }
         outputs.append(epubDirectory + "/book.xhtml");
-        for (const auto &theme: {"pure", "stellar"}) {
+        for (const auto &theme: {"pure", "next"}) {
             Notebook site{"site", "网站", "site", {}, {{"theme", theme}, {"domain", "https://example.org/blog/"}}, directory.path() + "/" + theme};
             QVERIFY2(StaticSite::prepare(site, &error), qPrintable(error));
             QFile file(site.path + "/source/_posts/article.md");
@@ -3394,7 +3394,7 @@ st->e
     void siteMetadataConfigAndPreview_data() { // NOLINT(readability-identifier-naming): Qt Test data-provider convention.
         QTest::addColumn<QString>("theme");
         QTest::newRow("pure") << QString("pure");
-        QTest::newRow("stellar") << QString("stellar");
+        QTest::newRow("next") << QString("next");
     }
 
     void siteMetadataConfigAndPreview() {
@@ -3475,7 +3475,8 @@ st->e
             auto *themes = dialog->findChild<QComboBox *>("config_theme");
             QVERIFY(themes);
             QCOMPARE(themes->currentData().toString(), QString("pure"));
-            QVERIFY(themes->findData("stellar") >= 0);
+            QVERIFY(themes->findData("next") >= 0);
+            QCOMPARE(themes->findData("stellar"), -1);
             themes->setCurrentIndex(themes->findData(theme));
             QVERIFY(!dialog->findChild<QLineEdit *>("config_token"));
             QTest::mouseClick(sections, Qt::LeftButton, Qt::NoModifier, sections->tabRect(0).center());
@@ -3513,18 +3514,24 @@ st->e
             QVERIFY(browser);
             QSignalSpy loaded(browser, &QWebEngineView::loadFinished);
             if (browser->title().isEmpty()) QVERIFY(loaded.wait(15000));
-            QVERIFY(browser->title().contains("Edited title"));
-            QVERIFY(javascript(*browser, theme == "pure" ? "!!document.querySelector('body.main-center > header.header')" : "!!document.querySelector('.l_body .l_left')").toBool());
+            QTRY_VERIFY_WITH_TIMEOUT(browser->title().contains("Edited title"), 15000);
+            QTRY_VERIFY_WITH_TIMEOUT(javascript(*browser, theme == "pure" ? "document.readyState === 'complete' && !!document.querySelector('body.main-center > header.header')" : "document.readyState === 'complete' && !!document.querySelector('.main .column .header')").toBool(), 15000);
             QCOMPARE(browser->url().path(), QString("/blog/"));
             javascript(*browser, "fetch('/blog/search.json').then(r => window.searchIndexReady = r.ok)");
             QTRY_VERIFY_WITH_TIMEOUT(javascript(*browser, "window.searchIndexReady === true").toBool(), 10000);
             QVERIFY(javascript(*browser, "!!document.querySelector('a[href=\"/blog/archives\"], a[href=\"/blog/archives/\"]')").toBool());
             QVERIFY(javascript(*browser, QString("Array.from(document.styleSheets).some(s => s.href && s.href.includes('/css/%1.css') && s.cssRules.length > 0)").arg(theme == "pure" ? "style" : "main")).toBool());
-            if (theme == "stellar") QTRY_VERIFY_WITH_TIMEOUT(javascript(*browser, "typeof searchFunc === 'function'").toBool(), 10000);
+            if (theme == "next") QTRY_VERIFY_WITH_TIMEOUT(javascript(*browser, "typeof LocalSearch === 'function' && !!document.querySelector('.search-input')").toBool(), 10000);
             if (theme == "pure") javascript(*browser, "document.querySelector('.search-form-input').click(); const input=document.querySelector('.ins-search-input'); input.value='真实输入'; input.dispatchEvent(new Event('input', {bubbles:true})); input.dispatchEvent(new KeyboardEvent('keyup', {bubbles:true}));");
-            else javascript(*browser, "const input=document.querySelector('#search-input'); input.focus(); input.dispatchEvent(new FocusEvent('focusin', {bubbles:true})); input.value='真实输入'; input.dispatchEvent(new Event('input', {bubbles:true}));");
-            QTRY_VERIFY2_WITH_TIMEOUT(javascript(*browser, "!!document.querySelector('.ins-section-container .ins-search-item[data-url=\"/blog/article/\"], #search-result a[href^=\"/blog/article/\"]')").toBool(), qPrintable(javascript(*browser, "JSON.stringify({active:document.activeElement.id,input:document.querySelector('#search-input')?._searchInitialized,cache:typeof searchCache === 'undefined' ? null : searchCache,root:typeof ctx === 'undefined' ? null : ctx.root,result:document.querySelector('#search-result')?.innerHTML})").toString()), 10000);
+            else javascript(*browser, "document.querySelector('.popup-trigger').click(); const input=document.querySelector('.search-input'); input.value='真实输入'; input.dispatchEvent(new Event('input', {bubbles:true}));");
+            QTRY_VERIFY_WITH_TIMEOUT(javascript(*browser, "!!document.querySelector('.ins-section-container .ins-search-item[data-url=\"/blog/article/\"], .search-result-list a[href*=\"/blog/article/\"]')").toBool(), 10000);
+            if (theme == "next") {
+                QVERIFY(javascript(*browser, "document.body.classList.contains('search-active')").toBool());
+                javascript(*browser, "document.querySelector('.popup-btn-close').click()");
+                QVERIFY(javascript(*browser, "!document.body.classList.contains('search-active')").toBool());
+            }
             const auto homeUrl = browser->url();
+            if (theme == "next") dialog->grab().save("site-preview-next-home.png");
             // Follow the themes' real menu links, including Pure's directory URLs without a trailing slash.
             for (const auto &route: {QString("categories"), QString("tags"), QString("archives"), QString("links"), QString("about")}) {
                 const auto selector = QString(R"(a[href="/blog/%1"], a[href="/blog/%1/"])").arg(route);
@@ -3535,6 +3542,7 @@ st->e
                 QVERIFY(loaded.last().first().toBool());
                 QCOMPARE(browser->url().path(), "/blog/" + route + "/");
                 QVERIFY(javascript(*browser, "!!document.querySelector('header.header')").toBool());
+                if (theme == "next" && route == "archives") dialog->grab().save("site-preview-next-archives.png");
                 if (route == "categories" || route == "tags") {
                     const auto term = route == "categories" ? QString("Updated") : QString("标签一");
                     const auto href = QString::fromLatin1(QUrl::toPercentEncoding("/blog/" + route + "/" + term + "/", "/"));
@@ -3555,20 +3563,31 @@ st->e
             browser->page()->toPlainText([&](const QString &value) { text = value; loop.quit(); });
             loop.exec();
             QVERIFY(text.contains("真实输入的文字"));
-            QTRY_VERIFY(javascript(*browser, "!!document.querySelector('h1.article-title, h1.text.title') && document.querySelector('h1.article-title, h1.text.title').textContent.trim() === '文章标题'").toBool());
-            if (theme == "stellar") QVERIFY(javascript(*browser, "!!document.querySelector('.toc .toc-child .toc-link')").toBool());
-            QTest::qWait(100);
+            QTRY_VERIFY(javascript(*browser, "!!document.querySelector('h1.article-title, h1.post-title') && document.querySelector('h1.article-title, h1.post-title').textContent.trim() === '文章标题'").toBool());
+            if (theme == "next") {
+                QVERIFY(javascript(*browser, "!!document.querySelector('.post-toc .nav-child .nav-link')").toBool());
+                QTRY_VERIFY(javascript(*browser, "Math.abs(document.querySelector('.sidebar').getBoundingClientRect().left) < 1").toBool());
+                javascript(*browser, "document.querySelector('.post-toc .nav-child .nav-link').click()");
+                QTRY_COMPARE(browser->url().fragment(), QString("内容"));
+                javascript(*browser, "window.scrollTo(0, 0)");
+            }
+            QTest::qWait(500);
             dialog->grab().save("site-preview-" + theme + ".png");
             dialog->resize(420, 800);
             QTRY_VERIFY(javascript(*browser, "window.innerWidth <= 420 && document.documentElement.scrollWidth <= window.innerWidth").toBool());
-            QTest::qWait(100);
+            if (theme == "next") {
+                javascript(*browser, "document.querySelector('.sidebar-toggle').click()");
+                QTRY_VERIFY(javascript(*browser, "!document.body.classList.contains('sidebar-active')").toBool());
+                QTRY_VERIFY(javascript(*browser, "document.querySelector('.sidebar').getBoundingClientRect().right <= 1").toBool());
+            }
+            QTest::qWait(500);
             dialog->grab().save("site-preview-" + theme + "-mobile.png");
-            const auto menu = theme == "pure" ? ".navbar-toggle" : ".leftbar-toggle";
+            const auto menu = theme == "pure" ? ".navbar-toggle" : ".site-nav-toggle";
             QTRY_VERIFY(javascript(*browser, QString("document.querySelector('%1').getBoundingClientRect().width > 0").arg(menu)).toBool());
             javascript(*browser, QString("document.querySelector('%1').click()").arg(menu));
-            QTRY_VERIFY(javascript(*browser, theme == "pure" ? "document.querySelector('#main-navbar').classList.contains('in')" : "document.querySelector('.l_body').hasAttribute('leftbar')").toBool());
+            QTRY_VERIFY(javascript(*browser, theme == "pure" ? "document.querySelector('#main-navbar').classList.contains('in')" : "document.body.classList.contains('site-nav-on')").toBool());
             javascript(*browser, QString("document.querySelector('%1').click()").arg(menu));
-            QTRY_VERIFY(javascript(*browser, theme == "pure" ? "!document.querySelector('#main-navbar').classList.contains('in')" : "!document.querySelector('.l_body').hasAttribute('leftbar')").toBool());
+            QTRY_VERIFY(javascript(*browser, theme == "pure" ? "!document.querySelector('#main-navbar').classList.contains('in')" : "!document.body.classList.contains('site-nav-on')").toBool());
             QTest::mouseClick(dialog->findChild<QPushButton *>("closeSitePreview"), Qt::LeftButton);
         });
         previewTimer.start();

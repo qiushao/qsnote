@@ -1,6 +1,6 @@
 # 原生静态站点
 
-QSNote 使用 C++ 和内置 Qt WebEngine 生成静态站点，创建、预览和生成均可离线完成，不需要 Hexo、Node.js、npm 或额外下载。Pure 和 Stellar 保持原主题的页面布局、导航和配色，文章正文使用编辑器预览的默认样式，可在「站点配置 → 主题与页脚」切换。C++ 按原模板的 DOM 结构输出 HTML，直接使用原主题的 CSS、字体、图片和浏览器脚本；Stellar 的 Stylus 已预编译为随程序分发的静态 CSS。构建和生成不读取 EJS、Stylus，不执行 Hexo 插件。
+QSNote 使用 C++ 和内置 Qt WebEngine 生成静态站点，创建、预览和生成均可离线完成，不需要 Hexo、Node.js、npm 或额外下载。Pure 和 NexT（Muse） 保持原主题的页面布局、导航和配色，文章正文使用编辑器预览的默认样式，可在「站点配置 → 主题与页脚」切换。C++ 按原模板的 DOM 结构输出 HTML，直接使用原主题的 CSS、字体、图片和浏览器脚本；NexT 的 Stylus 已预编译为随程序分发的静态 CSS。构建和生成不读取 EJS、Nunjucks、Stylus，不执行 Hexo 插件。旧配置中的 `stellar` 在读取或保存时自动迁移为 `next`，重新生成会清除旧主题输出资源。
 
 ## 文件结构
 
@@ -41,9 +41,9 @@ comments: false
 
 `slug` / `permalink` 是相对站点根目录的路径，默认生成目录下的 `index.html`，也支持 `.html` 路径。重复输出路径（包括与首页、归档、分类页等冲突）和包含 `..` 的路径会导致生成失败。`published: false`、`draft: true` 和 `_drafts` 下的文章均不发布。
 
-正文与编辑器预览共用 Markdown-it、Prism 和 CSS，支持标题、列表、引用、表格、删除线、脚注、上下标、标记、提示块和代码高亮。原始 HTML 使用与预览相同的安全过滤规则。公式及 Mermaid、Flowchart、Graphviz、WaveDrom、PlantUML 图表在生成时固化为图片，阅读时无需渲染脚本或网络；PlantUML 需要本地引擎。渲染失败会报告文章并保留上次生成结果。个性化阅读设置仅影响编辑器。文章页保留分类、标签和上下篇链接，Stellar 使用原来的侧栏标题目录。站内 Markdown 链接及本地图片会按输出路径重写；`_posts` 内的图片和附件输出到 `assets/posts`。原始 HTML 中的图片和链接也使用相同的路径映射。
+正文与编辑器预览共用 Markdown-it、Prism 和 CSS，支持标题、列表、引用、表格、删除线、脚注、上下标、标记、提示块和代码高亮。原始 HTML 使用与预览相同的安全过滤规则。公式及 Mermaid、Flowchart、Graphviz、WaveDrom、PlantUML 图表在生成时固化为图片，阅读时无需渲染脚本或网络；PlantUML 需要本地引擎。渲染失败会报告文章并保留上次生成结果。个性化阅读设置仅影响编辑器。文章页保留分类、标签和上下篇链接，NexT 使用原来的侧栏标题目录。站内 Markdown 链接及本地图片会按输出路径重写；`_posts` 内的图片和附件输出到 `assets/posts`。原始 HTML 中的图片和链接也使用相同的路径映射。
 
-文章按日期降序排列，列表每页 10 篇；Stellar 的归档沿用原主题，一页展示全部文章。搜索沿用主题原有界面：Pure 的弹层读取本地 `content.json`，Stellar 的侧栏读取 `search.json`，均支持标题和正文。Pure 保留原来的作者导航栏、内容区、右侧组件和底部翻页栏；Stellar 保留原来的侧栏菜单、文章卡片、标题区和目录栏。响应式断点、字体、间距和颜色沿用原主题 CSS。
+文章按日期降序排列，列表和归档每页 10 篇。搜索沿用主题原有界面：Pure 的弹层读取本地 `content.json`，NexT 的搜索弹层读取 `search.json`，均支持标题和正文。Pure 保留原来的作者导航栏、内容区、右侧组件和底部翻页栏；NexT 保留 Muse 的顶部导航、文章列表、标题区和可切换的目录侧栏。响应式断点、字体、间距和颜色沿用原主题 CSS。
 
 生成先写临时目录，完成后替换 `public` 并清除过期页面；解析、路径冲突或写入失败时保留上一次输出。
 
@@ -68,4 +68,4 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-`qsnote_site` 在清空 PATH 后验证 Pure/Stellar 生成，并覆盖文章与元数据、分页、分类标签、归档、搜索、评论、资源和站内链接、中文子路径、失败保留输出和过期页面清理。`qsnote_publish` 验证本地 Git 发布及模拟 SSH/SCP 参数；`qsnote_ui` 验证两套主题的 WebEngine 预览、实际搜索交互、手机菜单开合、配置持久化及发布入口。主题 CSS 的 SHA-256 校验可防止原有布局和配色被意外改动。资源来源见 `src/resources/site/README.md`。
+`qsnote_site` 在清空 PATH 后验证 Pure/NexT 生成，并覆盖文章与元数据、分页、分类标签、归档、搜索、评论、资源和站内链接、中文子路径、失败保留输出和过期页面清理。`qsnote_publish` 验证本地 Git 发布及模拟 SSH/SCP 参数；`qsnote_ui` 验证两套主题的 WebEngine 预览、实际搜索交互、手机菜单开合、配置持久化及发布入口。主题 CSS 的 SHA-256 校验可防止原有布局和配色被意外改动。资源来源见 `src/resources/site/README.md`。

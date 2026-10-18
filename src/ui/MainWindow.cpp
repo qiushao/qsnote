@@ -2726,7 +2726,7 @@ void MainWindow::showSiteConfig() {
     commentField("valineAppId", "Valine App ID", "valine");
     commentField("valineAppKey", "Valine App Key", "valine");
     section("siteThemeCard", tr("主题与页脚"));
-    field("theme", tr("站点主题"), {"Pure", "Stellar"}, {"pure", "stellar"});
+    field("theme", tr("站点主题"), {"Pure", "NexT"}, {"pure", "next"});
     field("footer", tr("页脚文字"));
     section("siteCategoriesCard", tr("分类管理"));
     auto *categories = new QListWidget(card);
@@ -2906,7 +2906,7 @@ void MainWindow::showSitePreview() {
     bar->setObjectName("dialogBar");
     auto *barLayout = row(bar, 14, 8, 10);
     barLayout->addWidget(label(tr("站点预览"), bar));
-    barLayout->addWidget(label(book->config["theme"].toString() == "stellar" ? "Stellar" : "Pure", bar, true));
+    barLayout->addWidget(label(book->config["theme"].toString() == "next" ? "NexT" : "Pure", bar, true));
     barLayout->addStretch();
     auto *close = button(tr("关闭"), "closeSitePreview", bar);
     barLayout->addWidget(close);
