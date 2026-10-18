@@ -116,10 +116,17 @@ QIcon icon(const QString &kind) {
         painter.setPen(ink);
         painter.drawText(QRectF(0, 0, 24, 24), Qt::AlignCenter, text);
     };
-    if (kind == "left" || kind == "right") {
+    if (kind == "left" || kind == "right" || kind == "leftCollapsed" || kind == "rightCollapsed") {
+        const bool left = kind == "left" || kind == "leftCollapsed";
+        const bool pointsLeft = kind == "left" || kind == "rightCollapsed";
         outline();
         painter.drawRoundedRect(QRectF(2.25, 2.25, 19.5, 19.5), 3, 3);
-        painter.drawLine(QPointF(kind == "left" ? 7.5 : 15, 3), QPointF(kind == "left" ? 7.5 : 15, 21));
+        painter.drawLine(QPointF(left ? 7.5 : 16.5, 3), QPointF(left ? 7.5 : 16.5, 21));
+        const qreal center = left ? 14.5 : 9.5;
+        const qreal direction = pointsLeft ? -1 : 1;
+        painter.drawPolyline(QPolygonF{QPointF(center - direction * 1.5, 8.5),
+                                       QPointF(center + direction * 1.5, 12),
+                                       QPointF(center - direction * 1.5, 15.5)});
     } else if (kind == "settings") {
         outline();
         painter.drawEllipse(QRectF(6, 6, 12, 12));
@@ -436,6 +443,9 @@ private:
 }// namespace
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
+    QSettings settings;
+    leftRequested_ = settings.value("session/leftPanelExpanded", true).toBool();
+    rightRequested_ = settings.value("session/rightPanelExpanded", true).toBool();
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
     setWindowTitle(QCoreApplication::applicationName());
     applyUiSettings();
@@ -663,6 +673,7 @@ void MainWindow::buildUi() {
 
     left_ = new QWidget(splitter_);
     left_->setObjectName("leftPanel");
+    left_->installEventFilter(this);
     auto *leftLayout = column(left_);
     auto *leftBody = new QWidget(left_);
     auto *bodyLayout = column(leftBody, 10, 8);
@@ -798,6 +809,7 @@ void MainWindow::buildUi() {
 
     right_ = new QWidget(splitter_);
     right_->setObjectName("rightPanel");
+    right_->installEventFilter(this);
     auto *rightLayout = column(right_);
     auto *rightHeader = new QWidget(right_);
     rightHeader->setObjectName("panelHeader");
@@ -823,8 +835,11 @@ void MainWindow::buildUi() {
     splitter_->setStretchFactor(1, 1);
     splitter_->setStretchFactor(2, 0);
     QTimer::singleShot(0, this, [this] {
-        splitter_->setSizes(pages_->currentWidget() == todoListPage_ ? QList<int>{264, 640, qMax(240, width() - 904)}
-                                                                  : QList<int>{264, qMax(240, width() - 496), 232});
+        const auto state = QSettings().value("session/mainSplitter").toByteArray();
+        if (state.isEmpty() || !splitter_->restoreState(state)) {
+            splitter_->setSizes(pages_->currentWidget() == todoListPage_ ? QList<int>{264, 640, qMax(240, width() - 904)}
+                                                                      : QList<int>{264, qMax(240, width() - 496), 232});
+        }
     });
     connect(add, &QPushButton::clicked, this, &MainWindow::createNotebook);
     connect(notebooks_, &QComboBox::currentIndexChanged, this, [this] {
@@ -1921,6 +1936,10 @@ void MainWindow::changeEvent(QEvent *event) {
 }
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
+    if (event->type() == QEvent::ShowToParent || event->type() == QEvent::HideToParent) {
+        if (watched == left_) toggleLeft_->setIcon(icon(left_->isHidden() ? "leftCollapsed" : "left"));
+        if (watched == right_) toggleRight_->setIcon(icon(right_->isHidden() ? "rightCollapsed" : "right"));
+    }
     if (event->type() == QEvent::MouseButtonPress && !isMaximized() && !isFullScreen()) {
         const auto edges = resizeHandles_.value(qobject_cast<QWidget *>(watched));
         auto *mouse = dynamic_cast<QMouseEvent *>(event);
@@ -1993,6 +2012,9 @@ void MainWindow::closeEvent(QCloseEvent *event) {
         QStringList openNotes;
         for (int index = 0; index < tabs_->count(); ++index) openNotes << tabs_->tabData(index).toString();
         session.setValue("session/openNotes", openNotes);
+        session.setValue("session/leftPanelExpanded", leftRequested_);
+        session.setValue("session/rightPanelExpanded", rightRequested_);
+        session.setValue("session/mainSplitter", splitter_->saveState());
         if (!quitting_ && session.value("General/minimizeToTray", false).toBool() && QSystemTrayIcon::isSystemTrayAvailable()) {
             tray_->show();
             hide();

@@ -36,6 +36,7 @@
 #include <QDoubleSpinBox>
 #include <QSettings>
 #include <QSpinBox>
+#include <QSplitter>
 #include <QApplication>
 #include <QComboBox>
 #include <QDir>
@@ -1979,6 +1980,62 @@ st->e
         QVERIFY(!UpdateChecker::parseRelease("not json", "1.0.0").error.isEmpty());
         QVERIFY(!UpdateChecker::parseRelease("{}", "1.0.0").error.isEmpty());
         QVERIFY(!UpdateChecker::parseRelease(release("unknown"), "1.0.0").error.isEmpty());
+    }
+
+    void sidebarLayoutSurvivesRestart_data() { // NOLINT(readability-identifier-naming): Qt Test data provider.
+        QTest::addColumn<QString>("type");
+        QTest::addColumn<bool>("leftExpanded");
+        QTest::addColumn<bool>("rightExpanded");
+        QTest::addColumn<bool>("narrow");
+        for (const auto &type: {QString("normal"), QString("todo")}) {
+            QTest::newRow(qPrintable(type + "-expanded")) << type << true << true << false;
+            QTest::newRow(qPrintable(type + "-left-hidden")) << type << false << true << false;
+            QTest::newRow(qPrintable(type + "-right-hidden")) << type << true << false << false;
+            QTest::newRow(qPrintable(type + "-both-hidden")) << type << false << false << false;
+            QTest::newRow(qPrintable(type + "-narrow")) << type << true << true << true;
+        }
+    }
+
+    void sidebarLayoutSurvivesRestart() {
+        QFETCH(QString, type);
+        QFETCH(bool, leftExpanded);
+        QFETCH(bool, rightExpanded);
+        QFETCH(bool, narrow);
+        NotebookStore fixture;
+        fixture.notebooks.append({type, type, type, {}, {}, fixturePath(type)});
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        QList<int> expandedSizes;
+        QList<int> savedSizes;
+        {
+            MainWindow window;
+            window.resize(1440, 900);
+            window.show();
+            QVERIFY(QTest::qWaitForWindowExposed(&window));
+            auto *splitter = window.findChild<QSplitter *>("mainSplitter");
+            QVERIFY(splitter);
+            splitter->setSizes({310, 768, 360});
+            QCoreApplication::processEvents();
+            expandedSizes = splitter->sizes();
+            if (!leftExpanded) window.findChild<QPushButton *>("toggleLeft")->click();
+            if (!rightExpanded) window.findChild<QPushButton *>("toggleRight")->click();
+            if (narrow) window.resize(480, 600);
+            QCoreApplication::processEvents();
+            savedSizes = splitter->sizes();
+            QVERIFY(window.close());
+        }
+        MainWindow restored;
+        restored.resize(narrow ? QSize(480, 600) : QSize(1440, 900));
+        restored.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&restored));
+        auto *splitter = restored.findChild<QSplitter *>("mainSplitter");
+        QTRY_COMPARE(splitter->sizes(), savedSizes);
+        if (narrow) restored.resize(1440, 900);
+        QTRY_COMPARE(restored.findChild<QWidget *>("leftPanel")->isVisible(), leftExpanded);
+        QTRY_COMPARE(restored.findChild<QWidget *>("rightPanel")->isVisible(), rightExpanded);
+        if (!leftExpanded) restored.findChild<QPushButton *>("toggleLeft")->click();
+        if (!rightExpanded) restored.findChild<QPushButton *>("toggleRight")->click();
+        QTRY_COMPARE(splitter->sizes(), expandedSizes);
     }
 
     void emptyAndResponsive() {
