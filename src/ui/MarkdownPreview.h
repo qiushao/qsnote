@@ -20,6 +20,7 @@ public slots:
     void taskChanged(int revision, int line, bool checked) { emit taskChangedReceived(revision, line, checked); }
     void renderPlantUml(const QString &source, int revision, int id);
     QString localImage(const QString &url);
+    void openLocalLink(int revision, const QString &url) { emit localLinkRequested(revision, url); }
 signals:
     void readyReceived();
     void renderedReceived(int revision);
@@ -28,6 +29,7 @@ signals:
     void documentChanged(const QString &markdown, int revision, bool resetScroll, const QString &baseUrl);
     void scrollRequested(int revision, int line);
     void plantUmlRendered(int revision, int id, const QString &data, const QString &error);
+    void localLinkRequested(int revision, const QString &url);
 };
 
 class MarkdownPreview : public QWebEngineView {
@@ -36,6 +38,7 @@ public:
     explicit MarkdownPreview(QWidget *parent = nullptr);
     void setMarkdown(const QString &markdown, const QString &documentId, const QString &directory = {});
     void scrollToLine(int line);
+    void scrollToAnchor(const QString &anchor);
     void showFind();
     void showSettings();
     void showHeadingNavigation();
@@ -49,6 +52,7 @@ signals:
     void renderFinished();
     void sourceLineChanged(int line);
     void taskToggled(int line, bool checked);
+    void localLinkActivated(const QUrl &url);
 
 protected:
     void contextMenuEvent(QContextMenuEvent *event) override;
@@ -67,6 +71,7 @@ private:
     QString markdown_;
     QString documentId_;
     QString baseUrl_;
+    QString pendingAnchor_;
     int revision_ = 0;
     int renderedRevision_ = -1;
     int pendingLine_ = -1;

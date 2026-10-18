@@ -14,6 +14,7 @@
 #include <QMimeDatabase>
 #include <QFormLayout>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -87,6 +88,7 @@ MarkdownPreview::MarkdownPreview(QWidget *parent) : QWebEngineView(parent), brid
     connect(bridge_, &PreviewBridge::renderedReceived, this, [this](int revision) {
         if (revision != revision_) return;
         renderedRevision_ = revision;
+        if (!pendingAnchor_.isEmpty()) scrollToAnchor(pendingAnchor_);
         if (findDialog_ && findDialog_->isVisible()) findInPreview(false, true);
         emit renderFinished();
     });
@@ -95,6 +97,10 @@ MarkdownPreview::MarkdownPreview(QWidget *parent) : QWebEngineView(parent), brid
     });
     connect(bridge_, &PreviewBridge::taskChangedReceived, this, [this](int revision, int line, bool checked) {
         if (revision == revision_ && line >= 0) emit taskToggled(line, checked);
+    });
+    connect(bridge_, &PreviewBridge::localLinkRequested, this, [this](int revision, const QString &url) {
+        const QUrl target(url);
+        if (revision == revision_ && revision == renderedRevision_ && target.isLocalFile()) emit localLinkActivated(target);
     });
     auto *headings = new QShortcut(QKeySequence("Ctrl+G"), this);
     headings->setContext(Qt::WidgetWithChildrenShortcut);
@@ -337,7 +343,10 @@ void MarkdownPreview::setMarkdown(const QString &markdown, const QString &docume
     if (loading_ && markdown == markdown_ && documentId == documentId_ && baseUrl == baseUrl_) return;
     if (headingDialog_) headingDialog_->close();
     const bool reset = documentId != documentId_;
-    if (reset) pendingLine_ = -1;
+    if (reset) {
+        pendingLine_ = -1;
+        pendingAnchor_.clear();
+    }
     markdown_ = markdown;
     documentId_ = documentId;
     baseUrl_ = baseUrl;
@@ -349,6 +358,14 @@ void MarkdownPreview::setMarkdown(const QString &markdown, const QString &docume
     } else if (ready_) {
         emit bridge_->documentChanged(markdown_, revision_, reset, baseUrl_);
     }
+}
+
+void MarkdownPreview::scrollToAnchor(const QString &anchor) {
+    pendingAnchor_ = anchor;
+    if (anchor.isEmpty() || renderedRevision_ != revision_) return;
+    const auto arguments = QJsonDocument(QJsonArray{revision_, anchor}).toJson(QJsonDocument::Compact);
+    page()->runJavaScript("window.qsnotePreview.jumpToAnchor(..." + QString::fromUtf8(arguments) + ")");
+    pendingAnchor_.clear();
 }
 
 void MarkdownPreview::scrollToLine(int line) {

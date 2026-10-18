@@ -762,6 +762,7 @@ void MainWindow::buildUi() {
     editors_->setMinimumSize(0, 0);
     editorSplitter_->addWidget(editors_);
     preview_ = new MarkdownPreview(editorSplitter_);
+    connect(preview_, &MarkdownPreview::localLinkActivated, this, &MainWindow::openLocalLink);
     editorSplitter_->addWidget(preview_);
     preview_->hide();
     previewTimer_ = new QTimer(this);
@@ -1509,6 +1510,33 @@ QString MainWindow::noteDirectory(const QString &id) {
     const auto *book = store_.owner(id);
     if (!note || !book) return {};
     return note->path.isEmpty() ? book->path : QFileInfo(book->path + '/' + note->path).absolutePath();
+}
+
+void MainWindow::openLocalLink(const QUrl &url) {
+    const QFileInfo target(url.toLocalFile());
+    if (!target.exists()) {
+        QMessageBox::warning(this, tr("无法打开链接"), tr("链接目标不存在：%1").arg(target.filePath()));
+        return;
+    }
+    const auto path = target.canonicalFilePath();
+    for (const auto &book: store_.notebooks) {
+        if (book.type == "todo") continue;
+        for (const auto &note: book.notes) {
+            if (note.folder || QFileInfo(book.path + '/' + note.path).canonicalFilePath() != path) continue;
+            const auto bookId = book.id;
+            const auto noteId = note.id;
+            const auto mode = viewMode_;
+            search_->clear();
+            notebooks_->setCurrentIndex(notebooks_->findData(bookId));
+            openNote(noteId);
+            setViewMode(mode);
+            preview_->scrollToAnchor(url.fragment(QUrl::FullyDecoded));
+            return;
+        }
+    }
+    if (!QDesktopServices::openUrl(url)) {
+        QMessageBox::warning(this, tr("无法打开链接"), tr("无法打开链接目标：%1").arg(target.filePath()));
+    }
 }
 
 void MainWindow::openNote(const QString &id) {

@@ -27,6 +27,7 @@ class QSystemTrayIcon;
 class UpdateChecker;
 class QTreeWidget;
 class QTreeWidgetItem;
+class QUrl;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -97,6 +98,7 @@ private:
     bool save();
     QString currentNoteId() const;
     QString noteDirectory(const QString &id);
+    void openLocalLink(const QUrl &url);
     bool generateSite(const Notebook &book);
 
     QSystemTrayIcon *tray_ = nullptr;

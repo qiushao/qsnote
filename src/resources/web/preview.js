@@ -57,6 +57,13 @@
             folding.expandHiddenAncestors(target);
             target.scrollIntoView();
         },
+        jumpToAnchor(generation, id) {
+            if (generation !== revision || generation !== requestedRevision) return;
+            const target = document.getElementById(id);
+            if (!target) return;
+            folding.expandHiddenAncestors(target);
+            target.scrollIntoView();
+        },
         setHeadingFolding(enabled) {
             collapsedSections.clear();
             folding.setEnabled(enabled);
@@ -123,6 +130,14 @@
                 else if (content.querySelector('.vx-heading-fold-toggle')) collapsedSections = foldedHeadings();
                 const root = qsnoteArticle.markdown(request.text);
                 if (request.baseUrl) {
+                    for (const anchor of root.querySelectorAll('a[href]')) {
+                        const href = anchor.getAttribute('href');
+                        if (!href || href.startsWith('#')) continue;
+                        try {
+                            const url = new URL(href, request.baseUrl);
+                            if (url.protocol === 'file:') anchor.href = url.href;
+                        } catch (_) { /* Keep invalid links as written. */ }
+                    }
                     await Promise.all(Array.from(root.querySelectorAll('img[src]'), async image => {
                         try {
                             const url = new URL(image.getAttribute('src'), request.baseUrl);
@@ -182,6 +197,12 @@
                 folding.expandHiddenAncestors(target);
                 target.scrollIntoView();
             }
+            return;
+        }
+        const link = event.target.closest('a[href]');
+        if (link && link.protocol === 'file:') {
+            event.preventDefault();
+            if (!rendering && revision === requestedRevision) bridge.openLocalLink(revision, link.href);
             return;
         }
         const image = event.target.closest('img');

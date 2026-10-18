@@ -504,6 +504,75 @@ st->e
         QVERIFY(!editor->document()->isUndoAvailable());
     }
 
+    void readingLocalNoteLinks_data() { // NOLINT(readability-identifier-naming): Qt Test data slot.
+        QTest::addColumn<bool>("split");
+        QTest::newRow("reading") << false;
+        QTest::newRow("split") << true;
+    }
+
+    void readingLocalNoteLinks() {
+        QFETCH(bool, split);
+        NotebookStore fixture;
+        QString targetContent = "# Target\n\n";
+        for (int line = 0; line < 80; ++line) targetContent += QString("Paragraph %1\n\n").arg(line);
+        targetContent += "## 目标章节\n\n";
+        for (int line = 0; line < 80; ++line) targetContent += "After target\n\n";
+        fixture.notebooks.append({"source-book", "Source", "normal",
+            {{"source-note", {}, "Source.md", {}, false, {}, {}}}, {}, fixturePath("link source")});
+        fixture.notebooks.append({"target-book", "Target", "normal",
+            {{"target-note", {}, "目标 笔记.md", targetContent, false, {}, {}}}, {}, fixturePath("link target")});
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        const auto sourcePath = fixture.notebooks[0].path + '/' + fixture.note("source-note")->path;
+        const auto targetPath = fixture.notebooks[1].path + '/' + fixture.note("target-note")->path;
+        const auto relative = QDir(QFileInfo(sourcePath).absolutePath()).relativeFilePath(targetPath);
+        const auto href = QString::fromLatin1(QUrl::toPercentEncoding(relative, "/"));
+        auto *source = fixture.note("source-note");
+        source->content = "[Target](" + href + "#" + QString::fromLatin1(QUrl::toPercentEncoding("目标章节"))
+            + ")\n\n[Missing](missing.md)\n";
+        source->contentDirty = true;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.resize(1280, 800);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *tree = window.findChild<QTreeWidget *>("noteTree");
+        openTreeNote(tree, tree->topLevelItem(0));
+        window.findChild<QPushButton *>(split ? "splitMode" : "previewMode")->click();
+        auto *preview = window.findChild<MarkdownPreview *>("preview");
+        auto *tabs = window.findChild<QTabBar *>("noteTabs");
+        QTRY_COMPARE_WITH_TIMEOUT(preview->renderedRevision(), preview->revision(), 5000);
+        const int sourceRevision = preview->revision();
+        javascript(*preview, "document.querySelector('a').click()");
+        QTRY_COMPARE_WITH_TIMEOUT(tabs->count(), 2, 5000);
+        QCOMPARE(tabs->tabData(tabs->currentIndex()).toString(), QString("target-note"));
+        QCOMPARE(window.findChild<QComboBox *>("notebooks")->currentData().toString(), QString("target-book"));
+        QVERIFY(window.findChild<QPushButton *>(split ? "splitMode" : "previewMode")->isChecked());
+        QTRY_VERIFY_WITH_TIMEOUT(preview->matchesDocument(targetContent, "target-note") && preview->renderedRevision() == preview->revision(), 5000);
+        QTRY_VERIFY_WITH_TIMEOUT(javascript(*preview, "Math.abs(document.getElementById('目标章节').getBoundingClientRect().top) < 5").toBool(), 5000);
+        preview->findChild<PreviewBridge *>()->openLocalLink(sourceRevision, QUrl::fromLocalFile(sourcePath).toString());
+        QCOMPARE(tabs->currentIndex(), 1);
+        tabs->setCurrentIndex(0);
+        QTRY_COMPARE_WITH_TIMEOUT(preview->renderedRevision(), preview->revision(), 5000);
+        javascript(*preview, "document.querySelector('a').click()");
+        QTRY_COMPARE(tabs->currentIndex(), 1);
+        QCOMPARE(tabs->count(), 2);
+        tabs->setCurrentIndex(0);
+        QTRY_COMPARE_WITH_TIMEOUT(preview->renderedRevision(), preview->revision(), 5000);
+        bool missingReported = false;
+        QTimer::singleShot(100, &window, [&] {
+            auto *message = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+            QVERIFY(message);
+            const auto close = qScopeGuard([message] { message->accept(); });
+            QVERIFY(message->text().contains("missing.md"));
+            missingReported = true;
+        });
+        javascript(*preview, "Array.from(document.querySelectorAll('a')).find(a => a.textContent === 'Missing').click()");
+        QTRY_VERIFY(missingReported);
+        QCOMPARE(tabs->currentIndex(), 0);
+        QCOMPARE(tabs->count(), 2);
+    }
+
     void fencedCodeSyntaxHighlighting_data() { // NOLINT(readability-identifier-naming): Qt Test data slot.
         QTest::addColumn<QString>("language");
         QTest::addColumn<QString>("code");

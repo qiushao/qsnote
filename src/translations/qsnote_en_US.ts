@@ -151,6 +151,18 @@
     <context>
         <name>MainWindow</name>
         <message>
+            <source>无法打开链接</source>
+            <translation>Unable to Open Link</translation>
+        </message>
+        <message>
+            <source>链接目标不存在：%1</source>
+            <translation>The link target does not exist: %1</translation>
+        </message>
+        <message>
+            <source>无法打开链接目标：%1</source>
+            <translation>Unable to open the link target: %1</translation>
+        </message>
+        <message>
             <source>清空已完成事项</source>
             <translation>Clear completed items</translation>
         </message>
