@@ -68,6 +68,7 @@ private:
     static QStringList siteCategories(const Notebook &book);
     void showTreeMenu(const QPoint &position);
     void openNote(const QString &id);
+    void showTabMenu(const QPoint &position);
     void closeTab(int index);
     enum class ViewMode { Edit, Preview, Split };
     struct Heading {

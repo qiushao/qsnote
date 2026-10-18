@@ -26,6 +26,7 @@
 #include <QTextLayout>
 #include <QTextStream>
 #include <QDialog>
+#include <QDesktopServices>
 #include <QCheckBox>
 #include <QClipboard>
 #include <QMimeData>
@@ -69,6 +70,14 @@ QString fixturePath(const QString &name) {
     return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/notebooks/" + name;
 }
 }// namespace
+
+class LocalUrlHandler : public QObject {
+    Q_OBJECT
+public:
+    QUrl url;
+public slots:
+    void open(const QUrl &value) { url = value; }
+};
 
 // Qt Test discovers non-static slots through the meta-object system.
 // NOLINTBEGIN(readability-convert-member-functions-to-static)
@@ -2558,6 +2567,121 @@ st->e
         QCOMPARE(tabs->count(), 1);
         emit tabs->tabCloseRequested(0);
         QCOMPARE(window.findChild<QStackedWidget *>("editorPages")->currentIndex(), 0);
+    }
+
+    void tabContextActions() {
+        NotebookStore fixture;
+        Notebook book{"menu-book", "Menu", "normal", {}, {}, fixturePath("menu-book")};
+        book.notes.append({"menu-folder", {}, "文件夹", {}, true, {}});
+        book.notes.append({"menu-a", "menu-folder", "A 空格.md", "# A", false, {}});
+        book.notes.append({"menu-b", {}, "B.md", "# B", false, {}});
+        fixture.notebooks.append(book);
+        fixture.notebooks.append({"menu-other", "Other", "normal", {{"menu-c", {}, "C.md", "# C", false, {}}}, {}, fixturePath("menu-other")});
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.resize(1400, 800);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *tree = window.findChild<QTreeWidget *>("noteTree");
+        auto *tabs = window.findChild<QTabBar *>("noteTabs");
+        auto *notebooks = window.findChild<QComboBox *>("notebooks");
+        auto *search = window.findChild<QLineEdit *>("search");
+        auto findItem = [tree](const QString &id) -> QTreeWidgetItem * {
+            QTreeWidgetItemIterator item(tree);
+            while (*item) {
+                if ((*item)->data(0, Qt::UserRole).toString() == id) return *item;
+                ++item;
+            }
+            return nullptr;
+        };
+        findItem("menu-folder")->setExpanded(true);
+        openTreeNote(tree, findItem("menu-a"));
+        auto *a = window.findChild<vte::VTextEdit *>("editor");
+        a->moveCursor(QTextCursor::End);
+        a->insertPlainText(" edited A");
+        openTreeNote(tree, findItem("menu-b"));
+        auto *b = window.findChild<vte::VTextEdit *>("editor");
+        b->moveCursor(QTextCursor::End);
+        b->insertPlainText(" edited B");
+        auto invokeMenu = [tabs](int index, const QString &text) {
+            QTimer::singleShot(0, tabs, [text] {
+                auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+                QVERIFY(menu);
+                const auto close = qScopeGuard([menu] { menu->close(); });
+                QStringList labels;
+                QAction *selected = nullptr;
+                for (auto *action: menu->actions()) {
+                    if (!action->isSeparator()) labels.append(action->text());
+                    if (action->text() == text) selected = action;
+                }
+                QCOMPARE(labels, (QStringList{"复制相对路径", "复制绝对路径", "打开路径", "定位节点", "全部保存", "关闭标签", "关闭其他标签", "关闭所有标签"}));
+                QVERIFY(selected);
+                QVERIFY(selected->isEnabled());
+                selected->trigger();
+            });
+            const auto point = tabs->tabRect(index).center();
+            QContextMenuEvent event(QContextMenuEvent::Mouse, point, tabs->mapToGlobal(point));
+            QApplication::sendEvent(tabs, &event);
+        };
+        invokeMenu(0, "复制相对路径");
+        QCOMPARE(QApplication::clipboard()->text(), QDir::toNativeSeparators(QStringLiteral("文件夹/A 空格.md")));
+        invokeMenu(0, "复制绝对路径");
+        const auto path = QDir(book.path).absoluteFilePath(fixture.note("menu-a")->path);
+        QCOMPARE(QApplication::clipboard()->text(), QDir::toNativeSeparators(path));
+        QCOMPARE(tabs->currentIndex(), 1);
+        LocalUrlHandler handler;
+        QDesktopServices::setUrlHandler("file", &handler, "open");
+        const auto resetHandler = qScopeGuard([] { QDesktopServices::unsetUrlHandler("file"); });
+        invokeMenu(0, "打开路径");
+        QCOMPARE(handler.url, QUrl::fromLocalFile(QFileInfo(path).absolutePath()));
+        invokeMenu(0, "全部保存");
+        NotebookStore saved;
+        QVERIFY2(saved.load(&error), qPrintable(error));
+        QCOMPARE(saved.note("menu-a")->content, a->toPlainText());
+        QCOMPARE(saved.note("menu-b")->content, b->toPlainText());
+        QVERIFY(tabs->tabIcon(0).isNull());
+        QVERIFY(tabs->tabIcon(1).isNull());
+
+        findItem("menu-folder")->setExpanded(false);
+        notebooks->setCurrentIndex(notebooks->findData("menu-other"));
+        openTreeNote(tree, findItem("menu-c"));
+        search->setText("no matches");
+        window.findChild<QWidget *>("leftPanel")->hide();
+        invokeMenu(0, "定位节点");
+        QCOMPARE(notebooks->currentData().toString(), QString("menu-book"));
+        QVERIFY(search->text().isEmpty());
+        QCOMPARE(tabs->currentIndex(), 0);
+        QCOMPARE(tree->currentItem()->data(0, Qt::UserRole).toString(), QString("menu-a"));
+        QVERIFY(tree->currentItem()->parent()->isExpanded());
+        QVERIFY(tree->isVisible());
+
+        tabs->moveTab(0, 1);
+        tabs->setCurrentIndex(0);
+        const QPointer<vte::VTextEdit> closedA(a);
+        const QPointer<vte::VTextEdit> keptB(b);
+        invokeMenu(1, "关闭标签");
+        QVERIFY(closedA.isNull());
+        QVERIFY(keptB);
+        QCOMPARE(tabs->count(), 2);
+        QCOMPARE(tabs->tabData(tabs->currentIndex()).toString(), QString("menu-b"));
+        openTreeNote(tree, findItem("menu-a"));
+        b->moveCursor(QTextCursor::End);
+        b->insertPlainText(" saved on close");
+        invokeMenu(0, "关闭其他标签");
+        QCOMPARE(tabs->count(), 1);
+        QCOMPARE(tabs->tabData(0).toString(), QString("menu-b"));
+        QCOMPARE(window.findChild<vte::VTextEdit *>("editor"), b);
+        QVERIFY2(saved.load(&error), qPrintable(error));
+        QCOMPARE(saved.note("menu-b")->content, b->toPlainText());
+        b->insertPlainText(" saved on close all");
+        const auto finalContent = b->toPlainText();
+        invokeMenu(0, "关闭所有标签");
+        QCOMPARE(tabs->count(), 0);
+        QVERIFY(keptB.isNull());
+        QCOMPARE(window.findChild<QStackedWidget *>("editorPages")->currentIndex(), 0);
+        QVERIFY2(saved.load(&error), qPrintable(error));
+        QCOMPARE(saved.note("menu-b")->content, finalContent);
     }
 
     void independentTabSessions() {

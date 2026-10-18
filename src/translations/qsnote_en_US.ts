@@ -151,6 +151,38 @@
     <context>
         <name>MainWindow</name>
         <message>
+            <source>复制相对路径</source>
+            <translation>Copy Relative Path</translation>
+        </message>
+        <message>
+            <source>复制绝对路径</source>
+            <translation>Copy Absolute Path</translation>
+        </message>
+        <message>
+            <source>打开路径</source>
+            <translation>Open Containing Folder</translation>
+        </message>
+        <message>
+            <source>定位节点</source>
+            <translation>Reveal in Notebook</translation>
+        </message>
+        <message>
+            <source>全部保存</source>
+            <translation>Save All</translation>
+        </message>
+        <message>
+            <source>关闭标签</source>
+            <translation>Close Tab</translation>
+        </message>
+        <message>
+            <source>关闭其他标签</source>
+            <translation>Close Other Tabs</translation>
+        </message>
+        <message>
+            <source>关闭所有标签</source>
+            <translation>Close All Tabs</translation>
+        </message>
+        <message>
             <source>无法打开链接</source>
             <translation>Unable to Open Link</translation>
         </message>

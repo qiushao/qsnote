@@ -22,6 +22,7 @@
 #include <QApplication>
 #include <QButtonGroup>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDate>
@@ -723,6 +724,7 @@ void MainWindow::buildUi() {
     tabs_->setElideMode(Qt::ElideRight);
     tabs_->setUsesScrollButtons(true);
     tabs_->setDrawBase(false);
+    tabs_->setContextMenuPolicy(Qt::CustomContextMenu);
     strip->setMinimumHeight(46);
     stripLayout->addWidget(tabs_);
     centerLayout->addWidget(strip);
@@ -865,6 +867,7 @@ void MainWindow::buildUi() {
     });
     connect(tabs_, &QTabBar::currentChanged, this, &MainWindow::refreshEditor);
     connect(tabs_, &QTabBar::tabCloseRequested, this, &MainWindow::closeTab);
+    connect(tabs_, &QTabBar::customContextMenuRequested, this, &MainWindow::showTabMenu);
     connect(toggleLeft_, &QPushButton::clicked, this, [this] {
         leftRequested_ = !left_->isVisible();
         left_->setVisible(leftRequested_);
@@ -1560,6 +1563,68 @@ void MainWindow::openNote(const QString &id) {
     }
     previewModeEnabled_ = false;
     refreshEditor();
+}
+
+void MainWindow::showTabMenu(const QPoint &position) {
+    const int index = tabs_->tabAt(position);
+    if (index < 0) return;
+    const auto id = tabs_->tabData(index).toString();
+    const auto *note = store_.note(id);
+    const auto *book = store_.owner(id);
+    if (!note || !book) return;
+    const auto path = note->path.isEmpty() ? QString() : QDir(book->path).absoluteFilePath(note->path);
+    const auto bookId = book->id;
+    QMenu menu(this);
+    auto *copyRelativePath = menu.addAction(tr("复制相对路径"), this, [relativePath = note->path] {
+        QApplication::clipboard()->setText(QDir::toNativeSeparators(relativePath));
+    });
+    copyRelativePath->setEnabled(!path.isEmpty());
+    auto *copyPath = menu.addAction(tr("复制绝对路径"), this, [path] {
+        QApplication::clipboard()->setText(QDir::toNativeSeparators(path));
+    });
+    copyPath->setEnabled(!path.isEmpty());
+    auto *openPath = menu.addAction(tr("打开路径"), this, [path] {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(path).absolutePath()));
+    });
+    openPath->setEnabled(!path.isEmpty());
+    menu.addAction(tr("定位节点"), this, [this, index, id, bookId] {
+        notebooks_->setCurrentIndex(notebooks_->findData(bookId));
+        search_->clear();
+        tabs_->setCurrentIndex(index);
+        leftRequested_ = true;
+        left_->show();
+        if (width() < 720) right_->hide();
+        QTreeWidgetItemIterator item(tree_);
+        while (*item) {
+            if ((*item)->data(0, Qt::UserRole).toString() == id) {
+                for (auto *parent = (*item)->parent(); parent; parent = parent->parent()) parent->setExpanded(true);
+                tree_->setCurrentItem(*item);
+                tree_->scrollToItem(*item);
+                break;
+            }
+            ++item;
+        }
+    });
+    menu.addSeparator();
+    menu.addAction(tr("全部保存"), this, [this] { save(); });
+    menu.addAction(tr("关闭标签"), this, [this, index] { closeTab(index); });
+    const auto closeTabs = [this, id](bool keepTarget) {
+        if (!save()) return;
+        {
+            const QSignalBlocker blocker(tabs_);
+            for (int tab = tabs_->count() - 1; tab >= 0; --tab) {
+                const auto noteId = tabs_->tabData(tab).toString();
+                if (keepTarget && noteId == id) continue;
+                tabs_->removeTab(tab);
+                removeEditor(noteId);
+            }
+        }
+        refreshEditor();
+    };
+    auto *closeOthers = menu.addAction(tr("关闭其他标签"), this, [closeTabs] { closeTabs(true); });
+    closeOthers->setEnabled(tabs_->count() > 1);
+    menu.addAction(tr("关闭所有标签"), this, [closeTabs] { closeTabs(false); });
+    menu.exec(tabs_->mapToGlobal(position));
 }
 
 void MainWindow::closeTab(int index) {
