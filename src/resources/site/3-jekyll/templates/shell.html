@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{headTitle}}</title>
+<meta name="description" content="{{description}}">
+<link rel="canonical" href="{{permalink}}">
+<link rel="stylesheet" href="{{root}}css/main.css">
+<link rel="stylesheet" href="{{root}}css/qsnote-3-jekyll.css">
+<script src="{{root}}js/qsnote-3-jekyll.js" defer></script>
+</head>
+<body data-root="{{root}}">
+<aside id="sidebar" aria-label="站点导航">
+  <div id="sidebar-left">
+    <header class="header">
+      <a id="sidebar-avatar" href="{{root}}"><img id="sidebar-avatar-img" alt="{{siteTitle}}" src="{{root}}assets/img/avatar.jpg"></a>
+      <a class="site-title" href="{{root}}">{{siteTitle}}</a>
+      <p class="site-author">{{author}}</p>
+      <nav class="site-menu" aria-label="页面">{{menu}}</nav>
+    </header>
+    <ul id="sidebar-tags" aria-label="按标签筛选文章">
+      <li><button class="sidebar-tag active" type="button" data-all="true" aria-pressed="true">全部文章</button></li>
+      {{filters}}
+    </ul>
+  </div>
+  <div id="sidebar-right">
+    <div id="search-box"><input id="search-input" type="search" placeholder="搜索文章" aria-label="搜索文章"></div>
+    <nav id="toc" aria-label="文章列表">{{entries}}<p id="search-empty" role="status" hidden>没有找到文章</p></nav>
+  </div>
+</aside>
+<main id="main">
+  {{content}}
+  <footer class="footer"><div class="container">
+    <p class="footer-entry">{{description}}</p>
+    <p class="footer-entry">{{footer}}</p>
+    <p class="footer-entry">Theme <a href="https://github.com/P233/3-Jekyll">3-Jekyll</a> by P233</p>
+  </div></footer>
+</main>
+<button id="menu" type="button" aria-label="切换导航" aria-controls="sidebar" aria-expanded="false"><span id="menu-icons" aria-hidden="true"></span></button>
+</body>
+</html>

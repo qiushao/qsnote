@@ -54,3 +54,22 @@ menu:
 Yilia 原 CSS SHA-256：`b0d7ccb28e00e916f5b7ea2c3e6c3fa3e204fef3a447f4de8415f8d7c9d869cd`。
 
 持续测试覆盖离线生成、CSS 指纹、配置迁移、分页、页面结构、搜索、目录和手机菜单。预览测试保存桌面与移动尺寸的截图供检查。
+
+## 3-Jekyll 的接入方式
+
+- 来源：[P233/3-Jekyll](https://github.com/P233/3-Jekyll)，固定提交 `45ca7c4578d498890c8ef078ff13c189a12df114`，对应 master 的三栏版本。
+- 保留上游默认绿色渐变、170px 标签栏、380px 文章列表栏、正文区，以及 1280px / 767px 响应式断点。模板对应上游 `default.html`、`post.html` 和 `sidebar.html`；默认头像和 IcoMoon 图标字体原样复制。
+- `main.css` 从上游 Sass 预编译；`qsnote-3-jekyll.css` 仅补充站点导航、列表、分页及键盘焦点。正文继续使用 QSNote 的统一 Markdown 样式与高亮。
+- 上游首页只有 `hi` 占位，移植后使用站点标题和分页文章摘要。左侧按标签筛选，文章列表包含全部已发布文章；搜索标题、正文和标签，支持中文、带空格或引号的标签。分类、归档、友链、关于及评论沿用现有站点数据。
+- `qsnote-3-jekyll.js` 适配筛选、搜索与手机菜单；页面使用静态链接跳转，避免 PJAX 替换正文时影响评论加载。未引入上游 Google Analytics、远程网页字体或旧版 JS 依赖；生成与浏览均无需 Jekyll、Ruby、Node.js 或 npm。
+- 主题标识为 `3-jekyll`，在站点配置的主题下拉框中选择 **3-Jekyll**。上游此提交未附主题许可证，来源及授权现状如实记录在 `3-jekyll/THIRD-PARTY-NOTICES.md`，该文件也随站点输出。
+
+CSS 更新时，在上述固定提交的源码目录中去掉 `css/main.sass` 开头的 Jekyll front matter（前 3 行），另存为 `main-build.sass`，然后执行：
+
+```sh
+npm exec --yes --package=sass@1.80.7 -- sass --no-source-map --style=compressed --load-path=_sass main-build.sass main.css
+```
+
+将生成文件复制到 `3-jekyll/assets/css/main.css`。不改动 Sass 变量或导入顺序。
+CSS SHA-256：`2ed7ba6e517eea794bb4e71edd77e3b891c4ba438b9e61e30630e9229f5b0db9`。
+测试覆盖原生离线生成、配置保存、子路径、分页、评论、主题切换清理，以及桌面三栏、筛选、全文搜索、手机菜单和 Escape 关闭；预览测试输出 `site-preview-3-jekyll*.png`。

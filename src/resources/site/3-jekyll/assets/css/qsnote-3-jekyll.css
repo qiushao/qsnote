@@ -1,0 +1,28 @@
+/* QSNote navigation and generated lists; main.css is compiled from upstream Sass. */
+#sidebar-left { overflow-y: auto; }
+.site-title, .site-author { display: block; margin: 10px; text-align: center; color: #fff; overflow-wrap: anywhere; }
+.site-title { text-decoration: none; line-height: 1.4; }
+.site-author { font-size: 13px; }
+.site-menu { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; padding: 15px 10px 20px; }
+.site-menu a { color: #fff; font-size: 14px; text-decoration: none; }
+button.sidebar-tag { display: block; width: 100%; padding: 0 8px; border: 0; border-bottom: 1px solid rgba(255,255,255,.5); background: transparent; font-family: inherit; overflow-wrap: anywhere; }
+.toc-link { width: 100%; }
+.toc-link[aria-current="page"] { font-weight: 600; }
+.toc-link[hidden], #search-empty[hidden] { display: none; }
+#search-empty { padding: 0 15px; color: #55606f; line-height: 1.5; }
+#main { overflow-wrap: anywhere; }
+.post-meta a, .post-categories a { margin-right: .6em; }
+.post-summary { padding: 20px 0; border-bottom: 1px solid #ebebeb; }
+.post-summary h2 { margin: 8px 0 12px; font-size: 1.3em; }
+.post-summary p { margin-bottom: 0; }
+.post-nav, .pagination { display: flex; flex-wrap: wrap; gap: 16px; padding: 20px 0; line-height: 1.5; }
+.post-nav { justify-content: space-between; }
+.pagination { justify-content: center; }
+.pagination a { color: #309e85; text-decoration: none; }
+.pagination .current { font-weight: bold; }
+:is(a, button, input):focus-visible { outline: 2px solid #283444 !important; outline-offset: -2px; }
+@media screen and (max-width: 767px) {
+  #sidebar-left { overflow: visible; }
+  #toc { min-height: 150px; }
+  .post-title { padding-right: 32px; }
+}

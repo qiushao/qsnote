@@ -3396,6 +3396,7 @@ st->e
         QTest::newRow("pure") << QString("pure");
         QTest::newRow("next") << QString("next");
         QTest::newRow("yilia") << QString("yilia");
+        QTest::newRow("3-jekyll") << QString("3-jekyll");
     }
 
     void siteMetadataConfigAndPreview() {
@@ -3403,6 +3404,11 @@ st->e
         NotebookStore fixture;
         Notebook site{"site", "测试站点", "site", {}, {{"title", "用户的站点"}, {"categories", QJsonArray{"Updated"}}, {"domain", "https://example.com/blog/"}}, fixturePath("site")};
         site.notes.append({"post-a", {}, "文章标题", "# 文章标题\n\n## 内容\n\n真实输入的文字", false, {{"category", "分类一"}, {"tags", "标签一, 标签二"}, {"date", "2026-10-09"}, {"slug", "article"}}});
+        if (theme == "3-jekyll") {
+            site.notes.first().metadata["tags"] = "标签一, 标签二, C++ \"入门\", all";
+            site.notes.append({"post-b", {}, "另一篇文章", "第二篇正文", false,
+                {{"category", "分类一"}, {"tags", "all things"}, {"slug", "second"}, {"date", "2026-10-08"}}});
+        }
         fixture.notebooks.append(site);
         QString error;
         QVERIFY2(fixture.save(&error), qPrintable(error));
@@ -3436,7 +3442,7 @@ st->e
         emit tree->customContextMenuRequested(articlePosition);
         QVERIFY(tree->topLevelItem(0)->text(0).contains("Updated"));
         window.findChild<QComboBox *>("groupBy")->setCurrentIndex(1);
-        QCOMPARE(tree->topLevelItemCount(), 2);
+        QCOMPARE(tree->topLevelItemCount(), theme == "3-jekyll" ? 5 : 2);
         window.grab().save("site-wide.png");
         QTimer::singleShot(30, &window, [theme] {
             auto *dialog = QApplication::activeModalWidget();
@@ -3478,6 +3484,7 @@ st->e
             QCOMPARE(themes->currentData().toString(), QString("pure"));
             QVERIFY(themes->findData("next") >= 0);
             QVERIFY(themes->findData("yilia") >= 0);
+            QVERIFY(themes->findData("3-jekyll") >= 0);
             QCOMPARE(themes->findData("stellar"), -1);
             themes->setCurrentIndex(themes->findData(theme));
             QVERIFY(!dialog->findChild<QLineEdit *>("config_token"));
@@ -3517,7 +3524,7 @@ st->e
             QSignalSpy loaded(browser, &QWebEngineView::loadFinished);
             if (browser->title().isEmpty()) QVERIFY(loaded.wait(15000));
             QTRY_VERIFY_WITH_TIMEOUT(browser->title().contains("Edited title"), 15000);
-            QTRY_VERIFY_WITH_TIMEOUT(javascript(*browser, theme == "pure" ? "document.readyState === 'complete' && !!document.querySelector('body.main-center > header.header')" : theme == "yilia" ? "document.readyState === 'complete' && !!document.querySelector('.left-col .header')" : "document.readyState === 'complete' && !!document.querySelector('.main .column .header')").toBool(), 15000);
+            QTRY_VERIFY_WITH_TIMEOUT(javascript(*browser, theme == "pure" ? "document.readyState === 'complete' && !!document.querySelector('body.main-center > header.header')" : theme == "yilia" ? "document.readyState === 'complete' && !!document.querySelector('.left-col .header')" : theme == "3-jekyll" ? "document.readyState === 'complete' && !!document.querySelector('#sidebar-left .header')" : "document.readyState === 'complete' && !!document.querySelector('.main .column .header')").toBool(), 15000);
             QCOMPARE(browser->url().path(), QString("/blog/"));
             javascript(*browser, "fetch('/blog/search.json').then(r => window.searchIndexReady = r.ok)");
             QTRY_VERIFY_WITH_TIMEOUT(javascript(*browser, "window.searchIndexReady === true").toBool(), 10000);
@@ -3526,8 +3533,9 @@ st->e
             if (theme == "next") QTRY_VERIFY_WITH_TIMEOUT(javascript(*browser, "typeof LocalSearch === 'function' && !!document.querySelector('.search-input')").toBool(), 10000);
             if (theme == "pure") javascript(*browser, "document.querySelector('.search-form-input').click(); const input=document.querySelector('.ins-search-input'); input.value='真实输入'; input.dispatchEvent(new Event('input', {bubbles:true})); input.dispatchEvent(new KeyboardEvent('keyup', {bubbles:true}));");
             else if (theme == "yilia") javascript(*browser, "document.querySelector('.search-trigger').click(); const input=document.querySelector('.search-ipt'); input.value='真实输入'; input.dispatchEvent(new Event('input', {bubbles:true}));");
+            else if (theme == "3-jekyll") javascript(*browser, "{ const input=document.querySelector('#search-input'); input.value='真实输入'; input.dispatchEvent(new Event('input', {bubbles:true})); }");
             else javascript(*browser, "document.querySelector('.popup-trigger').click(); const input=document.querySelector('.search-input'); input.value='真实输入'; input.dispatchEvent(new Event('input', {bubbles:true}));");
-            QTRY_VERIFY_WITH_TIMEOUT(javascript(*browser, "!!document.querySelector('.ins-section-container .ins-search-item[data-url=\"/blog/article/\"], .search-result-list a[href*=\"/blog/article/\"], .search-ul a[href=\"/blog/article/\"]')").toBool(), 10000);
+            QTRY_VERIFY_WITH_TIMEOUT(javascript(*browser, "!!document.querySelector('.ins-section-container .ins-search-item[data-url=\"/blog/article/\"], .search-result-list a[href*=\"/blog/article/\"], .search-ul a[href=\"/blog/article/\"], #toc .toc-link[href=\"/blog/article/\"]:not([hidden])')").toBool(), 10000);
             if (theme == "next") {
                 QVERIFY(javascript(*browser, "document.body.classList.contains('search-active')").toBool());
                 javascript(*browser, "document.querySelector('.popup-btn-close').click()");
@@ -3543,6 +3551,23 @@ st->e
                 QVERIFY(javascript(*browser, "!document.querySelector('#container').classList.contains('show')").toBool());
                 QTest::qWait(900);
                 dialog->grab().save("site-preview-yilia-home.png");
+            }
+            if (theme == "3-jekyll") {
+                QVERIFY(javascript(*browser, "window.innerWidth > 1280 && document.querySelector('#sidebar').getBoundingClientRect().width === 551 && Math.abs(document.querySelector('#main').getBoundingClientRect().left - 551) < 1").toBool());
+                QTRY_VERIFY(javascript(*browser, "document.querySelectorAll('#toc .toc-link:not([hidden])').length === 1").toBool());
+                javascript(*browser, "{ const input=document.querySelector('#search-input'); input.value='没有这样的文章'; input.dispatchEvent(new Event('input')); }");
+                QTRY_VERIFY(javascript(*browser, "!document.querySelector('#search-empty').hidden && document.querySelectorAll('#toc .toc-link:not([hidden])').length === 0").toBool());
+                javascript(*browser, "{ const input=document.querySelector('#search-input'); input.value=''; input.dispatchEvent(new Event('input')); }");
+                for (const auto &tag: {QString("C++ \"入门\""), QString("all")}) {
+                    const auto literal = QString::fromUtf8(QJsonDocument(QJsonArray{tag}).toJson(QJsonDocument::Compact));
+                    javascript(*browser, "Array.from(document.querySelectorAll('[data-filter]')).find(b => b.dataset.filter === " + literal + "[0]).click()");
+                    QTRY_VERIFY(javascript(*browser, "document.querySelectorAll('#toc .toc-link:not([hidden])').length === 1 && !document.querySelector('#toc a[href=\"/blog/article/\"]').hidden && document.querySelector('#toc a[href=\"/blog/second/\"]').hidden").toBool());
+                }
+                javascript(*browser, "document.querySelector('[data-all]').click()");
+                QCOMPARE(javascript(*browser, "document.querySelectorAll('#toc .toc-link:not([hidden])').length").toInt(), 2);
+                QTRY_VERIFY(javascript(*browser, "document.querySelector('#sidebar-avatar-img').naturalWidth > 0 && document.fonts.check('16px icomoon')").toBool());
+                QTest::qWait(100);
+                dialog->grab().save("site-preview-3-jekyll-home.png");
             }
             const auto homeUrl = browser->url();
             if (theme == "next") dialog->grab().save("site-preview-next-home.png");
@@ -3601,17 +3626,22 @@ st->e
             }
             QTest::qWait(500);
             dialog->grab().save("site-preview-" + theme + "-mobile.png");
-            const auto menu = theme == "pure" ? ".navbar-toggle" : theme == "yilia" ? "#mobile-nav .slider-trigger" : ".site-nav-toggle";
+            const auto menu = theme == "pure" ? ".navbar-toggle" : theme == "yilia" ? "#mobile-nav .slider-trigger" : theme == "3-jekyll" ? "#menu" : ".site-nav-toggle";
             QTRY_VERIFY(javascript(*browser, QString("document.querySelector('%1').getBoundingClientRect().width > 0").arg(menu)).toBool());
             javascript(*browser, QString("document.querySelector('%1').click()").arg(menu));
-            QTRY_VERIFY(javascript(*browser, theme == "pure" ? "document.querySelector('#main-navbar').classList.contains('in')" : theme == "yilia" ? "document.querySelector('#container').classList.contains('show')" : "document.body.classList.contains('site-nav-on')").toBool());
+            QTRY_VERIFY(javascript(*browser, theme == "pure" ? "document.querySelector('#main-navbar').classList.contains('in')" : theme == "yilia" ? "document.querySelector('#container').classList.contains('show')" : theme == "3-jekyll" ? "document.querySelector('#sidebar').classList.contains('open')" : "document.body.classList.contains('site-nav-on')").toBool());
             if (theme == "yilia") {
                 QTest::qWait(900);
                 QVERIFY(javascript(*browser, "Math.abs(document.querySelector('.tools-col').getBoundingClientRect().left) < 1").toBool());
                 dialog->grab().save("site-preview-yilia-mobile-search.png");
                 javascript(*browser, "document.querySelector('.search-close').click()");
+            } else if (theme == "3-jekyll") {
+                QTRY_VERIFY(javascript(*browser, "Math.abs(document.querySelector('#sidebar').getBoundingClientRect().left) < 1 && !document.querySelector('#sidebar').inert").toBool());
+                dialog->grab().save("site-preview-3-jekyll-mobile-menu.png");
+                javascript(*browser, "document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}))");
+                QVERIFY(javascript(*browser, "document.querySelector('#sidebar').inert && document.activeElement.id === 'menu'").toBool());
             } else javascript(*browser, QString("document.querySelector('%1').click()").arg(menu));
-            QTRY_VERIFY(javascript(*browser, theme == "pure" ? "!document.querySelector('#main-navbar').classList.contains('in')" : theme == "yilia" ? "!document.querySelector('#container').classList.contains('show')" : "!document.body.classList.contains('site-nav-on')").toBool());
+            QTRY_VERIFY(javascript(*browser, theme == "pure" ? "!document.querySelector('#main-navbar').classList.contains('in')" : theme == "yilia" ? "!document.querySelector('#container').classList.contains('show')" : theme == "3-jekyll" ? "!document.querySelector('#sidebar').classList.contains('open')" : "!document.body.classList.contains('site-nav-on')").toBool());
             QTest::mouseClick(dialog->findChild<QPushButton *>("closeSitePreview"), Qt::LeftButton);
         });
         previewTimer.start();

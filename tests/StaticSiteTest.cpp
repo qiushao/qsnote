@@ -30,6 +30,7 @@ private slots:
         QTest::newRow("pure") << QString("pure");
         QTest::newRow("next") << QString("next");
         QTest::newRow("yilia") << QString("yilia");
+        QTest::newRow("3-jekyll") << QString("3-jekyll");
     }
     void generateWithoutExternalPrograms() {
         QFETCH(QString, theme);
@@ -59,19 +60,30 @@ private slots:
         QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
         for (const auto &file: {"index.html", "article/index.html", "archives/index.html", "archives/2026/index.html", "archives/2026/10/index.html",
                                 "categories/index.html", "categories/分类/index.html", "tags/index.html", "tags/标签一/index.html",
-                                "links/index.html", "about/index.html", "theme-LICENSE", "search.json"})
+                                "links/index.html", "about/index.html", "search.json"})
             QVERIFY2(QFile::exists(directory.path() + "/public/" + file), file);
+        QVERIFY(QFile::exists(directory.path() + "/public/" + (theme == "3-jekyll" ? "theme-THIRD-PARTY-NOTICES.md" : "theme-LICENSE")));
         const auto article = read(directory.path() + "/public/article/index.html");
         for (const auto &content: {"<strong>加粗</strong>", "<table>", "language-cpp", "自定义页脚", "作者", "正文标题", "id=\"正文标题\"", "2026-10-09"})
             QVERIFY2(article.contains(content), content);
-        QVERIFY(article.contains(theme == "pure" ? "class=\"main-center\"" : theme == "yilia" ? "class=\"article article-type-post\"" : "class=\"main-inner post posts-expand\""));
+        QVERIFY(article.contains(theme == "pure" ? "class=\"main-center\"" : theme == "yilia" ? "class=\"article article-type-post\"" : theme == "3-jekyll" ? "class=\"post container\"" : "class=\"main-inner post posts-expand\""));
         QVERIFY(article.contains(theme == "pure" ? "/blog/css/style.css" : "/blog/css/main.css"));
         // Fingerprints of the original themes' compiled CSS: preserve layout, colors and breakpoints.
         const auto css = read(directory.path() + "/public/css/" + (theme == "pure" ? "style.css" : "main.css"));
         QCOMPARE(QCryptographicHash::hash(css, QCryptographicHash::Sha256).toHex(), theme == "pure"
             ? QByteArray("2aab838134abc02a55c42e3afcee6e867155aca4b0c28c7d66d1e1f74d0b9c10")
+            : theme == "3-jekyll" ? QByteArray("2ed7ba6e517eea794bb4e71edd77e3b891c4ba438b9e61e30630e9229f5b0db9")
             : theme == "yilia" ? QByteArray("b0d7ccb28e00e916f5b7ea2c3e6c3fa3e204fef3a447f4de8415f8d7c9d869cd")
             : QByteArray("d5d3280e2cb167a84fca9c4459d6a5db0603b2512f201ce85bd79b6148d9d71e"));
+        if (theme == "3-jekyll") {
+            for (const auto &asset: {"js/qsnote-3-jekyll.js", "css/qsnote-3-jekyll.css", "assets/icon/icomoon.woff", "assets/img/avatar.jpg"})
+                QVERIFY2(!read(directory.path() + "/public/" + asset).isEmpty(), asset);
+            for (const auto &markup: {"id=\"sidebar-left\"", "id=\"sidebar-right\"", "id=\"main\"", "data-filter=\"标签一\"", "aria-current=\"page\"", "class=\"post-meta-span date\""})
+                QVERIFY2(article.contains(markup), markup);
+            QVERIFY(!article.contains("{{"));
+            QVERIFY(!article.contains("fonts.googleapis.com"));
+            QVERIFY(read(directory.path() + "/public/archives/index.html").contains("class=\"post-summary\""));
+        }
         if (theme == "yilia") {
             for (const auto &asset: {"js/qsnote-yilia.js", "css/qsnote-yilia.css", "css/fonts/iconfont.8c627f.woff", "theme-THIRD-PARTY-NOTICES.md"})
                 QVERIFY2(!read(directory.path() + "/public/" + asset).isEmpty(), asset);
@@ -107,6 +119,10 @@ private slots:
         if (theme == "yilia") {
             QVERIFY(!QFile::exists(directory.path() + "/public/js/qsnote-yilia.js"));
             QVERIFY(!QFile::exists(directory.path() + "/public/css/qsnote-yilia.css"));
+        }
+        if (theme == "3-jekyll") {
+            QVERIFY(!QFile::exists(directory.path() + "/public/js/qsnote-3-jekyll.js"));
+            QVERIFY(!QFile::exists(directory.path() + "/public/assets/icon/icomoon.woff"));
         }
         QVERIFY(read(directory.path() + "/public/index.html").contains(theme == "pure" ? "class=\"main-inner index posts-expand\"" : "class=\"main-center\""));
         QTemporaryDir exported;

@@ -77,5 +77,18 @@
     <file>site/yilia/templates/page.html</file>
     <file>site/yilia/templates/post.html</file>
     <file>site/yilia/templates/shell.html</file>
+    <file>site/3-jekyll/THIRD-PARTY-NOTICES.md</file>
+    <file>site/3-jekyll/assets/assets/icon/icomoon.eot</file>
+    <file>site/3-jekyll/assets/assets/icon/icomoon.svg</file>
+    <file>site/3-jekyll/assets/assets/icon/icomoon.ttf</file>
+    <file>site/3-jekyll/assets/assets/icon/icomoon.woff</file>
+    <file>site/3-jekyll/assets/assets/img/avatar.jpg</file>
+    <file>site/3-jekyll/assets/css/main.css</file>
+    <file>site/3-jekyll/assets/css/qsnote-3-jekyll.css</file>
+    <file>site/3-jekyll/assets/js/qsnote-3-jekyll.js</file>
+    <file>site/3-jekyll/templates/card.html</file>
+    <file>site/3-jekyll/templates/page.html</file>
+    <file>site/3-jekyll/templates/post.html</file>
+    <file>site/3-jekyll/templates/shell.html</file>
   </qresource>
 </RCC>
