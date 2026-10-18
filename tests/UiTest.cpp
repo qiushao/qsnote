@@ -430,6 +430,38 @@ st->e
         QVERIFY(!editor.getText().contains("data:image"));
     }
 
+    void insertImagesIntoResources() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        MarkdownEditor editor;
+        editor.setBasePath(directory.path());
+        editor.setText("before\n");
+        auto *text = editor.getTextEdit();
+        text->moveCursor(QTextCursor::End);
+        QImage image(12, 9, QImage::Format_ARGB32);
+        image.fill(Qt::green);
+        QApplication::clipboard()->setImage(image);
+        const auto clearClipboard = qScopeGuard([] { QApplication::clipboard()->clear(); });
+        text->paste();
+        auto markdown = editor.getText();
+        QVERIFY(markdown.contains("](resources/images/image-"));
+        QVERIFY(!markdown.contains("base64"));
+        const auto pasted = markdown.section("resources/images/", 1).section(')', 0, 0);
+        QImage stored(directory.filePath("resources/images/" + QUrl::fromPercentEncoding(pasted.toUtf8())));
+        QCOMPARE(stored, image);
+
+        const auto source = directory.filePath("first image.png");
+        QVERIFY(image.save(source));
+        auto *mime = new QMimeData;
+        mime->setUrls({QUrl::fromLocalFile(source)});
+        QApplication::clipboard()->setMimeData(mime);
+        text->moveCursor(QTextCursor::End);
+        text->paste();
+        markdown = editor.getText();
+        QVERIFY(markdown.contains("![first image](resources/images/first%20image.png)"));
+        QVERIFY(QFile::exists(directory.filePath("resources/images/first image.png")));
+    }
+
     void localImagesInEditorAndReader() {
         NotebookStore fixture;
         const QString markdown = "# Local image\n\n![local](assets/image.png)\n";

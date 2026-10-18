@@ -5,8 +5,11 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
+#include <QDateTime>
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QDoubleSpinBox>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -48,6 +51,37 @@ QString imageLink(const QImage &image, const QString &description) {
     buffer.open(QIODevice::WriteOnly);
     image.save(&buffer, "PNG");
     return vte::MarkdownUtils::generateImageLink(description, "data:image/png;base64," + QString::fromLatin1(bytes.toBase64()), {});
+}
+
+// Empty path on failure. Never reuses an existing file.
+QString imageTarget(const QString &basePath, const QString &name, const QString &suffix) {
+    const QDir directory(QDir(basePath).filePath("resources/images"));
+    if (!QDir().mkpath(directory.path())) return {};
+    auto target = directory.filePath(name + '.' + suffix);
+    for (int index = 1; QFileInfo::exists(target); ++index) {
+        target = directory.filePath(QStringLiteral("%1-%2.%3").arg(name).arg(index).arg(suffix));
+    }
+    return target;
+}
+
+// URL of an image in <note dir>/resources/images, relative to the note.
+QString imageUrl(const QString &path) {
+    return "resources/images/" + QString::fromLatin1(QUrl::toPercentEncoding(QFileInfo(path).fileName()));
+}
+
+// Copies the image file into <note dir>/resources/images, keeping its name and format.
+QString storeImage(const QString &basePath, const QString &source) {
+    const QFileInfo info(source);
+    const auto target = imageTarget(basePath, info.completeBaseName(), info.suffix());
+    if (target.isEmpty() || !QFile::copy(source, target)) return {};
+    return imageUrl(target);
+}
+
+// Writes a clipboard image into <note dir>/resources/images as PNG.
+QString storePastedImage(const QString &basePath, const QImage &image) {
+    const auto target = imageTarget(basePath, "image-" + QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss"), "png");
+    if (target.isEmpty() || !image.save(target, "PNG")) return {};
+    return imageUrl(target);
 }
 
 QSharedPointer<vte::MarkdownEditorConfig> editorConfig() {
@@ -131,9 +165,25 @@ MarkdownEditor::MarkdownEditor(const QSharedPointer<vte::MarkdownEditorConfig> &
         if (!source->hasImage() && paths.isEmpty()) return;
         *handled = true;
         if (getTextEdit()->isReadOnly()) return;
+        // Without a note directory there is nowhere to store resources, so embed them.
+        const auto basePath = getBasePath();
+        const auto failCopy = [this, &basePath] {
+            QMessageBox::warning(this, tr("无法插入图片"), tr("无法将图片复制到 %1").arg(QDir(basePath).filePath("resources/images")));
+        };
         if (source->hasImage()) {
             const auto image = qvariant_cast<QImage>(source->imageData());
-            if (!image.isNull()) insertText(imageLink(image, getTextEdit()->textCursor().selectedText()));
+            if (image.isNull()) return;
+            const auto description = getTextEdit()->textCursor().selectedText();
+            if (basePath.isEmpty()) {
+                insertText(imageLink(image, description));
+                return;
+            }
+            const auto url = storePastedImage(basePath, image);
+            if (url.isEmpty()) {
+                failCopy();
+                return;
+            }
+            insertText(vte::MarkdownUtils::generateImageLink(description, url, {}));
             return;
         }
         QStringList links;
@@ -143,7 +193,17 @@ MarkdownEditor::MarkdownEditor(const QSharedPointer<vte::MarkdownEditorConfig> &
                 QMessageBox::warning(this, tr("无法插入图片"), tr("无法读取所选图片。"));
                 return;
             }
-            links.append(imageLink(image, QFileInfo(path).completeBaseName()));
+            const auto description = QFileInfo(path).completeBaseName();
+            if (basePath.isEmpty()) {
+                links.append(imageLink(image, description));
+                continue;
+            }
+            const auto url = storeImage(basePath, path);
+            if (url.isEmpty()) {
+                failCopy();
+                return;
+            }
+            links.append(vte::MarkdownUtils::generateImageLink(description, url, {}));
         }
         insertText(links.join('\n'));
     });
@@ -221,7 +281,22 @@ void MarkdownEditor::insertImage(quint64 requestId, const QString &selectedText)
         QMessageBox::warning(this, tr("无法插入图片"), tr("无法读取所选图片。"));
         return;
     }
-    const auto link = imageLink(image, selectedText);
+    const auto basePath = getBasePath();
+    if (basePath.isEmpty()) {
+        // No note directory to store resources next to, so fall back to embedding.
+        const auto link = imageLink(image, selectedText);
+        if (requestId) completeImageInsertion(requestId, link);
+        else
+            insertText(link);
+        return;
+    }
+    const auto relative = storeImage(basePath, path);
+    if (relative.isEmpty()) {
+        if (requestId) cancelImageInsertion(requestId);
+        QMessageBox::warning(this, tr("无法插入图片"), tr("无法将图片复制到 %1").arg(QDir(basePath).filePath("resources/images")));
+        return;
+    }
+    const auto link = vte::MarkdownUtils::generateImageLink(selectedText, relative, {});
     if (requestId) completeImageInsertion(requestId, link);
     else
         insertText(link);

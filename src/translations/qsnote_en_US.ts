@@ -1483,6 +1483,11 @@ It will be removed from the list. Files on disk will be kept, and you can add it
         </message>
         <message>
             <location line="+15" />
+            <source>无法将图片复制到 %1</source>
+            <translation>Unable to copy the image to %1</translation>
+        </message>
+        <message>
+            <location line="+4" />
             <source>查找和替换</source>
             <translation>Find and Replace</translation>
         </message>
