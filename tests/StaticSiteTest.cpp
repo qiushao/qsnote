@@ -138,6 +138,70 @@ private slots:
         QCOMPARE(QJsonDocument::fromJson(read(directory.path() + "/public/search.json")).array().size(), 0);
     }
 
+    void profileAndKeywords_data() { generateWithoutExternalPrograms_data(); } // NOLINT(readability-identifier-naming)
+    void profileAndKeywords() {
+        QFETCH(QString, theme);
+        QTemporaryDir directory;
+        NotebookStore store;
+        store.notebooks.append({"site", "站点", "site", {},
+            {{"theme", theme}, {"github", "https://github.com/example?tab=repositories&language=c++"},
+             {"city", "杭州 <西湖>"}, {"keywords", "站点，C++ & Qt"}}, directory.path()});
+        auto &site = store.notebooks.first();
+        site.notes.append({"post", {}, "文章", "正文", false,
+            {{"slug", "article"}, {"keywords", "文章, \"关键词\""}}});
+        QString error;
+        QVERIFY2(store.save(&error), qPrintable(error));
+        Notebook restored;
+        QVERIFY2(NotebookStore::readNotebook(site.path, restored, &error), qPrintable(error));
+        for (const auto &key: {"github", "city", "keywords"}) QCOMPARE(restored.config[key], site.config[key]);
+        QCOMPARE(restored.notes.first().metadata["keywords"], site.notes.first().metadata["keywords"]);
+        QVERIFY(read(site.path + "/" + site.notes.first().path).contains("\"keywords\""));
+        QVERIFY2(StaticSite::generate(restored, &error), qPrintable(error));
+        const auto siteMeta = QByteArray(R"(<meta name="keywords" content="站点,C++ &amp; Qt">)");
+        for (const auto &route: {"index.html", "archives/index.html", "about/index.html"}) {
+            const auto html = read(site.path + "/public/" + route);
+            QVERIFY(html.contains(siteMeta));
+            QCOMPARE(html.contains("杭州 &lt;西湖&gt;"), theme == "pure");
+            QVERIFY(html.contains("href=\"https://github.com/example?tab=repositories&amp;language=c++\""));
+            QVERIFY(!html.contains("{{"));
+            QVERIFY(!html.contains("class=\"site-city\""));
+            QVERIFY(!html.contains("class=\"site-github\""));
+            const auto socialClass = theme == "pure" ? "icon icon-github" : theme == "next" ? "fab fa-github fa-fw"
+                : theme == "yilia" ? "icon-github" : "sidebar-social-icon github";
+            QVERIFY(html.contains(socialClass));
+            if (theme == "pure")
+                QVERIFY(html.contains(R"(<small class="text-muted hidden-xs hidden-sm" id="location"><i class="icon icon-map-marker"></i> 杭州 &lt;西湖&gt;</small>)"));
+        }
+        const auto article = read(site.path + "/public/article/index.html");
+        QVERIFY(article.contains(R"(<meta name="keywords" content="文章, &quot;关键词&quot;">)"));
+        QVERIFY(!article.contains(siteMeta));
+
+        // Clearing the article keywords restores the site default.
+        site.notes.first().metadata["keywords"] = "";
+        QVERIFY2(store.save(&error), qPrintable(error));
+        QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
+        QVERIFY(read(site.path + "/public/article/index.html").contains(siteMeta));
+
+        // Author-written front matter accepts keyword lists too.
+        QVERIFY(write(site.path + "/source/_posts/manual.md", "---\nkeywords: [manual, seo]\n---\n正文"));
+        site.config["keywords"] = "";
+        site.config["city"] = "";
+        site.config["github"] = "javascript:alert(1)";
+        QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
+        QVERIFY(read(site.path + "/public/manual/index.html").contains(R"(<meta name="keywords" content="manual, seo">)"));
+        const auto empty = read(site.path + "/public/article/index.html");
+        QVERIFY(!empty.contains("name=\"keywords\""));
+        QVERIFY(!empty.contains("class=\"site-city\""));
+        QVERIFY(!empty.contains("class=\"site-github\""));
+        QVERIFY(!empty.contains("aria-label=\"GitHub\""));
+        QVERIFY(!empty.contains("{{"));
+        site.config["github"] = "";
+        QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
+        const auto unset = read(site.path + "/public/index.html");
+        QVERIFY(!unset.contains("aria-label=\"GitHub\""));
+        QVERIFY(!unset.contains("{{"));
+    }
+
     void customAvatar_data() { // NOLINT(readability-identifier-naming): Qt Test data-provider convention.
         generateWithoutExternalPrograms_data();
     }

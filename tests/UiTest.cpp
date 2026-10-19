@@ -3682,6 +3682,10 @@ gantt
                 auto *category = dialog->findChild<QComboBox *>();
                 QVERIFY(category);
                 category->setCurrentText("Updated");
+                auto *keywords = dialog->findChild<QLineEdit *>("postKeywords");
+                QVERIFY(keywords);
+                QVERIFY(keywords->text().isEmpty());
+                keywords->setText("article, seo");
                 dialog->accept();
             });
             properties->trigger();
@@ -3697,6 +3701,13 @@ gantt
             auto *dialog = QApplication::activeModalWidget();
             QVERIFY(dialog);
             QCOMPARE(dialog->objectName(), QString("siteConfigDialog"));
+            for (const auto &entry: QList<QPair<QString, QString>>{{"github", "https://github.com/example"}, {"city", "Hangzhou"}, {"keywords", "site, seo"}}) {
+                auto *input = dialog->findChild<QLineEdit *>("config_" + entry.first);
+                QVERIFY(input);
+                QVERIFY(input->isVisible());
+                QVERIFY(input->text().isEmpty());
+                QTest::keyClicks(input, entry.second);
+            }
             auto *avatar = dialog->findChild<QLineEdit *>("config_avatar");
             QVERIFY(avatar);
             QVERIFY(avatar->isVisible());
@@ -3754,6 +3765,9 @@ gantt
             QVERIFY(!dialog->findChild<QLineEdit *>("config_token"));
             QTest::mouseClick(sections, Qt::LeftButton, Qt::NoModifier, sections->tabRect(0).center());
             QCOMPARE(title->text(), QString("Edited title"));
+            QTRY_VERIFY(avatar->height() >= avatar->sizeHint().height());
+            auto *chooseAvatar = dialog->findChild<QPushButton *>("chooseSiteAvatar");
+            QTRY_VERIFY(chooseAvatar->height() >= chooseAvatar->sizeHint().height());
             dialog->grab().save("site-config.png");
             QTest::mouseClick(dialog->findChild<QPushButton *>("closeSiteConfig"), Qt::LeftButton);
         });
@@ -3763,6 +3777,9 @@ gantt
             QVERIFY(dialog);
             QCOMPARE(dialog->findChild<QComboBox *>("config_theme")->currentData().toString(), theme);
             QCOMPARE(dialog->findChild<QLineEdit *>("config_avatar")->text(), QString("images/qsnote-avatar.png"));
+            QCOMPARE(dialog->findChild<QLineEdit *>("config_github")->text(), QString("https://github.com/example"));
+            QCOMPARE(dialog->findChild<QLineEdit *>("config_city")->text(), QString("Hangzhou"));
+            QCOMPARE(dialog->findChild<QLineEdit *>("config_keywords")->text(), QString("site, seo"));
             dialog->findChild<QTabBar *>("siteConfigTabs")->setCurrentIndex(1);
             auto *comments = dialog->findChild<QComboBox *>("config_commentPlatform");
             QVERIFY(comments);
@@ -3780,6 +3797,10 @@ gantt
         Notebook restoredSite;
         QVERIFY2(NotebookStore::readNotebook(site.path, restoredSite, &error), qPrintable(error));
         QCOMPARE(restoredSite.config["avatar"].toString(), QString("images/qsnote-avatar.png"));
+        QCOMPARE(restoredSite.config["github"].toString(), QString("https://github.com/example"));
+        QCOMPARE(restoredSite.config["city"].toString(), QString("Hangzhou"));
+        QCOMPARE(restoredSite.config["keywords"].toString(), QString("site, seo"));
+        QCOMPARE(restoredSite.notes.first().metadata["keywords"].toString(), QString("article, seo"));
         QCOMPARE(QImage(site.path + "/source/images/qsnote-avatar.png"), avatarImage);
         QVERIFY(QFile::remove(avatarFile));
         QTimer previewTimer;

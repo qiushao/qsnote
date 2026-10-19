@@ -2689,6 +2689,10 @@ void MainWindow::showTreeMenu(const QPoint &position) {
                 auto *tagsInput = new QLineEdit(target->metadata["tags"].toString(), &dialog);
                 tagsInput->setPlaceholderText(tr("逗号分隔"));
                 layout->addRow(tr("标签："), tagsInput);
+                auto *keywordsInput = new QLineEdit(target->metadata["keywords"].toString(), &dialog);
+                keywordsInput->setObjectName("postKeywords");
+                keywordsInput->setPlaceholderText(tr("逗号分隔；留空使用站点关键词"));
+                layout->addRow(tr("SEO 关键词："), keywordsInput);
                 auto *dateInput = new QDateEdit(QDate::fromString(target->metadata["date"].toString(), Qt::ISODate), &dialog);
                 dateInput->setDisplayFormat("yyyy-MM-dd");
                 dateInput->setCalendarPopup(true);
@@ -2706,6 +2710,7 @@ void MainWindow::showTreeMenu(const QPoint &position) {
                 target->title = titleInput->text().trimmed();
                 target->metadata["category"] = categoryInput->currentText();
                 target->metadata["tags"] = tagsInput->text().trimmed();
+                target->metadata["keywords"] = keywordsInput->text().trimmed();
                 target->metadata["date"] = dateInput->date().toString(Qt::ISODate);
                 target->metadata["slug"] = slugInput->text().trimmed();
                 target->metadata["draft"] = draftInput->isChecked();
@@ -2844,7 +2849,10 @@ void MainWindow::showSiteConfig() {
     section("siteBasicCard", tr("基本信息"));
     field("title", tr("站点标题"));
     field("description", tr("站点描述"));
+    field("keywords", tr("SEO 关键词"))->findChild<QLineEdit *>()->setPlaceholderText(tr("逗号分隔"));
     field("author", tr("作者"));
+    field("github", tr("GitHub 地址"))->findChild<QLineEdit *>()->setPlaceholderText("https://github.com/username");
+    field("city", tr("城市"));
     auto *avatarField = field("avatar", tr("头像"));
     auto *avatar = avatarField->findChild<QLineEdit *>();
     avatar->setPlaceholderText(tr("图片网址或 source 内相对路径；留空使用默认头像"));

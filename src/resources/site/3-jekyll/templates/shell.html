@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{headTitle}}</title>
+<title>{{headTitle}}</title>{{keywordsMeta}}
 <meta name="description" content="{{description}}">
 <link rel="canonical" href="{{permalink}}">
 <link rel="stylesheet" href="{{root}}css/main.css">
@@ -15,6 +15,7 @@
   <div id="sidebar-left">
     <header class="header">
       <a id="sidebar-avatar" href="{{root}}"><img id="sidebar-avatar-img" alt="{{siteTitle}}" src="{{avatar}}"></a>
+      {{#githubSocial}}<div id="sidebar-social"><a class="sidebar-social-icon github" href="{{githubSocial}}" target="_blank" rel="noopener noreferrer" title="GitHub" aria-label="GitHub"></a></div>{{/githubSocial}}
       <a class="site-title" href="{{root}}">{{siteTitle}}</a>
       <p class="site-author">{{author}}</p>
       <nav class="site-menu" aria-label="页面">{{menu}}</nav>

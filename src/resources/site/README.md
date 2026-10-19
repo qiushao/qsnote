@@ -5,6 +5,7 @@ NexT 来自 [next-theme/hexo-theme-next](https://github.com/next-theme/hexo-them
 Yilia 来自 [litten/hexo-theme-yilia](https://github.com/litten/hexo-theme-yilia)，版本 4.0.0，固定提交 `5cd9ba5a98fa4aad18a82e2344390dab1aae7685`。
 
 - `templates/`：按上游模板的 DOM 和类名适配的 HTML 片段，`{{name}}` 由 C++ 生成器填充。NexT 对应 `_layout.njk`、`_macro/post.njk`、`_macro/sidebar.njk` 及导航、搜索、独立页面模板；归档、分类、分页由生成器按上游结构输出。
+- `{{githubSocial}}` 是用户设置的 GitHub 地址（HTML 转义后），各主题在模板中定义链接、图标和布局。`{{#githubSocial}}…{{/githubSocial}}` 仅在地址非空时输出内容；未填写或非 HTTP(S) 地址不显示。可选块可用于其他变量，不支持嵌套。城市通过 `{{city}}` 填充，只用于原主题已有的城市位置。
 - `assets/`：原 CSS、字体、图片和浏览器脚本。Pure 的 `style.css` 直接复制；NexT 的 `main.css`、`noscript.css` 由上游 Stylus 预编译，程序构建和运行均不需要 Stylus、Hexo、Node.js 或 npm。
 - NexT 的 `config.js`、`utils.js`、`sidebar.js`、`next-boot.js` 和 `third-party/search/local-search.js` 原样复制到 `assets/js/`。搜索依赖 `hexo-generator-searchdb` 1.5.0 的 `dist/search.js`，图标使用 Font Awesome Free 7.3.1 的 CSS 与 WOFF2 字体，默认头像来自上游 `source/images/avatar.gif`。所有运行时资源均在本地。
 - NexT 的页面和搜索数据由 QSNote 提供，正文沿用编辑器预览的 Prism 高亮和默认样式，评论沿用站点配置。搜索标题和正文在写入索引时做 HTML 转义，以匹配搜索组件插入 HTML 的方式。

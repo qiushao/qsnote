@@ -29,6 +29,7 @@ struct Page {
     QString updated;
     QStringList categories;
     QStringList tags;
+    QString keywords;
     bool post = false;
     bool comments = true;
 };
@@ -174,6 +175,7 @@ public:
             page.title = metadata["title"].toString(QFileInfo(file).completeBaseName());
             page.categories = strings(metadata["categories"]);
             page.tags = strings(metadata["tags"]);
+            page.keywords = strings(metadata["keywords"]).join(", ").trimmed();
             page.date = metadata["date"].toString(QFileInfo(file).lastModified().toString(Qt::ISODate));
             page.updated = metadata["updated"].toString(QFileInfo(file).lastModified().toString(Qt::ISODate));
             auto route = metadata["permalink"].toString(metadata["slug"].toString());
@@ -346,10 +348,14 @@ private:
     [[nodiscard]] QString themeTemplate(const QString &name, QMap<QString, QString> values = {}) const {
         QFile file(":/site/" + themeName() + "/templates/" + name + ".html");
         if (!file.open(QIODevice::ReadOnly)) return {};
-        const auto source = QString::fromUtf8(file.readAll());
+        auto source = QString::fromUtf8(file.readAll());
         values["root"] = escaped(href({}));
         values["siteTitle"] = escaped(book_.config["title"].toString(book_.name));
         values["author"] = escaped(book_.config["author"].toString());
+        values["city"] = escaped(book_.config["city"].toString().trimmed());
+        const auto github = book_.config["github"].toString().trimmed();
+        const QUrl githubUrl(github);
+        values["githubSocial"] = githubUrl.scheme() == "https" || githubUrl.scheme() == "http" ? escaped(github) : QString();
         auto avatar = book_.config["avatar"].toString().trimmed();
         if (avatar.isEmpty() && !yiliaTheme())
             avatar = nextTheme() ? "images/avatar.gif" : threeTheme() ? "assets/img/avatar.jpg" : "images/avatar.jpg";
@@ -364,6 +370,17 @@ private:
         values["description"] = escaped(book_.config["description"].toString());
         values["footer"] = escaped(book_.config["footer"].toString("Powered by QSNote"));
         values["domain"] = escaped(book_.config["domain"].toString(href({})));
+        // Optional, non-nested blocks are evaluated before inserting user values.
+        QString conditionalSource;
+        qsizetype blockOffset = 0;
+        auto blocks = QRegularExpression(R"(\{\{#([A-Za-z]+)\}\}([\s\S]*?)\{\{/\1\}\})").globalMatch(source);
+        while (blocks.hasNext()) {
+            const auto block = blocks.next();
+            conditionalSource += source.mid(blockOffset, block.capturedStart() - blockOffset);
+            if (!values.value(block.captured(1)).isEmpty()) conditionalSource += block.captured(2);
+            blockOffset = block.capturedEnd();
+        }
+        source = conditionalSource + source.mid(blockOffset);
         QString result;
         qsizetype offset = 0;
         auto matches = QRegularExpression(R"(\{\{([A-Za-z]+)\}\})").globalMatch(source);
@@ -507,7 +524,10 @@ private:
         return result;
     }
     bool html(QString route, const QString &title, const QString &body, const Page *page = nullptr) {
+        auto keywords = page && !page->keywords.isEmpty() ? page->keywords : book_.config["keywords"].toString().trimmed();
+        keywords.replace(QChar(0xff0c), QChar(','));
         QMap<QString, QString> values{{"headTitle", escaped(title + " | " + book_.config["title"].toString(book_.name))}, {"content", body},
+            {"keywordsMeta", keywords.isEmpty() ? QString() : R"(<meta name="keywords" content=")" + escaped(keywords) + "\">"},
             {"title", escaped(title)}, {"permalink", escaped(permalink(route))}, {"sidebarRecent", sidebarRecent()},
             {"sidebarCategories", sidebarTerms(categories_, "category")}, {"sidebarTags", sidebarTerms(tags_, "tag")}, {"sidebarCloud", sidebarTerms(tags_, "tag", true)},
             {"layout", route.startsWith("archives/") || (!page && (route.startsWith("categories/") || route.startsWith("tags/"))) ? "archive posts-collapse" : page ? (page->post ? "post posts-expand" : "page posts-expand") : "index posts-expand"},

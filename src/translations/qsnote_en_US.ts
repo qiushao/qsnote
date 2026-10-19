@@ -1161,6 +1161,26 @@ It will be removed from the list. Files on disk will be kept, and you can add it
             <translation>Basic Information</translation>
         </message>
         <message>
+            <source>GitHub 地址</source>
+            <translation>GitHub URL</translation>
+        </message>
+        <message>
+            <source>城市</source>
+            <translation>City</translation>
+        </message>
+        <message>
+            <source>SEO 关键词</source>
+            <translation>SEO keywords</translation>
+        </message>
+        <message>
+            <source>SEO 关键词：</source>
+            <translation>SEO keywords:</translation>
+        </message>
+        <message>
+            <source>逗号分隔；留空使用站点关键词</source>
+            <translation>Comma-separated; leave empty to use site keywords</translation>
+        </message>
+        <message>
             <location line="+1" />
             <source>站点标题</source>
             <translation>Site title</translation>

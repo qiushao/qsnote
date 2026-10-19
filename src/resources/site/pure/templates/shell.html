@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 
 <html lang="zh">
-<head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1, maximum-scale=1" name="viewport"/><meta content="{{author}}" name="author"/><meta content="QSNote" name="generator"/><title>{{headTitle}}</title><meta content="{{description}}" name="description"/><link href="{{permalink}}" rel="canonical"/><link href="{{root}}css/style.css" rel="stylesheet"/><script defer="" src="{{root}}js/highlight.js"></script></head>
+<head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1, maximum-scale=1" name="viewport"/><meta content="{{author}}" name="author"/><meta content="QSNote" name="generator"/><title>{{headTitle}}</title>{{keywordsMeta}}<meta content="{{description}}" name="description"/><link href="{{permalink}}" rel="canonical"/><link href="{{root}}css/style.css" rel="stylesheet"/><script defer="" src="{{root}}js/highlight.js"></script></head>
 <body class="main-center" itemscope="" itemtype="http://schema.org/WebPage">
 <header class="header" itemscope="" itemtype="http://schema.org/WPHeader">
 <div class="slimContent">
@@ -12,7 +12,7 @@
 </a>
 <h2 class="hidden-xs hidden-sm" id="name">{{author}}</h2>
 <h3 class="hidden-xs hidden-sm hidden-md" id="title"></h3>
-<small class="text-muted hidden-xs hidden-sm" id="location"><i class="icon icon-map-marker"></i> </small>
+<small class="text-muted hidden-xs hidden-sm" id="location"><i class="icon icon-map-marker"></i> {{city}}</small>
 </div>
 <div class="search" id="search-form-wrap">
 <form class="search-form sidebar-form">
@@ -83,6 +83,7 @@
 </li>
 </ul>
 <ul class="social-links">
+{{#githubSocial}}<li><a href="{{githubSocial}}" target="_blank" rel="noopener noreferrer" title="GitHub" aria-label="GitHub"><i class="icon icon-github"></i></a></li>{{/githubSocial}}
 </ul>
 </nav>
 </div>
@@ -100,6 +101,7 @@
 {{tocSidebar}}<main class="main" role="main">{{content}}</main>
 <footer class="footer" itemscope="" itemtype="http://schema.org/WPFooter">
 <ul class="social-links">
+{{#githubSocial}}<li><a href="{{githubSocial}}" target="_blank" rel="noopener noreferrer" title="GitHub" aria-label="GitHub"><i class="icon icon-github"></i></a></li>{{/githubSocial}}
 </ul>
 <div class="copyright">
 <p>{{footer}}</p>
