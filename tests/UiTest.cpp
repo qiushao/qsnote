@@ -2186,6 +2186,70 @@ gantt
         for (const auto &book: reloaded.notebooks) QVERIFY(book.notes.isEmpty());
     }
 
+    void todoPrioritySortingAndCreation() {
+        NotebookStore fixture;
+        Notebook book{"todo", "待办", "todo", {}, {{"categories", QJsonArray{"工作"}}}, fixturePath("todo-sort")};
+        for (int index = 0; index < 22; ++index) {
+            Note note{QString::number(index), {}, QString("事项 %1").arg(index), {}};
+            note.metadata = {{"created", QDateTime(QDate(2026, 10, 1).addDays(index), QTime(9, 0)).toString(Qt::ISODate)}};
+            if (index > 0) note.metadata["due"] = QDate(2026, 10, 1).addDays(22 - index).toString(Qt::ISODate);
+            if (index == 21) note.metadata["priority"] = 2;
+            book.notes.append(note);
+        }
+        fixture.notebooks.append(book);
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *list = window.findChild<QTreeWidget *>("todoList");
+        auto *sort = window.findChild<QComboBox *>("todoSort");
+        auto *priority = window.findChild<QComboBox *>("todoPriority");
+        auto *next = window.findChild<QPushButton *>("todoNextPage");
+        QCOMPARE(list->topLevelItem(0)->data(0, Qt::UserRole).toString(), QString("21"));
+        priority->setCurrentIndex(0);
+        QCOMPARE(list->currentItem()->data(0, Qt::UserRole).toString(), QString("21"));
+        QCOMPARE(list->topLevelItemCount(), 2);
+        sort->setCurrentIndex(1);
+        QCOMPARE(list->topLevelItemCount(), 20);
+        QCOMPARE(list->topLevelItem(0)->data(0, Qt::UserRole).toString(), QString("21"));
+        sort->setCurrentIndex(2);
+        QCOMPARE(list->topLevelItem(0)->data(0, Qt::UserRole).toString(), QString("21"));
+        next->click();
+        QCOMPARE(list->topLevelItem(1)->data(0, Qt::UserRole).toString(), QString("0"));
+        list->setCurrentItem(list->topLevelItem(1));
+        QCOMPARE(priority->currentIndex(), 1);
+        auto *dueEnabled = window.findChild<QCheckBox *>("todoDueEnabled");
+        dueEnabled->setChecked(true);
+        window.findChild<QDateEdit *>("todoDue")->setDate(QDate(2026, 9, 1));
+        QCOMPARE(list->topLevelItem(0)->data(0, Qt::UserRole).toString(), QString("0"));
+
+        QTimer::singleShot(20, &window, [] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            QInputDialog original(dialog->parentWidget());
+            original.setLabelText("事项标题：");
+            original.setInputMode(QInputDialog::TextInput);
+            const int expectedWidth = original.sizeHint().width() * 2;
+            const int actualWidth = dialog->width();
+            dialog->findChild<QLineEdit *>("newTodoTitle")->setText("分类事项");
+            auto *category = dialog->findChild<QComboBox *>("newTodoCategory");
+            category->setCurrentIndex(category->findData("工作"));
+            dialog->accept();
+            QCOMPARE(actualWidth, expectedWidth);
+        });
+        window.findChild<QPushButton *>("newTodo")->click();
+        QCOMPARE(list->currentItem()->text(0), QString("分类事项"));
+        const auto id = list->currentItem()->data(0, Qt::UserRole).toString();
+        QCOMPARE(window.findChild<QComboBox *>("todoCategory")->currentData().toString(), QString("工作"));
+        QVERIFY(window.close());
+        NotebookStore reloaded;
+        QVERIFY2(reloaded.load(&error), qPrintable(error));
+        QCOMPARE(reloaded.note("21")->metadata["priority"].toInt(), 0);
+        QCOMPARE(reloaded.note(id)->metadata["category"].toString(), QString("工作"));
+        QCOMPARE(reloaded.note(id)->metadata["priority"].toInt(), 1);
+    }
+
     void todoDeleteHoverKeepsDetails() {
         NotebookStore fixture;
         fixture.notebooks.append({"todo", "待办", "todo",
@@ -2332,9 +2396,9 @@ gantt
 
         QTest::mouseClick(previous, Qt::LeftButton);
         QTimer::singleShot(20, &window, [] {
-            auto *dialog = qobject_cast<QInputDialog *>(QApplication::activeModalWidget());
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
             QVERIFY(dialog);
-            dialog->setTextValue("新增事项");
+            dialog->findChild<QLineEdit *>("newTodoTitle")->setText("新增事项");
             dialog->accept();
         });
         QTest::mouseClick(window.findChild<QPushButton *>("newTodo"), Qt::LeftButton);
@@ -2498,9 +2562,9 @@ gantt
         QCOMPARE(created->text(), QString("—"));
 
         QTimer::singleShot(20, &window, [] {
-            auto *dialog = qobject_cast<QInputDialog *>(QApplication::activeModalWidget());
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
             QVERIFY(dialog);
-            dialog->setTextValue("新建事项");
+            dialog->findChild<QLineEdit *>("newTodoTitle")->setText("新建事项");
             dialog->accept();
         });
         QTest::mouseClick(window.findChild<QPushButton *>("newTodo"), Qt::LeftButton);
@@ -2548,9 +2612,9 @@ gantt
         QVERIFY(!window.findChild<QTabBar *>("noteTabs")->isVisible());
         auto addTodo = [&window](const QString &name) {
             QTimer::singleShot(20, &window, [name] {
-                auto *dialog = qobject_cast<QInputDialog *>(QApplication::activeModalWidget());
+                auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
                 QVERIFY(dialog);
-                dialog->setTextValue(name);
+                dialog->findChild<QLineEdit *>("newTodoTitle")->setText(name);
                 dialog->accept();
             });
             QTest::mouseClick(window.findChild<QPushButton *>("newTodo"), Qt::LeftButton);

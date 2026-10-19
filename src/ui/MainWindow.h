@@ -116,6 +116,8 @@ private:
     QWidget *toolbar_ = nullptr;
     QComboBox *notebooks_ = nullptr;
     QComboBox *groupBy_ = nullptr;
+    QComboBox *todoSort_ = nullptr;
+    QComboBox *todoPriority_ = nullptr;
     QComboBox *todoStatus_ = nullptr;
     QWidget *todoListPage_ = nullptr;
     QPushButton *todoAdd_ = nullptr;

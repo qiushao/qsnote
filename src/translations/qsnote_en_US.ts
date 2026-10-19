@@ -151,6 +151,38 @@
     <context>
         <name>MainWindow</name>
         <message>
+            <source>事项排序</source>
+            <translation>Task sorting</translation>
+        </message>
+        <message>
+            <source>按优先级（高到低）</source>
+            <translation>Priority (high to low)</translation>
+        </message>
+        <message>
+            <source>按创建日期（新到旧）</source>
+            <translation>Created date (newest first)</translation>
+        </message>
+        <message>
+            <source>按截止日期（近到远）</source>
+            <translation>Due date (earliest first)</translation>
+        </message>
+        <message>
+            <source>优先级</source>
+            <translation>Priority</translation>
+        </message>
+        <message>
+            <source>低</source>
+            <translation>Low</translation>
+        </message>
+        <message>
+            <source>中</source>
+            <translation>Medium</translation>
+        </message>
+        <message>
+            <source>高</source>
+            <translation>High</translation>
+        </message>
+        <message>
             <source>复制相对路径</source>
             <translation>Copy Relative Path</translation>
         </message>
