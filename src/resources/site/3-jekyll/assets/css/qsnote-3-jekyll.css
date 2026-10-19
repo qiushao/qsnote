@@ -10,8 +10,12 @@ button.sidebar-tag { display: block; width: 100%; padding: 0 8px; border: 0; bor
 .toc-link[aria-current="page"] { font-weight: 600; }
 .toc-link[hidden], #search-empty[hidden] { display: none; }
 #search-empty { padding: 0 15px; color: #55606f; line-height: 1.5; }
-#main { overflow-wrap: anywhere; }
+#main { overflow-wrap: anywhere; background: #fff; }
+/* Upstream caps every column at 800px, leaving wide empty gutters on desktop. */
+.container { width: 100%; max-width: none; padding: 0 24px; }
 .post-meta a, .post-categories a { margin-right: .6em; }
+/* Diagrams are exported as images; upstream's photo frame and block layout must not leak in. */
+.post .diagram img { display: inline-block; width: auto; height: auto; border: 0; }
 .post-summary { padding: 20px 0; border-bottom: 1px solid #ebebeb; }
 .post-summary h2 { margin: 8px 0 12px; font-size: 1.3em; }
 .post-summary p { margin-bottom: 0; }
@@ -25,4 +29,5 @@ button.sidebar-tag { display: block; width: 100%; padding: 0 8px; border: 0; bor
   #sidebar-left { overflow: visible; }
   #toc { min-height: 150px; }
   .post-title { padding-right: 32px; }
+  .container { padding: 0 16px; }
 }
