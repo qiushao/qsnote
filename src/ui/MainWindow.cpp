@@ -1286,9 +1286,13 @@ void MainWindow::refreshTodoList(const QString &selectedId) {
         item->setCheckState(0, note.metadata["completed"].toBool() ? Qt::Checked : Qt::Unchecked);
         auto *remove = button("×", "todoDelete", todoList_);
         remove->setProperty("iconButton", true);
+        remove->setFocusPolicy(Qt::NoFocus);
         remove->setToolTip(tr("删除"));
         remove->setAccessibleName(tr("删除"));
-        connect(remove, &QPushButton::clicked, this, [this, noteId = note.id] { deleteTodo(noteId); });
+        connect(remove, &QPushButton::clicked, this, [this, item, noteId = note.id] {
+            todoList_->setCurrentItem(item);
+            deleteTodo(noteId);
+        });
         todoList_->setItemWidget(item, 2, remove);
         if (note.id == id) todoList_->setCurrentItem(item);
     }

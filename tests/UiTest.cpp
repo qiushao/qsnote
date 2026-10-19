@@ -2186,6 +2186,44 @@ gantt
         for (const auto &book: reloaded.notebooks) QVERIFY(book.notes.isEmpty());
     }
 
+    void todoDeleteHoverKeepsDetails() {
+        NotebookStore fixture;
+        fixture.notebooks.append({"todo", "待办", "todo",
+                                  {{"first", {}, "第一项", "第一项详情"},
+                                   {"second", {}, "第二项", "第二项详情"}}, {}, fixturePath("todo-hover")});
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *list = window.findChild<QTreeWidget *>("todoList");
+        auto *content = window.findChild<QPlainTextEdit *>("todoContent");
+        auto *first = list->topLevelItem(0);
+        auto *second = list->topLevelItem(1);
+        auto *remove = qobject_cast<QPushButton *>(list->itemWidget(second, 2));
+        QVERIFY(remove);
+        list->setCurrentItem(first);
+        list->setFocus();
+        QTRY_VERIFY(list->hasFocus());
+        QTest::mouseMove(list->viewport(), list->visualItemRect(first).center());
+        QTest::mouseMove(remove, remove->rect().center());
+        QCoreApplication::processEvents();
+        QCOMPARE(list->currentItem(), first);
+        QCOMPARE(content->toPlainText(), QString("第一项详情"));
+        QTimer::singleShot(0, &window, [&] {
+            auto *dialog = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            QCOMPARE(list->currentItem(), second);
+            QCOMPARE(content->toPlainText(), QString("第二项详情"));
+            dialog->done(QMessageBox::Cancel);
+        });
+        QTest::mouseClick(remove, Qt::LeftButton);
+        QCOMPARE(list->topLevelItemCount(), 2);
+        QTest::mouseClick(list->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          list->visualItemRect(first).center());
+        QCOMPARE(content->toPlainText(), QString("第一项详情"));
+    }
+
     void todoPaginationBoundaries_data() { // NOLINT(readability-identifier-naming): Qt Test data provider.
         QTest::addColumn<int>("count");
         for (int count: {0, 20, 21, 40, 41}) QTest::newRow(qPrintable(QString::number(count))) << count;
