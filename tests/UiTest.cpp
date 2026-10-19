@@ -3645,6 +3645,11 @@ gantt
 
     void siteMetadataConfigAndPreview() {
         QFETCH(QString, theme);
+        QTemporaryDir avatarDirectory;
+        const auto avatarFile = avatarDirectory.filePath("avatar.png");
+        QImage avatarImage(17, 17, QImage::Format_RGB32);
+        avatarImage.fill(Qt::red);
+        QVERIFY(avatarImage.save(avatarFile));
         NotebookStore fixture;
         Notebook site{"site", "测试站点", "site", {}, {{"title", "用户的站点"}, {"categories", QJsonArray{"Updated"}}, {"domain", "https://example.com/blog/"}}, fixturePath("site")};
         site.notes.append({"post-a", {}, "文章标题", "# 文章标题\n\n## 内容\n\n真实输入的文字", false, {{"category", "分类一"}, {"tags", "标签一, 标签二"}, {"date", "2026-10-09"}, {"slug", "article"}}});
@@ -3688,10 +3693,25 @@ gantt
         window.findChild<QComboBox *>("groupBy")->setCurrentIndex(1);
         QCOMPARE(tree->topLevelItemCount(), theme == "3-jekyll" ? 5 : 2);
         window.grab().save("site-wide.png");
-        QTimer::singleShot(30, &window, [theme] {
+        QTimer::singleShot(30, &window, [theme, avatarFile] {
             auto *dialog = QApplication::activeModalWidget();
             QVERIFY(dialog);
             QCOMPARE(dialog->objectName(), QString("siteConfigDialog"));
+            auto *avatar = dialog->findChild<QLineEdit *>("config_avatar");
+            QVERIFY(avatar);
+            QVERIFY(avatar->isVisible());
+            QVERIFY(avatar->text().isEmpty());
+            QTimer::singleShot(30, dialog, [avatarFile] {
+                auto *chooser = qobject_cast<QFileDialog *>(QApplication::activeModalWidget());
+                QVERIFY(chooser);
+                chooser->setDirectory(QFileInfo(avatarFile).absolutePath());
+                QTimer::singleShot(80, chooser, [chooser, avatarFile] {
+                    chooser->findChild<QLineEdit *>("fileNameEdit")->setText(avatarFile);
+                    QMetaObject::invokeMethod(chooser, "accept");
+                });
+            });
+            dialog->findChild<QPushButton *>("chooseSiteAvatar")->click();
+            QCOMPARE(avatar->text(), QString("images/qsnote-avatar.png"));
             auto *title = dialog->findChild<QLineEdit *>("config_title");
             title->setText("Edited title");
             emit title->textEdited(title->text());
@@ -3742,6 +3762,7 @@ gantt
             auto *dialog = QApplication::activeModalWidget();
             QVERIFY(dialog);
             QCOMPARE(dialog->findChild<QComboBox *>("config_theme")->currentData().toString(), theme);
+            QCOMPARE(dialog->findChild<QLineEdit *>("config_avatar")->text(), QString("images/qsnote-avatar.png"));
             dialog->findChild<QTabBar *>("siteConfigTabs")->setCurrentIndex(1);
             auto *comments = dialog->findChild<QComboBox *>("config_commentPlatform");
             QVERIFY(comments);
@@ -3756,6 +3777,11 @@ gantt
             QTest::mouseClick(dialog->findChild<QPushButton *>("closeSiteConfig"), Qt::LeftButton);
         });
         QTest::mouseClick(window.findChild<QPushButton *>("siteConfig"), Qt::LeftButton);
+        Notebook restoredSite;
+        QVERIFY2(NotebookStore::readNotebook(site.path, restoredSite, &error), qPrintable(error));
+        QCOMPARE(restoredSite.config["avatar"].toString(), QString("images/qsnote-avatar.png"));
+        QCOMPARE(QImage(site.path + "/source/images/qsnote-avatar.png"), avatarImage);
+        QVERIFY(QFile::remove(avatarFile));
         QTimer previewTimer;
         previewTimer.setInterval(100);
         connect(&previewTimer, &QTimer::timeout, &window, [&] {
@@ -3770,6 +3796,7 @@ gantt
             QTRY_VERIFY_WITH_TIMEOUT(browser->title().contains("Edited title"), 15000);
             QTRY_VERIFY_WITH_TIMEOUT(javascript(*browser, theme == "pure" ? "document.readyState === 'complete' && !!document.querySelector('body.main-center > header.header')" : theme == "yilia" ? "document.readyState === 'complete' && !!document.querySelector('.left-col .header')" : theme == "3-jekyll" ? "document.readyState === 'complete' && !!document.querySelector('#sidebar-left .header')" : "document.readyState === 'complete' && !!document.querySelector('.main .column .header')").toBool(), 15000);
             QCOMPARE(browser->url().path(), QString("/blog/"));
+            QTRY_VERIFY(javascript(*browser, "Array.from(document.querySelectorAll('img[src=\"/blog/images/qsnote-avatar.png\"]')).some(img => img.naturalWidth === 17)").toBool());
             javascript(*browser, "fetch('/blog/search.json').then(r => window.searchIndexReady = r.ok)");
             QTRY_VERIFY_WITH_TIMEOUT(javascript(*browser, "window.searchIndexReady === true").toBool(), 10000);
             QVERIFY(javascript(*browser, "!!document.querySelector('a[href=\"/blog/archives\"], a[href=\"/blog/archives/\"]')").toBool());

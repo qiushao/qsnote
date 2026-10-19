@@ -1176,6 +1176,38 @@ It will be removed from the list. Files on disk will be kept, and you can add it
             <translation>Author</translation>
         </message>
         <message>
+            <source>头像</source>
+            <translation>Avatar</translation>
+        </message>
+        <message>
+            <source>图片网址或 source 内相对路径；留空使用默认头像</source>
+            <translation>Image URL or path relative to source; leave empty for the default avatar</translation>
+        </message>
+        <message>
+            <source>选择图片…</source>
+            <translation>Choose image…</translation>
+        </message>
+        <message>
+            <source>选择头像</source>
+            <translation>Choose avatar</translation>
+        </message>
+        <message>
+            <source>图片 (*.png *.jpg *.jpeg *.webp *.bmp)</source>
+            <translation>Images (*.png *.jpg *.jpeg *.webp *.bmp)</translation>
+        </message>
+        <message>
+            <source>头像设置失败</source>
+            <translation>Failed to set avatar</translation>
+        </message>
+        <message>
+            <source>无法读取所选图片。</source>
+            <translation>Unable to read the selected image.</translation>
+        </message>
+        <message>
+            <source>无法保存头像：%1</source>
+            <translation>Unable to save avatar: %1</translation>
+        </message>
+        <message>
             <location line="+1" />
             <source>域名</source>
             <translation>Domain</translation>

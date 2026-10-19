@@ -8,6 +8,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QUrl>
 
 namespace {
 QByteArray read(const QString &path) {
@@ -135,6 +136,39 @@ private slots:
         QVERIFY(!QFile::exists(directory.path() + "/public/article/index.html"));
         QVERIFY(!QFile::exists(directory.path() + "/public/categories/分类/index.html"));
         QCOMPARE(QJsonDocument::fromJson(read(directory.path() + "/public/search.json")).array().size(), 0);
+    }
+
+    void customAvatar_data() { // NOLINT(readability-identifier-naming): Qt Test data-provider convention.
+        generateWithoutExternalPrograms_data();
+    }
+    void customAvatar() {
+        QFETCH(QString, theme);
+        QTemporaryDir directory;
+        Notebook site{"site", "站点", "site", {}, {{"theme", theme}, {"domain", "https://example.com/blog/"}}, directory.path()};
+        QString error;
+        QVERIFY2(StaticSite::prepare(site, &error), qPrintable(error));
+        QVERIFY(write(directory.path() + "/source/_posts/post.md", "---\nslug: nested/article\n---\n正文"));
+        const auto avatarPath = QStringLiteral("images/我的头像.png");
+        const auto image = read(":/site/pure/assets/images/avatar.jpg");
+        QVERIFY(!image.isEmpty());
+        QVERIFY(write(directory.path() + "/source/" + avatarPath, image));
+        site.config["avatar"] = avatarPath;
+        QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
+        const auto expected = "src=\"/blog/" + QUrl::toPercentEncoding(avatarPath, "/") + "\"";
+        for (const auto &route: {"index.html", "nested/article/index.html"})
+            QVERIFY(read(directory.path() + "/public/" + route).contains(expected));
+        QCOMPARE(read(directory.path() + "/public/" + avatarPath), image);
+        if (theme == "yilia") QCOMPARE(read(directory.path() + "/public/index.html").count(expected), 2);
+        site.config["avatar"] = "https://example.org/avatar.png?size=128&name=\"author\"";
+        QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
+        QVERIFY(read(directory.path() + "/public/index.html").contains("src=\"https://example.org/avatar.png?size=128&amp;name=&quot;author&quot;\""));
+        site.config["avatar"] = "";
+        QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
+        const auto html = read(directory.path() + "/public/index.html");
+        QVERIFY(!html.contains(expected));
+        if (theme == "yilia") QVERIFY(!html.contains("<img class=\"show\""));
+        else QVERIFY(html.contains(theme == "next" ? "src=\"/blog/images/avatar.gif\""
+                                   : theme == "3-jekyll" ? "src=\"/blog/assets/img/avatar.jpg\"" : "src=\"/blog/images/avatar.jpg\""));
     }
 
     void migrateRemovedTheme() {

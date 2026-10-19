@@ -350,6 +350,17 @@ private:
         values["root"] = escaped(href({}));
         values["siteTitle"] = escaped(book_.config["title"].toString(book_.name));
         values["author"] = escaped(book_.config["author"].toString());
+        auto avatar = book_.config["avatar"].toString().trimmed();
+        if (avatar.isEmpty() && !yiliaTheme())
+            avatar = nextTheme() ? "images/avatar.gif" : threeTheme() ? "assets/img/avatar.jpg" : "images/avatar.jpg";
+        const QUrl avatarUrl(avatar);
+        if (!avatar.isEmpty() && avatarUrl.isRelative() && !avatar.startsWith('/'))
+            avatar = href(avatarUrl.path(QUrl::FullyDecoded))
+                + (avatarUrl.hasQuery() ? "?" + avatarUrl.query(QUrl::FullyEncoded) : QString())
+                + (avatarUrl.hasFragment() ? "#" + avatarUrl.fragment(QUrl::FullyEncoded) : QString());
+        values["avatar"] = escaped(avatar);
+        values["avatarImage"] = avatar.isEmpty() ? QString() : R"(<img class="show" src=")" + escaped(avatar)
+            + "\" alt=\"" + values["author"] + R"(" width="128" height="128">)";
         values["description"] = escaped(book_.config["description"].toString());
         values["footer"] = escaped(book_.config["footer"].toString("Powered by QSNote"));
         values["domain"] = escaped(book_.config["domain"].toString(href({})));

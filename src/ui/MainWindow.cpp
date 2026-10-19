@@ -36,6 +36,7 @@
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QHeaderView>
+#include <QImage>
 #include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -55,6 +56,7 @@
 #include <QPlainTextEdit>
 #include <QRegularExpression>
 #include <QScreen>
+#include <QSaveFile>
 #include <QScrollArea>
 #include <QShortcut>
 #include <QSignalBlocker>
@@ -2843,6 +2845,33 @@ void MainWindow::showSiteConfig() {
     field("title", tr("站点标题"));
     field("description", tr("站点描述"));
     field("author", tr("作者"));
+    auto *avatarField = field("avatar", tr("头像"));
+    auto *avatar = avatarField->findChild<QLineEdit *>();
+    avatar->setPlaceholderText(tr("图片网址或 source 内相对路径；留空使用默认头像"));
+    avatar->setClearButtonEnabled(true);
+    auto *chooseAvatar = button(tr("选择图片…"), "chooseSiteAvatar", avatarField);
+    qobject_cast<QFormLayout *>(avatarField->layout())->addRow(QString(), chooseAvatar);
+    connect(chooseAvatar, &QPushButton::clicked, &dialog, [this, book, avatar, &dialog] {
+        const auto selected = QFileDialog::getOpenFileName(&dialog, tr("选择头像"), book->path,
+                                                          tr("图片 (*.png *.jpg *.jpeg *.webp *.bmp)"));
+        if (selected.isEmpty()) return;
+        const QImage image(selected);
+        if (image.isNull()) {
+            QMessageBox::warning(&dialog, tr("头像设置失败"), tr("无法读取所选图片。"));
+            return;
+        }
+        const auto relative = QStringLiteral("images/qsnote-avatar.png");
+        const auto target = book->path + "/source/" + relative;
+        QSaveFile file(target);
+        if (!QDir().mkpath(QFileInfo(target).absolutePath()) || !file.open(QIODevice::WriteOnly)
+            || !image.save(&file, "PNG") || !file.commit()) {
+            QMessageBox::warning(&dialog, tr("头像设置失败"), tr("无法保存头像：%1").arg(target));
+            return;
+        }
+        avatar->setText(relative);
+        book->config["avatar"] = relative;
+        saveTimer_->start();
+    });
     field("domain", tr("域名"));
     section("siteCommentsCard", tr("评论"));
     auto *comments = field("commentPlatform", tr("评论平台"), {tr("关闭"), "Valine", "Gitalk", "Disqus"}, {"none", "valine", "gitalk", "disqus"})->findChild<QComboBox *>();
