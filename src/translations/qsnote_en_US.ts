@@ -513,6 +513,14 @@
             <translation>Category</translation>
         </message>
         <message>
+            <source>截止日期</source>
+            <translation>Due date</translation>
+        </message>
+        <message>
+            <source>创建时间</source>
+            <translation>Created</translation>
+        </message>
+        <message>
             <location line="+4" />
             <source>选择事项后编辑详情</source>
             <translation>Select a task to edit its details</translation>

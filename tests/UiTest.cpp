@@ -4,6 +4,7 @@
 #include "core/DiagramRuntime.h"
 #include "core/StaticSite.h"
 #include "core/UpdateChecker.h"
+#include <QDateEdit>
 #include <QDialogButtonBox>
 #include <QSystemTrayIcon>
 #include <QLayout>
@@ -2306,7 +2307,7 @@ gantt
             QVERIFY(dialog);
             dialog->button(QMessageBox::Yes)->click();
         });
-        auto *remove = qobject_cast<QPushButton *>(list->itemWidget(list->currentItem(), 1));
+        auto *remove = qobject_cast<QPushButton *>(list->itemWidget(list->currentItem(), 2));
         QVERIFY(remove);
         QTest::mouseClick(remove, Qt::LeftButton);
         QCOMPARE(list->topLevelItemCount(), 20);
@@ -2385,6 +2386,101 @@ gantt
         QVERIFY(add->isEnabled());
         QVERIFY(!clear->isVisible());
         QCOMPARE(list->topLevelItemCount(), 1);
+    }
+
+    void todoDueDate() {
+        NotebookStore fixture;
+        Notebook book{"todo", "待办", "todo",
+                      {{"task", {}, "有截止日期", {}, false, {{"category", "默认"}, {"completed", false}, {"due", "2026-10-20"}}},
+                       {"none", {}, "无截止日期", {}}},
+                      {}, fixturePath("todo-due")};
+        fixture.notebooks.append(book);
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.resize(1280, 800);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *list = window.findChild<QTreeWidget *>("todoList");
+        auto *dueEnabled = window.findChild<QCheckBox *>("todoDueEnabled");
+        auto *due = window.findChild<QDateEdit *>("todoDue");
+        QVERIFY(list && dueEnabled && due);
+
+        list->setCurrentItem(list->topLevelItem(0));
+        QCOMPARE(list->currentItem()->data(0, Qt::UserRole).toString(), QString("task"));
+        QVERIFY(dueEnabled->isChecked());
+        QVERIFY(due->isEnabled());
+        QCOMPARE(due->date(), QDate(2026, 10, 20));
+        QCOMPARE(list->currentItem()->text(1), QString("2026-10-20"));
+        due->setDate(QDate(2026, 11, 1));
+        QCOMPARE(list->currentItem()->text(1), QString("2026-11-01"));
+
+        QTest::mouseClick(dueEnabled, Qt::LeftButton, Qt::NoModifier, QPoint(8, dueEnabled->height() / 2));
+        QVERIFY(!dueEnabled->isChecked());
+        QVERIFY(!due->isEnabled());
+        QCOMPARE(list->currentItem()->text(1), QString());
+
+        list->setCurrentItem(list->topLevelItem(1));
+        QCOMPARE(list->currentItem()->data(0, Qt::UserRole).toString(), QString("none"));
+        QVERIFY(!dueEnabled->isChecked());
+        QTest::mouseClick(dueEnabled, Qt::LeftButton, Qt::NoModifier, QPoint(8, dueEnabled->height() / 2));
+        QVERIFY(dueEnabled->isChecked());
+        QVERIFY(due->isEnabled());
+        QCOMPARE(list->currentItem()->text(1), QDate::currentDate().toString(Qt::ISODate));
+
+        QVERIFY(window.close());
+        NotebookStore reloaded;
+        QVERIFY2(reloaded.load(&error), qPrintable(error));
+        QVERIFY(!reloaded.note("task")->metadata.contains("due"));
+        QCOMPARE(reloaded.note("none")->metadata["due"].toString(), QDate::currentDate().toString(Qt::ISODate));
+    }
+
+    void todoCreatedTime() {
+        NotebookStore fixture;
+        Notebook book{"todo", "待办", "todo",
+                      {{"old", {}, "旧事项", {}, false, {{"category", "默认"}, {"completed", false}, {"created", "2026-10-01T09:30:00"}}},
+                       {"legacy", {}, "无记录事项", {}}},
+                      {}, fixturePath("todo-created")};
+        fixture.notebooks.append(book);
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.resize(1280, 800);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *list = window.findChild<QTreeWidget *>("todoList");
+        auto *created = window.findChild<QLabel *>("todoCreated");
+        auto *title = window.findChild<QLineEdit *>("todoTitle");
+        auto *dueEnabled = window.findChild<QCheckBox *>("todoDueEnabled");
+        QVERIFY(list && created && title && dueEnabled);
+
+        list->setCurrentItem(list->topLevelItem(0));
+        QCOMPARE(created->text(), QString("2026-10-01 09:30"));
+        list->setCurrentItem(list->topLevelItem(1));
+        QCOMPARE(created->text(), QString("—"));
+
+        QTimer::singleShot(20, &window, [] {
+            auto *dialog = qobject_cast<QInputDialog *>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            dialog->setTextValue("新建事项");
+            dialog->accept();
+        });
+        QTest::mouseClick(window.findChild<QPushButton *>("newTodo"), Qt::LeftButton);
+        QCOMPARE(list->currentItem()->text(0), QString("新建事项"));
+        const auto noteId = list->currentItem()->data(0, Qt::UserRole).toString();
+        const auto createdText = created->text();
+        QVERIFY2(createdText.startsWith(QDate::currentDate().toString(Qt::ISODate)), qPrintable(createdText));
+
+        title->setFocus();
+        title->selectAll();
+        QTest::keyClicks(title, "Renamed");
+        QTest::mouseClick(dueEnabled, Qt::LeftButton, Qt::NoModifier, QPoint(8, dueEnabled->height() / 2));
+        QCOMPARE(created->text(), createdText);
+
+        QVERIFY(window.close());
+        NotebookStore reloaded;
+        QVERIFY2(reloaded.load(&error), qPrintable(error));
+        QVERIFY(reloaded.note(noteId)->metadata["created"].toString().startsWith(QDate::currentDate().toString(Qt::ISODate)));
     }
 
     void todoCategoriesEditingAndPersistence() {

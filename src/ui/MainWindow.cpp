@@ -26,6 +26,7 @@
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDate>
+#include <QDateTime>
 #include <QDateEdit>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -1066,11 +1067,13 @@ void MainWindow::buildTodoUi() {
     todoList_->setHeaderHidden(true);
     todoList_->setRootIsDecorated(false);
     todoList_->setMinimumSize(0, 0);
-    todoList_->setColumnCount(2);
+    todoList_->setColumnCount(3);
     todoList_->header()->setStretchLastSection(false);
     todoList_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     todoList_->header()->setSectionResizeMode(1, QHeaderView::Fixed);
-    todoList_->header()->resizeSection(1, 40);
+    todoList_->header()->resizeSection(1, 96);
+    todoList_->header()->setSectionResizeMode(2, QHeaderView::Fixed);
+    todoList_->header()->resizeSection(2, 40);
     listLayout->addWidget(todoList_, 1);
     todoPagination_ = new QWidget(todoListPage_);
     auto *paginationLayout = row(todoPagination_, 0, 0);
@@ -1104,6 +1107,14 @@ void MainWindow::buildTodoUi() {
     todoTitle_->setPlaceholderText(tr("事项标题"));
     todoTitle_->setAccessibleName(tr("事项标题"));
     detailsLayout->addWidget(todoTitle_);
+    auto *createdRow = new QWidget(todoDetails_);
+    auto *createdLayout = row(createdRow, 0, 0);
+    createdLayout->addWidget(label(tr("创建时间"), createdRow, true));
+    todoCreated_ = label({}, createdRow, true);
+    todoCreated_->setObjectName("todoCreated");
+    todoCreated_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    createdLayout->addWidget(todoCreated_, 1);
+    detailsLayout->addWidget(createdRow);
     todoCompleted_ = new QCheckBox(tr("已完成"), todoDetails_);
     todoCompleted_->setObjectName("todoCompleted");
     detailsLayout->addWidget(todoCompleted_);
@@ -1112,6 +1123,19 @@ void MainWindow::buildTodoUi() {
     todoCategory_->setAccessibleName(tr("事项分类"));
     detailsLayout->addWidget(label(tr("分类"), todoDetails_, true));
     detailsLayout->addWidget(todoCategory_);
+    auto *dueRow = new QWidget(todoDetails_);
+    auto *dueLayout = row(dueRow, 0, 0);
+    todoDueEnabled_ = new QCheckBox(tr("截止日期"), dueRow);
+    todoDueEnabled_->setObjectName("todoDueEnabled");
+    todoDue_ = new QDateEdit(QDate::currentDate(), dueRow);
+    todoDue_->setObjectName("todoDue");
+    todoDue_->setDisplayFormat("yyyy-MM-dd");
+    todoDue_->setCalendarPopup(true);
+    todoDue_->setAccessibleName(tr("截止日期"));
+    todoDue_->setEnabled(false);
+    dueLayout->addWidget(todoDueEnabled_);
+    dueLayout->addWidget(todoDue_, 1);
+    detailsLayout->addWidget(dueRow);
     todoContent_ = new QPlainTextEdit(todoDetails_);
     todoContent_->setObjectName("todoContent");
     todoContent_->setPlaceholderText(tr("选择事项后编辑详情"));
@@ -1156,6 +1180,25 @@ void MainWindow::buildTodoUi() {
         note->metadata["completed"] = checked;
         save();
         refreshTodoList();
+    });
+    connect(todoDueEnabled_, &QCheckBox::toggled, this, [this](bool checked) {
+        auto *item = todoList_->currentItem();
+        auto *note = item ? store_.note(item->data(0, Qt::UserRole).toString()) : nullptr;
+        if (!note) return;
+        todoDue_->setEnabled(checked);
+        if (checked) note->metadata["due"] = todoDue_->date().toString(Qt::ISODate);
+        else note->metadata.remove("due");
+        item->setText(1, note->metadata.value("due").toString());
+        save();
+    });
+    connect(todoDue_, &QDateEdit::dateChanged, this, [this](const QDate &date) {
+        if (!todoDueEnabled_->isChecked()) return;
+        auto *item = todoList_->currentItem();
+        auto *note = item ? store_.note(item->data(0, Qt::UserRole).toString()) : nullptr;
+        if (!note) return;
+        note->metadata["due"] = date.toString(Qt::ISODate);
+        item->setText(1, note->metadata["due"].toString());
+        save();
     });
     connect(todoList_, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem *item) {
         auto *note = store_.note(item->data(0, Qt::UserRole).toString());
@@ -1236,16 +1279,17 @@ void MainWindow::refreshTodoList(const QString &selectedId) {
     todoPageInfo_->setText(tr("第 %1 / %2 页，共 %3 项").arg(todoPage_ + 1).arg(pageCount).arg(count));
     for (int index = todoPage_ * pageSize; index < qMin(count, (todoPage_ + 1) * pageSize); ++index) {
         const auto &note = *matches.at(index);
-        auto *item = new QTreeWidgetItem(todoList_, {note.title});
+        auto *item = new QTreeWidgetItem(todoList_, {note.title, note.metadata["due"].toString()});
         item->setData(0, Qt::UserRole, note.id);
         item->setToolTip(0, note.title);
+        item->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
         item->setCheckState(0, note.metadata["completed"].toBool() ? Qt::Checked : Qt::Unchecked);
         auto *remove = button("×", "todoDelete", todoList_);
         remove->setProperty("iconButton", true);
         remove->setToolTip(tr("删除"));
         remove->setAccessibleName(tr("删除"));
         connect(remove, &QPushButton::clicked, this, [this, noteId = note.id] { deleteTodo(noteId); });
-        todoList_->setItemWidget(item, 1, remove);
+        todoList_->setItemWidget(item, 2, remove);
         if (note.id == id) todoList_->setCurrentItem(item);
     }
     if (!todoList_->currentItem() && todoList_->topLevelItemCount()) todoList_->setCurrentItem(todoList_->topLevelItem(0));
@@ -1260,11 +1304,19 @@ void MainWindow::refreshTodoDetails() {
     const QSignalBlocker titleBlocker(todoTitle_);
     const QSignalBlocker categoryBlocker(todoCategory_);
     const QSignalBlocker completedBlocker(todoCompleted_);
+    const QSignalBlocker dueEnabledBlocker(todoDueEnabled_);
+    const QSignalBlocker dueBlocker(todoDue_);
     const QSignalBlocker contentBlocker(todoContent_);
     todoDetails_->setEnabled(note);
     todoTitle_->setText(note ? note->title : QString());
+    const auto created = QDateTime::fromString(note ? note->metadata["created"].toString() : QString(), Qt::ISODate);
+    todoCreated_->setText(created.isValid() ? created.toString("yyyy-MM-dd HH:mm") : QStringLiteral("—"));
     todoCategory_->setCurrentIndex(todoCategory_->findData(note ? note->metadata["category"].toString("默认") : QStringLiteral("默认")));
     todoCompleted_->setChecked(note && note->metadata["completed"].toBool());
+    const auto due = QDate::fromString(note ? note->metadata["due"].toString() : QString(), Qt::ISODate);
+    todoDueEnabled_->setChecked(due.isValid());
+    todoDue_->setEnabled(due.isValid());
+    todoDue_->setDate(due.isValid() ? due : QDate::currentDate());
     todoContent_->setPlainText(note ? note->content : QString());
 }
 
@@ -1277,7 +1329,9 @@ void MainWindow::createTodo() {
     Note note;
     note.id = NotebookStore::newId();
     note.title = title;
-    note.metadata = {{"category", todoCategoryFilter_.isEmpty() ? QStringLiteral("默认") : todoCategoryFilter_}, {"completed", false}};
+    note.metadata = {{"category", todoCategoryFilter_.isEmpty() ? QStringLiteral("默认") : todoCategoryFilter_},
+                     {"completed", false},
+                     {"created", QDateTime::currentDateTime().toString(Qt::ISODate)}};
     book->notes.append(note);
     save();
     search_->clear();

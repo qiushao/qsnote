@@ -11,6 +11,7 @@ class MarkdownEditor;
 class MarkdownPreview;
 class QCheckBox;
 class QComboBox;
+class QDateEdit;
 class QLabel;
 class QLineEdit;
 namespace vte {
@@ -128,8 +129,11 @@ private:
     int todoPage_ = 0;
     QWidget *todoDetails_ = nullptr;
     QLineEdit *todoTitle_ = nullptr;
+    QLabel *todoCreated_ = nullptr;
     QComboBox *todoCategory_ = nullptr;
     QCheckBox *todoCompleted_ = nullptr;
+    QCheckBox *todoDueEnabled_ = nullptr;
+    QDateEdit *todoDue_ = nullptr;
     QPlainTextEdit *todoContent_ = nullptr;
     QString todoNotebookId_;
     QString todoCategoryFilter_;
