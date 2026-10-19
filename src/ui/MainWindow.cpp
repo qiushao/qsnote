@@ -1057,15 +1057,21 @@ void MainWindow::buildTodoUi() {
     todoListPage_ = new QWidget(pages_);
     todoListPage_->setObjectName("todoListPage");
     auto *listLayout = column(todoListPage_, 16, 12);
+    auto *actionsLayout = new QHBoxLayout;
+    actionsLayout->setSpacing(12);
+    listLayout->addLayout(actionsLayout);
+    auto *addCategory = button(tr("新建分类"), "newTodoCategory", todoListPage_);
+    actionsLayout->addWidget(addCategory);
+    connect(addCategory, &QPushButton::clicked, this, &MainWindow::createTodoCategory);
     todoAdd_ = button(tr("＋ 新建事项"), "newTodo", todoListPage_);
-    listLayout->addWidget(todoAdd_);
+    actionsLayout->addWidget(todoAdd_);
     todoClearCompleted_ = button(tr("清空已完成事项"), "clearCompletedTodos", todoListPage_);
-    listLayout->addWidget(todoClearCompleted_);
+    actionsLayout->addWidget(todoClearCompleted_);
     todoSort_ = new QComboBox(todoListPage_);
     todoSort_->setObjectName("todoSort");
     todoSort_->setAccessibleName(tr("事项排序"));
     todoSort_->addItems({tr("按优先级（高到低）"), tr("按创建日期（新到旧）"), tr("按截止日期（近到远）")});
-    listLayout->addWidget(todoSort_);
+    actionsLayout->addWidget(todoSort_, 1);
     connect(todoSort_, &QComboBox::currentIndexChanged, this, [this] {
         todoPage_ = 0;
         refreshTodoList();
