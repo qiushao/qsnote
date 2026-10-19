@@ -1453,6 +1453,52 @@ st->e
         QVERIFY(javascript(preview, "!!document.querySelector('code.language-plantuml')").toBool());
     }
 
+    void ganttPreviewAfterEditing() {
+        QString source = R"md(```mermaid
+gantt
+    title Product Launch Plan
+    dateFormat YYYY-MM
+    section Planning
+        Market research      :done, research, 2024-03-01, 10d
+        Define requirements  :done, reqs, after research, 7d
+    section Build
+        Design prototype     :active, proto, after reqs, 14d
+        User testing         :testing, after proto, 7d
+    section Launch
+        Marketing campaign   :marketing, after proto, 14d
+        Release day          :milestone, after testing, 0d
+```
+)md";
+        NotebookStore fixture;
+        fixture.notebooks.append({"book", "笔记本", "normal",
+            {{"note", {}, "甘特图", source, false, {}}}, {}, fixturePath("gantt")});
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        QSettings().setValue("session/openNotes", QStringList{"note"});
+        MainWindow window;
+        window.resize(1100, 800);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *editor = window.findChild<MarkdownEditor *>("markdownEditor");
+        auto *preview = window.findChild<MarkdownPreview *>("preview");
+        for (int iteration = 0; iteration < 2; ++iteration) {
+            window.findChild<QPushButton *>("editMode")->click();
+            source.replace("Product Launch Plan", "Updated Product Launch Plan");
+            editor->getTextEdit()->setPlainText(source);
+            QTRY_COMPARE_WITH_TIMEOUT(previewImages(*editor, vte::PreviewData::CodeBlock).size(), 1, 10000);
+            window.findChild<QPushButton *>("previewMode")->click();
+            QTRY_COMPARE_WITH_TIMEOUT(preview->renderedRevision(), preview->revision(), 30000);
+            QCOMPARE(javascript(*preview, "document.querySelectorAll('.render-error').length").toInt(), 0);
+            QCOMPARE(javascript(*preview, "document.querySelectorAll('.diagram svg').length").toInt(), 1);
+            QVERIFY(javascript(*preview, R"js((() => {
+                const svg = document.querySelector('.diagram svg');
+                return svg.viewBox.baseVal.width > 0 && svg.viewBox.baseVal.height > 0
+                    && svg.getBoundingClientRect().width > 0 && svg.getBoundingClientRect().height > 0
+                    && svg.textContent.includes('Updated Product Launch Plan');
+            })())js").toBool());
+        }
+    }
+
     void webPreviewLatestDocumentAndScroll() {
         MarkdownPreview preview;
         preview.resize(700, 400);

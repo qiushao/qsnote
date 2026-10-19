@@ -123,6 +123,11 @@
         rendering = true;
         try {
             while (pending) {
+                // Mode switches resize the WebEngine viewport asynchronously. Wait for
+                // layout before diagrams measure it; hidden pages do not receive frames.
+                if (document.visibilityState === 'visible') {
+                    await new Promise(resolve => requestAnimationFrame(resolve));
+                }
                 const request = pending;
                 pending = null;
                 const oldLine = request.reset ? 0 : currentLine();
