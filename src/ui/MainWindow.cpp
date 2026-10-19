@@ -1546,7 +1546,7 @@ void MainWindow::refreshNotebooks() {
         const QSignalBlocker numberingBlocker(autoNumberChapters_);
         autoNumberChapters_->setChecked(book && book->config["autoNumberChapters"].toBool());
     }
-    export_->setVisible(book && (book->type == "site" || book->type == "ebook"));
+    export_->setVisible(book && (book->type == "normal" || book->type == "site" || book->type == "ebook"));
     export_->setText(site ? tr("发布站点") : tr("导出电子书"));
     updatePanels();
     refreshEditor();
@@ -3098,7 +3098,7 @@ void MainWindow::showSitePreview() {
 
 void MainWindow::exportNotebook() {
     const auto *book = store_.notebook(currentNotebookId_);
-    if (!book || (book->type != "site" && book->type != "ebook")) return;
+    if (!book || (book->type != "normal" && book->type != "site" && book->type != "ebook")) return;
     if (book->type == "site") {
         QString error;
         if (!SitePublisher::validate(*book, &error)) {
@@ -3135,7 +3135,7 @@ void MainWindow::exportNotebook() {
     auto *form = new QFormLayout;
     auto *scope = new QComboBox(&dialog);
     scope->setObjectName("exportScope");
-    scope->addItem(tr("整本电子书 · ") + book->name, QString());
+    scope->addItem((book->type == "normal" ? tr("整本笔记本 · ") : tr("整本电子书 · ")) + book->name, QString());
     const auto *note = store_.note(currentNoteId());
     if (note && !note->folder && store_.owner(note->id) == book) scope->addItem(tr("当前文档 · ") + note->title, note->id);
     auto *format = new QComboBox(&dialog);
@@ -3174,7 +3174,7 @@ void MainWindow::exportNotebook() {
         const bool missingCompiler = format->currentData().toInt() == int(EbookExporter::Format::Chm) && EbookExporter::chmCompiler().isEmpty();
         const bool validDirectory = QFileInfo(directory->text().trimmed()).isDir();
         hint->setText(missingCompiler ? tr("CHM 需要安装 Free Pascal 的 chmcmd（Linux：fp-utils）；Windows 也可将 HTML Help Workshop 的 hhc 加入 PATH。")
-                                    : !validDirectory ? tr("请选择已有的保存目录。") : book->notes.isEmpty() ? tr("电子书中还没有章节。") : QString());
+                                    : !validDirectory ? tr("请选择已有的保存目录。") : book->notes.isEmpty() ? (book->type == "normal" ? tr("笔记本中还没有笔记。") : tr("电子书中还没有章节。")) : QString());
         confirm->setEnabled(!missingCompiler && validDirectory && !book->notes.isEmpty());
     };
     connect(format, &QComboBox::currentIndexChanged, &dialog, validate);

@@ -143,10 +143,18 @@ private slots:
         QCOMPARE(readFile(single), readFile(second));
     }
 
+    void epubPackageAndNavigation_data() { // NOLINT(readability-identifier-naming)
+        QTest::addColumn<QString>("type");
+        QTest::newRow("ebook") << QString("ebook");
+        QTest::newRow("normal") << QString("normal");
+    }
+
     void epubPackageAndNavigation() {
+        QFETCH(QString, type);
         QTemporaryDir source;
         QTemporaryDir destination;
-        const auto book = fixture(source.path());
+        auto book = fixture(source.path());
+        book.type = type;
         QString error;
         for (const auto &id: {QString(), QString("one")}) {
             const auto output = EbookExporter::exportBook(book, id, EbookExporter::Format::Epub, destination.path(), &error);
@@ -178,15 +186,21 @@ private slots:
             }
             if (qEnvironmentVariableIsSet("QSNOTE_EXPORT_ARTIFACTS")) {
                 QDir().mkpath(qEnvironmentVariable("QSNOTE_EXPORT_ARTIFACTS"));
-                QVERIFY(QFile::copy(output, qEnvironmentVariable("QSNOTE_EXPORT_ARTIFACTS") + (id.isEmpty() ? "/book.epub" : "/single.epub")));
+                QVERIFY(QFile::copy(output, qEnvironmentVariable("QSNOTE_EXPORT_ARTIFACTS") + "/" + type + (id.isEmpty() ? "-book.epub" : "-single.epub")));
             }
         }
     }
 
+    void pdfContainsChineseAndImages_data() { // NOLINT(readability-identifier-naming)
+        epubPackageAndNavigation_data();
+    }
+
     void pdfContainsChineseAndImages() {
+        QFETCH(QString, type);
         QTemporaryDir source;
         QTemporaryDir destination;
-        const auto book = fixture(source.path());
+        auto book = fixture(source.path());
+        book.type = type;
         QString error;
         for (const auto &id: {QString(), QString("one")}) {
             const auto output = EbookExporter::exportBook(book, id, EbookExporter::Format::Pdf, destination.path(), &error);
@@ -204,15 +218,21 @@ private slots:
                 QVERIFY(!text.contains(QChar::ReplacementCharacter));
             }
             if (qEnvironmentVariableIsSet("QSNOTE_EXPORT_ARTIFACTS")) {
-                QVERIFY(QFile::copy(output, qEnvironmentVariable("QSNOTE_EXPORT_ARTIFACTS") + (id.isEmpty() ? "/book.pdf" : "/single.pdf")));
+                QVERIFY(QFile::copy(output, qEnvironmentVariable("QSNOTE_EXPORT_ARTIFACTS") + "/" + type + (id.isEmpty() ? "-book.pdf" : "-single.pdf")));
             }
         }
     }
 
+    void pdfBookmarksFollowNoteTree_data() { // NOLINT(readability-identifier-naming)
+        epubPackageAndNavigation_data();
+    }
+
     void pdfBookmarksFollowNoteTree() {
+        QFETCH(QString, type);
         QTemporaryDir source;
         QTemporaryDir destination;
         auto book = fixture(source.path());
+        book.type = type;
         book.notes.append({"deep", "two", "三级 (书签) \\ 示例 📚", "三级正文。", false, {}, "deep.md"});
         book.notes.append({"sibling", "one", "同级章节", "同级正文。", false, {}, "sibling.md"});
         for (int i = 0; i < 150; ++i) book.notes[0].content += "\n\n长章节的正文，用于验证跨页后的书签定位。";
@@ -258,18 +278,25 @@ private slots:
             QCOMPARE(count, indices.size());
             if (qEnvironmentVariableIsSet("QSNOTE_EXPORT_ARTIFACTS")) {
                 QDir().mkpath(qEnvironmentVariable("QSNOTE_EXPORT_ARTIFACTS"));
-                QVERIFY(QFile::copy(output, qEnvironmentVariable("QSNOTE_EXPORT_ARTIFACTS") + (id.isEmpty() ? "/bookmarks.pdf" : "/single-bookmark.pdf")));
+                QVERIFY(QFile::copy(output, qEnvironmentVariable("QSNOTE_EXPORT_ARTIFACTS") + "/" + type + (id.isEmpty() ? "-bookmarks.pdf" : "-single-bookmark.pdf")));
             }
         }
     }
 
+    void chmCompilation_data() { // NOLINT(readability-identifier-naming)
+        epubPackageAndNavigation_data();
+    }
+
     void chmCompilation() {
+        QFETCH(QString, type);
         if (EbookExporter::chmCompiler().isEmpty()) QSKIP("Install chmcmd or hhc to run CHM integration test");
         QTemporaryDir source;
         QTemporaryDir destination;
+        auto book = fixture(source.path());
+        book.type = type;
         QString error;
         for (const auto &id: {QString(), QString("one")}) {
-            const auto output = EbookExporter::exportBook(fixture(source.path()), id, EbookExporter::Format::Chm, destination.path(), &error);
+            const auto output = EbookExporter::exportBook(book, id, EbookExporter::Format::Chm, destination.path(), &error);
             QVERIFY2(!output.isEmpty(), qPrintable(error));
             QVERIFY(readFile(output).startsWith("ITSF"));
             if (!QStandardPaths::findExecutable("7z").isEmpty()) {
@@ -281,9 +308,31 @@ private slots:
                 QVERIFY(html.contains("<body><nav epub:type=\"toc\">"));
                 QVERIFY(html.contains("第一章内容"));
                 QCOMPARE(html.contains("第二章内容"), id.isEmpty());
+                process.start("7z", {"x", "-so", output, "contents.hhc"});
+                QVERIFY(process.waitForFinished());
+                QCOMPARE(process.exitCode(), 0);
+                const auto navigation = QString::fromUtf8(process.readAllStandardOutput());
+                const QList<int> depths = id.isEmpty() ? QList<int>{0, 1, 0, 0, 1} : QList<int>{0};
+                // NOLINTNEXTLINE(modernize-raw-string-literal): Qt MOC cannot parse this custom-delimited raw string.
+                auto tokens = QRegularExpression("<ul>|</ul>|<param name=\"Local\" value=\"([^\"]+)\">").globalMatch(navigation);
+                int depth = -1;
+                int count = 0;
+                while (tokens.hasNext()) {
+                    const auto token = tokens.next();
+                    if (token.captured() == "<ul>") ++depth;
+                    else if (token.captured() == "</ul>") --depth;
+                    else {
+                        QVERIFY(count < depths.size());
+                        QCOMPARE(depth, depths[count]);
+                        QCOMPARE(token.captured(1), QString("book.html#chapter-%1").arg(count + 1));
+                        ++count;
+                    }
+                }
+                QCOMPARE(count, depths.size());
+                QCOMPARE(depth, -1);
             }
             if (qEnvironmentVariableIsSet("QSNOTE_EXPORT_ARTIFACTS")) {
-                QVERIFY(QFile::copy(output, qEnvironmentVariable("QSNOTE_EXPORT_ARTIFACTS") + (id.isEmpty() ? "/book.chm" : "/single.chm")));
+                QVERIFY(QFile::copy(output, qEnvironmentVariable("QSNOTE_EXPORT_ARTIFACTS") + "/" + type + (id.isEmpty() ? "-book.chm" : "-single.chm")));
             }
         }
     }

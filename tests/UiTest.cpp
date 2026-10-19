@@ -2176,7 +2176,7 @@ gantt
             QCOMPARE(window.findChild<QComboBox *>("notebooks")->count(), type + 1);
             QCOMPARE(window.findChild<QTreeWidget *>("noteTree")->topLevelItemCount(), type == 3 ? 2 : type == 1 ? 1 : 0);
             QCOMPARE(window.findChild<QPushButton *>("siteConfig")->isVisible(), type == 1);
-            QCOMPARE(window.findChild<QPushButton *>("exportNotebook")->isVisible(), type == 1 || type == 2);
+            QCOMPARE(window.findChild<QPushButton *>("exportNotebook")->isVisible(), type != 3);
         }
         NotebookStore reloaded;
         QString error;
@@ -3290,9 +3290,20 @@ gantt
         QCOMPARE(tree->topLevelItem(0)->text(0), QString("笔记X.md"));
     }
 
+    void ebookExportOptionsAndUnsavedDocument_data() { // NOLINT(readability-identifier-naming)
+        QTest::addColumn<QString>("type");
+        QTest::addColumn<bool>("single");
+        for (const auto &type: {QString("normal"), QString("ebook")}) {
+            QTest::newRow(qPrintable(type + "-book")) << type << false;
+            QTest::newRow(qPrintable(type + "-single")) << type << true;
+        }
+    }
+
     void ebookExportOptionsAndUnsavedDocument() {
+        QFETCH(QString, type);
+        QFETCH(bool, single);
         NotebookStore fixture;
-        fixture.notebooks.append({"ebook-options", "整本书", "ebook", {
+        fixture.notebooks.append({"ebook-options", "整本书", type, {
             {"parent", {}, "父章节", "原始内容", false, {}},
             {"child", "parent", "子章节", "子章节正文", false, {}}
         }, {}, fixturePath("ebook-options")});
@@ -3303,6 +3314,7 @@ gantt
         window.resize(1100, 800);
         window.show();
         QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QVERIFY(window.findChild<QPushButton *>("exportNotebook")->isVisible());
         auto *tree = window.findChild<QTreeWidget *>("noteTree");
         QVERIFY(tree);
         openTreeNote(tree, tree->topLevelItem(0));
@@ -3310,13 +3322,14 @@ gantt
         QVERIFY(editor);
         editor->setText("尚未等待自动保存的新内容");
         for (int format = 0; format < 4; ++format) {
-            QTimer::singleShot(30, &window, [&destination, format] {
+            QTimer::singleShot(30, &window, [&destination, format, single, type] {
                 auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
                 QVERIFY(dialog);
                 QCOMPARE(dialog->objectName(), QString("ebookExportDialog"));
                 auto *scope = dialog->findChild<QComboBox *>("exportScope");
                 QCOMPARE(scope->count(), 2);
-                scope->setCurrentIndex(1);
+                QCOMPARE(scope->itemText(0), type == "normal" ? QString("整本笔记本 · 整本书") : QString("整本电子书 · 整本书"));
+                scope->setCurrentIndex(single ? 1 : 0);
                 auto *formats = dialog->findChild<QComboBox *>("exportFormat");
                 QCOMPARE(formats->count(), 4);
                 formats->setCurrentIndex(format);
@@ -3336,14 +3349,15 @@ gantt
             });
             window.findChild<QPushButton *>("exportNotebook")->click();
         }
-        QFile html(destination.filePath("父章节.html"));
+        const auto name = single ? QString("父章节") : QString("整本书");
+        QFile html(destination.filePath(name + ".html"));
         QVERIFY(html.open(QIODevice::ReadOnly));
         const auto content = QString::fromUtf8(html.readAll());
         QVERIFY(content.contains("尚未等待自动保存的新内容"));
-        QVERIFY(!content.contains("子章节正文"));
-        QVERIFY(QFileInfo::exists(destination.filePath("父章节.epub")));
-        QVERIFY(QFileInfo::exists(destination.filePath("父章节.pdf")));
-        if (!EbookExporter::chmCompiler().isEmpty()) QVERIFY(QFileInfo::exists(destination.filePath("父章节.chm")));
+        QCOMPARE(content.contains("子章节正文"), !single);
+        QVERIFY(QFileInfo::exists(destination.filePath(name + ".epub")));
+        QVERIFY(QFileInfo::exists(destination.filePath(name + ".pdf")));
+        if (!EbookExporter::chmCompiler().isEmpty()) QVERIFY(QFileInfo::exists(destination.filePath(name + ".chm")));
         const auto files = QDir(destination.path()).entryList(QDir::Files);
         QTimer::singleShot(30, &window, [&destination] {
             auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());

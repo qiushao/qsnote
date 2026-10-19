@@ -1464,6 +1464,14 @@ It will be removed from the list. Files on disk will be kept, and you can add it
             <translation>Entire ebook · </translation>
         </message>
         <message>
+            <source>整本笔记本 · </source>
+            <translation>Entire notebook · </translation>
+        </message>
+        <message>
+            <source>笔记本中还没有笔记。</source>
+            <translation>This notebook has no notes yet.</translation>
+        </message>
+        <message>
             <location line="+2" />
             <source>当前文档 · </source>
             <translation>Current document · </translation>
