@@ -69,6 +69,8 @@ private:
     static QStringList siteCategories(const Notebook &book);
     void showTreeMenu(const QPoint &position);
     void openNote(const QString &id);
+    void openExternalFile(const QString &path);
+    Note *documentNote(const QString &id);
     void showTabMenu(const QPoint &position);
     void closeTab(int index);
     enum class ViewMode { Edit, Preview, Split };
@@ -107,6 +109,7 @@ private:
     UpdateChecker *updateChecker_ = nullptr;
     bool quitting_ = false;
     NotebookStore store_;
+    QHash<QString, Note> externalFiles_;
     QString currentNotebookId_;
     QSplitter *splitter_ = nullptr;
     QWidget *header_ = nullptr;

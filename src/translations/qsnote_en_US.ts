@@ -252,6 +252,10 @@
             <translation>Unable to Read Notes</translation>
         </message>
         <message>
+            <source>文件不是有效的 UTF-8 文本：%1</source>
+            <translation>The file is not valid UTF-8 text: %1</translation>
+        </message>
+        <message>
             <location line="+107" />
             <location line="+1232" />
             <source>设置</source>

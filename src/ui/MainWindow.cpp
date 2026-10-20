@@ -17,6 +17,8 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QMimeDatabase>
+#include <QMimeData>
+#include <QStringDecoder>
 #include <QScopedValueRollback>
 #include <QScrollBar>
 #include <QApplication>
@@ -508,7 +510,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     refreshEditor();
     // 标签页延迟到窗口显示后恢复：构造期间加入的标签不会触发父布局重算，标签栏会保持 0 高度不可见。
     QTimer::singleShot(0, this, [this, savedOpenNotes, savedNoteId] {
-        for (const auto &id: savedOpenNotes) openNote(id);
+        for (const auto &id: savedOpenNotes) {
+            const QUrl url(id);
+            if (url.isLocalFile() && QFileInfo::exists(url.toLocalFile())) openExternalFile(url.toLocalFile());
+            else openNote(id);
+        }
         for (int index = 0; index < tabs_->count(); ++index) {
             if (tabs_->tabData(index).toString() == savedNoteId) {
                 tabs_->setCurrentIndex(index);
@@ -522,7 +528,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     connect(saveTimer_, &QTimer::timeout, this, [this] { save(); });
     auto *find = new QShortcut(QKeySequence::Find, this);
     connect(find, &QShortcut::activated, this, [this] {
-        if (store_.note(currentNoteId())) {
+        if (documentNote(currentNoteId())) {
             auto *focus = QApplication::focusWidget();
             if (viewMode_ == ViewMode::Preview || (viewMode_ == ViewMode::Split && focus && (focus == preview_ || preview_->isAncestorOf(focus)))) {
                 preview_->showFind();
@@ -547,7 +553,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     });
     auto *replace = new QShortcut(QKeySequence::Replace, this);
     connect(replace, &QShortcut::activated, this, [this] {
-        if (!store_.note(currentNoteId())) return;
+        if (!documentNote(currentNoteId())) return;
         if (viewMode_ == ViewMode::Preview) setPreview(false);
         markdownEditor_->showFindReplace();
     });
@@ -749,6 +755,8 @@ void MainWindow::buildUi() {
     centerLayout->addWidget(toolbar_);
     pages_ = new QStackedWidget(center);
     pages_->setObjectName("editorPages");
+    pages_->setAcceptDrops(true);
+    pages_->installEventFilter(this);
     pages_->setMinimumSize(0, 0);
     auto *empty = new QWidget(pages_);
     empty->setObjectName("emptyState");
@@ -786,7 +794,7 @@ void MainWindow::buildUi() {
     previewTimer_->setSingleShot(true);
     previewTimer_->setInterval(180);
     connect(previewTimer_, &QTimer::timeout, this, [this] {
-        if (const auto *note = store_.note(currentNoteId())) preview_->setMarkdown(note->content, note->id, noteDirectory(note->id));
+        if (const auto *note = documentNote(currentNoteId())) preview_->setMarkdown(note->content, note->id, noteDirectory(note->id));
     });
     connect(preview_, &MarkdownPreview::sourceLineChanged, this, [this](int line) {
         if (!editor_ || !preview_->matchesDocument(editor_->toPlainText(), currentNoteId())) return;
@@ -948,7 +956,7 @@ void MainWindow::buildToolbar() {
     auto *headingMenu = new QMenu(heading);
     for (int level = 1; level <= 5; ++level) {
         headingMenu->addAction(QString("H%1").arg(level), this, [this, level] {
-            if (!store_.note(currentNoteId())) return;
+            if (!documentNote(currentNoteId())) return;
             setPreview(false);
             markdownEditor_->type(Type::TypeHeading, level);
         });
@@ -979,7 +987,7 @@ void MainWindow::buildToolbar() {
         action->setFocusPolicy(Qt::NoFocus);
         layout->addWidget(action);
         connect(action, &QPushButton::clicked, this, [this, tool] {
-            if (!store_.note(currentNoteId())) return;
+            if (!documentNote(currentNoteId())) return;
             setPreview(false);
             markdownEditor_->type(tool.action, tool.data);
         });
@@ -1014,7 +1022,7 @@ void MainWindow::buildToolbar() {
 })", "wavedrom"}};
     for (const auto &diagram: diagrams) {
         diagramMenu->addAction(diagram.title, this, [this, diagram] {
-            if (!store_.note(currentNoteId())) return;
+            if (!documentNote(currentNoteId())) return;
             setPreview(false);
             auto cursor = editor_->textCursor();
             cursor.beginEditBlock();
@@ -1661,7 +1669,49 @@ QString MainWindow::currentNoteId() const {
     return tabs_->tabData(tabs_->currentIndex()).toString();
 }
 
+Note *MainWindow::documentNote(const QString &id) {
+    auto it = externalFiles_.find(id);
+    return it == externalFiles_.end() ? store_.note(id) : &it.value();
+}
+
+void MainWindow::openExternalFile(const QString &path) {
+    const QFileInfo info(path);
+    const auto canonicalPath = info.canonicalFilePath();
+    if (!info.isFile()) return;
+    for (const auto &book: store_.notebooks) {
+        if (book.type == "todo") continue;
+        for (const auto &note: book.notes) {
+            if (!note.folder && QFileInfo(QDir(book.path).filePath(note.path)).canonicalFilePath() == canonicalPath) {
+                openNote(note.id);
+                return;
+            }
+        }
+    }
+    const auto id = QUrl::fromLocalFile(canonicalPath).toString();
+    if (!externalFiles_.contains(id)) {
+        QFile file(canonicalPath);
+        if (!file.open(QIODevice::ReadOnly)) {
+            QMessageBox::warning(this, tr("无法读取笔记"), file.errorString());
+            return;
+        }
+        const auto bytes = file.readAll();
+        QStringDecoder decoder(QStringDecoder::Utf8, QStringDecoder::Flag::Stateless);
+        const QString content = decoder(bytes);
+        if (decoder.hasError() || content.contains(QChar::Null)) {
+            QMessageBox::warning(this, tr("无法读取笔记"), tr("文件不是有效的 UTF-8 文本：%1").arg(path));
+            return;
+        }
+        Note note{id, {}, info.fileName(), content, false, {}, canonicalPath};
+        note.metadata["utf8Bom"] = bytes.startsWith("\xef\xbb\xbf");
+        note.metadata["crlf"] = bytes.contains("\r\n");
+        note.content.replace("\r\n", "\n");
+        externalFiles_.insert(id, note);
+    }
+    openNote(id);
+}
+
 QString MainWindow::noteDirectory(const QString &id) {
+    if (externalFiles_.contains(id)) return QFileInfo(externalFiles_[id].path).absolutePath();
     const auto *note = store_.note(id);
     const auto *book = store_.owner(id);
     if (!note || !book) return {};
@@ -1704,7 +1754,7 @@ void MainWindow::openNote(const QString &id) {
             return;
         }
     }
-    const auto *note = store_.note(id);
+    const auto *note = documentNote(id);
     if (!note || note->folder) return;
     {
         const QSignalBlocker blocker(tabs_);
@@ -1721,16 +1771,16 @@ void MainWindow::showTabMenu(const QPoint &position) {
     const int index = tabs_->tabAt(position);
     if (index < 0) return;
     const auto id = tabs_->tabData(index).toString();
-    const auto *note = store_.note(id);
+    const auto *note = documentNote(id);
     const auto *book = store_.owner(id);
-    if (!note || !book) return;
-    const auto path = note->path.isEmpty() ? QString() : QDir(book->path).absoluteFilePath(note->path);
-    const auto bookId = book->id;
+    if (!note) return;
+    const auto path = book ? (note->path.isEmpty() ? QString() : QDir(book->path).absoluteFilePath(note->path)) : note->path;
+    const auto bookId = book ? book->id : QString();
     QMenu menu(this);
     auto *copyRelativePath = menu.addAction(tr("复制相对路径"), this, [relativePath = note->path] {
         QApplication::clipboard()->setText(QDir::toNativeSeparators(relativePath));
     });
-    copyRelativePath->setEnabled(!path.isEmpty());
+    copyRelativePath->setEnabled(book && !path.isEmpty());
     auto *copyPath = menu.addAction(tr("复制绝对路径"), this, [path] {
         QApplication::clipboard()->setText(QDir::toNativeSeparators(path));
     });
@@ -1739,7 +1789,7 @@ void MainWindow::showTabMenu(const QPoint &position) {
         QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(path).absolutePath()));
     });
     openPath->setEnabled(!path.isEmpty());
-    menu.addAction(tr("定位节点"), this, [this, index, id, bookId] {
+    auto *locate = menu.addAction(tr("定位节点"), this, [this, index, id, bookId] {
         notebooks_->setCurrentIndex(notebooks_->findData(bookId));
         search_->clear();
         tabs_->setCurrentIndex(index);
@@ -1757,6 +1807,7 @@ void MainWindow::showTabMenu(const QPoint &position) {
             ++item;
         }
     });
+    locate->setEnabled(book);
     menu.addSeparator();
     menu.addAction(tr("全部保存"), this, [this] { save(); });
     menu.addAction(tr("关闭标签"), this, [this, index] { closeTab(index); });
@@ -1804,6 +1855,7 @@ void MainWindow::activateEditor(const QString &id) {
         EditorSession session;
         auto *documentEditor = new MarkdownEditor(editors_);
         auto *textEdit = documentEditor->getTextEdit();
+        textEdit->viewport()->installEventFilter(this);
         textEdit->setPlaceholderText(tr("开始书写 Markdown..."));
         textEdit->setProperty("noteId", id);
         session.editor = documentEditor;
@@ -1824,9 +1876,9 @@ void MainWindow::activateEditor(const QString &id) {
             if (activeEditorId_ == id) refreshOutline();
         });
         documentEditor->setBasePath(noteDirectory(id));
-        documentEditor->setText(store_.note(id)->content);
+        documentEditor->setText(documentNote(id)->content);
         connect(textEdit, &QTextEdit::textChanged, this, [this, id, textEdit] {
-            auto *note = store_.note(id);
+            auto *note = documentNote(id);
             if (!note) return;
             const auto text = textEdit->toPlainText();
             if (note->content == text) return;
@@ -1881,6 +1933,7 @@ void MainWindow::removeEditor(const QString &id) {
     disconnect(session.editor->getTextEdit(), nullptr, this, nullptr);
     disconnect(session.editor->getTextEdit()->verticalScrollBar(), nullptr, this, nullptr);
     delete session.editor;
+    externalFiles_.remove(id);
 }
 
 void MainWindow::refreshEditor() {
@@ -1907,7 +1960,7 @@ void MainWindow::refreshEditor() {
         return;
     }
     const auto id = currentNoteId();
-    const auto *note = store_.note(id);
+    const auto *note = documentNote(id);
     toolbar_->setVisible(note);
     if (note) {
         activateEditor(id);
@@ -1927,7 +1980,7 @@ void MainWindow::setPreview(bool enabled) {
 }
 
 void MainWindow::setViewMode(ViewMode mode) {
-    const auto *note = store_.note(currentNoteId());
+    const auto *note = documentNote(currentNoteId());
     if (!note) return;
     const auto oldMode = viewMode_;
     const auto sessionMode = editorSessions_[activeEditorId_].mode;
@@ -1967,7 +2020,7 @@ void MainWindow::refreshOutline() {
     const auto *book = store_.notebook(currentNotebookId_);
     if (book && book->type == "todo") return;
     outline_->clear();
-    const auto *note = store_.note(currentNoteId());
+    const auto *note = documentNote(currentNoteId());
     outlineHint_->setText(note ? tr("本文暂无标题") : tr("打开一篇笔记后自动生成大纲"));
     if (note && editorSessions_.contains(note->id)) {
         QList<QPair<int, QTreeWidgetItem *>> parents;
@@ -1986,7 +2039,7 @@ void MainWindow::refreshOutline() {
 }
 
 void MainWindow::updateStatus() {
-    const auto *note = store_.note(currentNoteId());
+    const auto *note = documentNote(currentNoteId());
     if (!note) return;
     status_->setText(tr("%1 字 · %2 行 · %3").arg(note->content.size()).arg(note->content.count('\n') + 1).arg(viewMode_ == ViewMode::Split ? tr("分屏") : previewModeEnabled_ ? tr("预览") : tr("编辑中")));
 }
@@ -2073,6 +2126,27 @@ void MainWindow::changeEvent(QEvent *event) {
 }
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
+    if (((watched == pages_ && pages_->currentWidget() != todoListPage_) || (editor_ && watched == editor_->viewport()))
+        && (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove || event->type() == QEvent::Drop)) {
+        auto *drop = dynamic_cast<QDropEvent *>(event);
+        if (!drop) return QMainWindow::eventFilter(watched, event);
+        QStringList paths;
+        for (const auto &url: drop->mimeData()->urls()) {
+            if (!url.isLocalFile()) continue;
+            const QFileInfo info(url.toLocalFile());
+            if (!info.isFile()) continue;
+            const auto mime = QMimeDatabase().mimeTypeForFile(info);
+            if (info.size() == 0 || (mime.inherits("text/plain") && !mime.name().startsWith("image/"))) paths.append(info.filePath());
+        }
+        if (!paths.isEmpty()) {
+            drop->setDropAction(Qt::CopyAction);
+            drop->accept();
+            if (event->type() == QEvent::Drop) {
+                for (const auto &path: paths) openExternalFile(path);
+            }
+            return true;
+        }
+    }
     if (event->type() == QEvent::ShowToParent || event->type() == QEvent::HideToParent) {
         if (watched == left_) toggleLeft_->setIcon(icon(left_->isHidden() ? "leftCollapsed" : "left"));
         if (watched == right_) toggleRight_->setIcon(icon(right_->isHidden() ? "rightCollapsed" : "right"));
@@ -2109,9 +2183,22 @@ bool MainWindow::save() {
         QMessageBox::warning(this, tr("无法保存笔记"), error);
         return false;
     }
+    for (auto &note: externalFiles_) {
+        if (!note.contentDirty) continue;
+        auto content = note.content;
+        if (note.metadata["crlf"].toBool()) content.replace("\n", "\r\n");
+        auto bytes = content.toUtf8();
+        if (note.metadata["utf8Bom"].toBool()) bytes.prepend("\xef\xbb\xbf");
+        QSaveFile file(note.path);
+        if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) {
+            QMessageBox::warning(this, tr("无法保存笔记"), file.errorString());
+            return false;
+        }
+        note.contentDirty = false;
+    }
     for (auto it = editorSessions_.cbegin(); it != editorSessions_.cend(); ++it) {
         const auto directory = noteDirectory(it.key());
-        const auto *note = store_.note(it.key());
+        const auto *note = documentNote(it.key());
         if (note && it->editor->getText() != note->content) {
             const auto previous = it->editor->getTextEdit()->textCursor();
             const int anchor = previous.anchor();
@@ -2128,10 +2215,10 @@ bool MainWindow::save() {
         it->editor->getPreviewMgr()->refreshPreview();
     }
     if (viewMode_ != ViewMode::Edit) {
-        if (const auto *note = store_.note(currentNoteId())) preview_->setMarkdown(note->content, note->id, noteDirectory(note->id));
+        if (const auto *note = documentNote(currentNoteId())) preview_->setMarkdown(note->content, note->id, noteDirectory(note->id));
     }
     for (int index = 0; index < tabs_->count(); ++index) {
-        if (const auto *note = store_.note(tabs_->tabData(index).toString())) {
+        if (const auto *note = documentNote(tabs_->tabData(index).toString())) {
             tabs_->setTabText(index, note->title);
             tabs_->setTabToolTip(index, note->title);
             tabs_->setTabIcon(index, {});

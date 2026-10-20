@@ -377,6 +377,120 @@ st->e
         QCOMPARE(editor.getText(), QString("plain text"));
     }
 
+    void dropExternalTextFiles_data() { // NOLINT(readability-identifier-naming): Qt Test data slot.
+        QTest::addColumn<QByteArray>("original");
+        QTest::addColumn<QString>("text");
+        QTest::addColumn<QByteArray>("addition");
+        QTest::newRow("utf8") << QString("# 外部文件\nOriginal\n").toUtf8() << QString("# 外部文件\nOriginal\n") << QByteArray("Edited\n");
+        QTest::newRow("bom-crlf") << QByteArray("\xef\xbb\xbf# External\r\n\r\nOriginal\r\n")
+                                 << QString("# External\n\nOriginal\n") << QByteArray("Edited\r\n");
+        QTest::newRow("empty") << QByteArray() << QString() << QByteArray("Edited\n");
+    }
+
+    void dropExternalTextFiles() {
+        QFETCH(QByteArray, original);
+        QFETCH(QString, text);
+        QFETCH(QByteArray, addition);
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const auto first = directory.filePath("外部文件.md");
+        const auto second = directory.filePath("second file.txt");
+        for (const auto &path: {first, second}) {
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            QCOMPARE(file.write(original), original.size());
+        }
+        MainWindow window;
+        window.resize(1000, 700);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *tabs = window.findChild<QTabBar *>("noteTabs");
+        auto *pages = window.findChild<QStackedWidget *>("editorPages");
+        QCOMPARE(tabs->count(), 0);
+        const auto dropFiles = [](QWidget *target, const QList<QUrl> &urls) {
+            QMimeData mime;
+            mime.setUrls(urls);
+            const QPoint point(30, 30);
+            QDragEnterEvent enter(point, Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(target, &enter);
+            QVERIFY(enter.isAccepted());
+            QDragMoveEvent move(point, Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(target, &move);
+            QVERIFY(move.isAccepted());
+            QDropEvent drop(point, Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(target, &drop);
+            QVERIFY(drop.isAccepted());
+        };
+        dropFiles(pages, {QUrl::fromLocalFile(first)});
+        QCOMPARE(tabs->count(), 1);
+        QCOMPARE(tabs->tabText(0), QString("外部文件.md"));
+        auto *editor = window.findChild<vte::VTextEdit *>("editor");
+        QVERIFY(editor);
+        QCOMPARE(editor->toPlainText(), text);
+        QCOMPARE(window.findChild<MarkdownEditor *>("markdownEditor")->getBasePath(), directory.path());
+        editor->moveCursor(QTextCursor::End);
+        editor->insertPlainText("Edited\n");
+        const auto edited = editor->toPlainText();
+        dropFiles(editor->viewport(), {QUrl::fromLocalFile(second), QUrl::fromLocalFile(first)});
+        QCOMPARE(tabs->count(), 2);
+        QCOMPARE(tabs->currentIndex(), 0);
+        QCOMPARE(window.findChild<vte::VTextEdit *>("editor"), editor);
+        QCOMPARE(editor->toPlainText(), edited);
+        tabs->setCurrentIndex(1);
+        QCOMPARE(window.findChild<vte::VTextEdit *>("editor")->toPlainText(), text);
+        emit tabs->tabCloseRequested(0);
+        QCOMPARE(tabs->count(), 1);
+        QFile saved(first);
+        QVERIFY(saved.open(QIODevice::ReadOnly));
+        QCOMPARE(saved.readAll(), original + addition);
+        QFile untouched(second);
+        QVERIFY(untouched.open(QIODevice::ReadOnly));
+        QCOMPARE(untouched.readAll(), original);
+        NotebookStore store;
+        QString error;
+        QVERIFY2(store.load(&error), qPrintable(error));
+        QVERIFY(store.notebooks.isEmpty());
+        QVERIFY(window.close());
+        MainWindow restored;
+        restored.show();
+        auto *restoredTabs = restored.findChild<QTabBar *>("noteTabs");
+        QTRY_COMPARE(restoredTabs->count(), 1);
+        QCOMPARE(restoredTabs->tabText(0), QString("second file.txt"));
+    }
+
+    void dropInvalidTextFile() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QFile file(directory.filePath("invalid.txt"));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        const QByteArray bytes("Incomplete UTF-8: \xe4\xb8");
+        QCOMPARE(file.write(bytes), bytes.size());
+        file.close();
+        MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *pages = window.findChild<QStackedWidget *>("editorPages");
+        QMimeData mime;
+        mime.setUrls({QUrl::fromLocalFile(file.fileName())});
+        QDragEnterEvent enter(QPoint(30, 30), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(pages, &enter);
+        QVERIFY(enter.isAccepted());
+        bool warned = false;
+        QTimer::singleShot(0, &window, [&warned] {
+            auto *dialog = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+            if (!dialog) return;
+            warned = dialog->text().contains("UTF-8");
+            dialog->accept();
+        });
+        QDropEvent drop(QPoint(30, 30), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(pages, &drop);
+        QVERIFY(warned);
+        QCOMPARE(window.findChild<QTabBar *>("noteTabs")->count(), 0);
+        QVERIFY(window.close());
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), bytes);
+    }
+
     void insertImageFiles_data() { // NOLINT(readability-identifier-naming): Qt Test data slot.
         QTest::addColumn<bool>("drop");
         QTest::newRow("paste") << false;
