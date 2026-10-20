@@ -96,6 +96,11 @@
         }
         return lineCount - 1;
     }
+    function scrollToPosition(y) {
+        ignoreScroll = true;
+        window.scrollTo(0, y);
+        requestAnimationFrame(() => requestAnimationFrame(() => { ignoreScroll = false; }));
+    }
     function scrollToLine(line, reveal = true) {
         if (reveal) {
             const nodes = [...content.querySelectorAll('[data-source-line]')]
@@ -111,9 +116,7 @@
         for (let i = 1; i < map.length; ++i) {
             if (map[i].line >= line) {
                 const a = map[i - 1], b = map[i];
-                ignoreScroll = true;
-                window.scrollTo(0, a.y + (b.y - a.y) * (line - a.line) / Math.max(1, b.line - a.line));
-                requestAnimationFrame(() => requestAnimationFrame(() => { ignoreScroll = false; }));
+                scrollToPosition(a.y + (b.y - a.y) * (line - a.line) / Math.max(1, b.line - a.line));
                 return;
             }
         }
@@ -130,7 +133,7 @@
                 }
                 const request = pending;
                 pending = null;
-                const oldLine = request.reset ? 0 : currentLine();
+                const oldScrollY = request.reset ? 0 : scrollY;
                 if (request.reset) collapsedSections.clear();
                 else if (content.querySelector('.vx-heading-fold-toggle')) collapsedSections = foldedHeadings();
                 const root = qsnoteArticle.markdown(request.text);
@@ -173,7 +176,9 @@
                 if (request.revision !== requestedRevision) continue;
                 decorateHeadings(collapsedSections);
                 revision = request.revision;
-                scrollToLine(requestedLine ?? oldLine, requestedLine !== null);
+                // Content edits must not round the viewport position to a source line.
+                if (requestedLine !== null) scrollToLine(requestedLine);
+                else scrollToPosition(oldScrollY);
                 requestedLine = null;
                 bridge.rendered(revision);
             }

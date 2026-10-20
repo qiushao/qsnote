@@ -2,6 +2,7 @@
 #define QSNOTE_INPLACEPREVIEW_H
 
 #include <QCache>
+#include <QHash>
 #include <QObject>
 #include <QTimer>
 #include <QVariantMap>
@@ -56,6 +57,7 @@ private:
     QTimer renderTimer_;
     QTimer publishTimer_;
     QCache<QString, Image> cache_{16384};// Raster bytes in KiB, bounded to 16 MiB.
+    QHash<QString, Image> activeImages_;// Current previews must survive history cache eviction.
     QVector<Request> requests_;
     quint64 revision_ = 0;
     int generation_ = 0;

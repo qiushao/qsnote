@@ -44,6 +44,7 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QInputDialog>
+#include <QInputMethodEvent>
 #include <QLabel>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -1738,6 +1739,129 @@ gantt
         QCOMPARE(previewImages(*editor, vte::PreviewData::CodeBlock).size(), 0);
         QCOMPARE(editor->getText(), source);
         QVERIFY(!QSettings().value("editor/inplacePreview").toBool());
+    }
+
+    void editorKeepsPositionWithUncachedDiagrams_data() { // NOLINT(readability-identifier-naming): Qt Test data-provider convention.
+        QTest::addColumn<bool>("inputMethod");
+        QTest::newRow("keyboard") << false;
+        QTest::newRow("input-method") << true;
+    }
+
+    void editorKeepsPositionWithUncachedDiagrams() {
+        QFETCH(bool, inputMethod);
+        NotebookStore fixture;
+        Notebook book{"editor-scroll-book", "Scroll", "normal", {}, {}, fixturePath("editor-scroll-book")};
+        QString markdown;
+        for (int i = 0; i < 5; ++i) {
+            markdown += QStringLiteral("## Chart %1\n\n```mermaid\nxychart\n"
+                                       "    title \"Chart %1\"\n"
+                                       "    x-axis [A, B, C]\n"
+                                       "    y-axis \"Value\" 0 --> 100\n"
+                                       "    line [10, 50, 30]\n```\n\n"
+                                       "Paragraph after chart %1.\n\n").arg(i);
+        }
+        book.notes.append({"editor-scroll-note", {}, "Scroll.md", markdown, false, {}});
+        fixture.notebooks.append(book);
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.resize(1400, 700);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *tree = window.findChild<QTreeWidget *>("noteTree");
+        openTreeNote(tree, tree->topLevelItem(0));
+        auto &editor = *window.findChild<MarkdownEditor *>("markdownEditor");
+        QTRY_COMPARE_WITH_TIMEOUT(previewImages(editor, vte::PreviewData::CodeBlock).size(), 5, 30000);
+        qint64 rasterBytes = 0;
+        for (const auto &image: previewImages(editor, vte::PreviewData::CodeBlock)) {
+            const auto *pixmap = editor.findImageFromDocumentResourceMgr(image.m_imageName);
+            QVERIFY(pixmap);
+            rasterBytes += static_cast<qint64>(pixmap->width()) * pixmap->height() * 4;
+        }
+        QVERIFY(rasterBytes > 16 * 1024 * 1024);
+        QTest::qWait(1000);
+        auto *edit = editor.getTextEdit();
+        QTextCursor cursor = editor.document()->find("Paragraph after chart 0.");
+        cursor.movePosition(QTextCursor::EndOfBlock);
+        edit->setTextCursor(cursor);
+        edit->setFocus();
+        edit->verticalScrollBar()->setValue(edit->verticalScrollBar()->value() + edit->cursorRect().y() - 200);
+        QTest::qWait(200);
+        const int position = edit->verticalScrollBar()->value();
+        const int cursorY = edit->cursorRect().y();
+        QVERIFY(cursorY > 50);
+        QVERIFY(cursorY < edit->viewport()->height() - 50);
+        QSignalSpy renderRequests(editor.findChild<InplacePreview *>(), &InplacePreview::renderRequested);
+        for (int i = 0; i < 3; ++i) {
+            if (inputMethod) {
+                QInputMethodEvent preedit("wen", {});
+                QApplication::sendEvent(edit, &preedit);
+                QCOMPARE(edit->verticalScrollBar()->value(), position);
+                QInputMethodEvent commit;
+                commit.setCommitString("文");
+                QApplication::sendEvent(edit, &commit);
+            } else {
+                QTest::keyClicks(edit, "x");
+            }
+            QCOMPARE(edit->verticalScrollBar()->value(), position);
+            QTest::qWait(600);
+            QCOMPARE(edit->verticalScrollBar()->value(), position);
+            QCOMPARE(edit->cursorRect().y(), cursorY);
+            QCOMPARE(previewImages(editor, vte::PreviewData::CodeBlock).size(), 5);
+            QVERIFY(renderRequests.isEmpty());
+        }
+    }
+
+    void splitPreviewKeepsPositionWhileTyping() {
+        NotebookStore fixture;
+        Notebook book{"typing-scroll-book", "Scroll", "normal", {}, {}, fixturePath("typing-scroll-book")};
+        QString text;
+        for (int i = 0; i < 80; ++i) text += QStringLiteral("## Heading %1\n\nParagraph %1\n\n").arg(i);
+        book.notes.append({"typing-scroll-note", {}, "Scroll.md", text, false, {}});
+        fixture.notebooks.append(book);
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.resize(1400, 700);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *tree = window.findChild<QTreeWidget *>("noteTree");
+        openTreeNote(tree, tree->topLevelItem(0));
+        window.findChild<QPushButton *>("splitMode")->click();
+        auto *preview = window.findChild<MarkdownPreview *>("preview");
+        auto *editor = window.findChild<MarkdownEditor *>("markdownEditor");
+        QTRY_COMPARE_WITH_TIMEOUT(preview->renderedRevision(), preview->revision(), 30000);
+        auto *edit = editor->getTextEdit();
+        QTextCursor cursor(editor->document()->findBlockByNumber(162));
+        cursor.movePosition(QTextCursor::EndOfBlock);
+        edit->setTextCursor(cursor);
+        edit->setFocus();
+        editor->scrollToLine(160, false);
+        QTRY_VERIFY(javascript(*preview, "window.scrollY > 1000").toBool());
+        QTest::qWait(100);
+        QSignalSpy lines(preview, &MarkdownPreview::sourceLineChanged);
+        // Stop between source lines so rounding the position to a line loses pixels.
+        javascript(*preview, "window.scrollTo(0, document.querySelector('h2[data-source-line=\"160\"]').getBoundingClientRect().top + scrollY + 13)");
+        QTRY_VERIFY(!lines.isEmpty());
+        const int editorPosition = edit->verticalScrollBar()->value();
+        const int previewPosition = javascript(*preview, "window.scrollY").toInt();
+        for (int i = 0; i < 3; ++i) {
+            const int revision = preview->revision();
+            QTest::keyClicks(edit, "x");
+            QTRY_VERIFY(preview->revision() > revision);
+            QTRY_COMPARE_WITH_TIMEOUT(preview->renderedRevision(), preview->revision(), 30000);
+            QTest::qWait(100);
+            QCOMPARE(edit->verticalScrollBar()->value(), editorPosition);
+            QCOMPARE(javascript(*preview, "window.scrollY").toInt(), previewPosition);
+        }
+        // A layout change during refresh must also preserve the viewport position.
+        const int revision = preview->revision();
+        QTest::keyClick(edit, Qt::Key_Return);
+        QTRY_VERIFY(preview->revision() > revision);
+        QTRY_COMPARE_WITH_TIMEOUT(preview->renderedRevision(), preview->revision(), 30000);
+        QTest::qWait(100);
+        QCOMPARE(edit->verticalScrollBar()->value(), editorPosition);
+        QCOMPARE(javascript(*preview, "window.scrollY").toInt(), previewPosition);
     }
 
     void splitPreviewScrollsBothWays() {

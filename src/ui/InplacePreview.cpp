@@ -118,6 +118,8 @@ void InplacePreview::refresh() {
 
 void InplacePreview::update(const QVector<QSharedPointer<const vte::Preview>> &previews) {
     ++generation_;
+    const auto previousImages = activeImages_;
+    activeImages_.clear();
     requests_.clear();
     next_ = 0;
     QSettings settings;
@@ -150,7 +152,12 @@ void InplacePreview::update(const QVector<QSharedPointer<const vte::Preview>> &p
         const QJsonObject identity{{"language", request.language}, {"text", request.text}, {"display", request.display}, {"font", fontSize}, {"baseFont", editor_->baseEditorFontPointSize()}, {"dpi", editor_->logicalDpiY()}, {"color", color}, {"scale", scale}, {"graphWidth", graphWidth()}};
         request.key = QString::fromLatin1(QCryptographicHash::hash(QJsonDocument(identity).toJson(QJsonDocument::Compact), QCryptographicHash::Sha256).toHex());
         requests_.append(request);
-        if (const auto image = cache_.object(request.key)) attach(static_cast<int>(requests_.size()) - 1, *image);
+        const auto previous = previousImages.constFind(request.key);
+        const auto *image = previous != previousImages.cend() ? &previous.value() : cache_.object(request.key);
+        if (image) {
+            activeImages_.insert(request.key, *image);
+            attach(static_cast<int>(requests_.size()) - 1, *image);
+        }
     }
     publishTimer_.start();
     renderTimer_.start();
@@ -259,6 +266,7 @@ void InplacePreview::rendered(int generation, int index, const QString &png, int
                 image.size *= static_cast<double>(editor_->editorFontPointSize()) / editor_->baseEditorFontPointSize();
             }
             attach(index, image);
+            activeImages_.insert(requests_[index].key, image);
             cache_.insert(requests_[index].key, new Image(image), qMax(1, static_cast<int>(image.pixmap.width() * static_cast<qint64>(image.pixmap.height()) * 4 / 1024)));
         } else if (!error.isEmpty()) {
             qWarning().noquote() << QCoreApplication::translate("InplacePreview", "就地预览渲染失败（%1）：").arg(requests_[index].language) << error;
