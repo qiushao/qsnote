@@ -1,5 +1,7 @@
 #include "core/EbookExporter.h"
 #include "core/DiagramRuntime.h"
+#include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QImage>
@@ -39,6 +41,122 @@ Notebook fixture(const QString &root) {
 class EbookExporterTest : public QObject {
     Q_OBJECT
 private slots:
+    void initTestCase() {
+        QStandardPaths::setTestModeEnabled(true);
+    }
+    void cachedExports_data() { // NOLINT(readability-identifier-naming)
+        QTest::addColumn<QString>("type");
+        QTest::newRow("ebook") << QString("ebook");
+        QTest::newRow("normal") << QString("normal");
+    }
+    void deletingNotesClearsCache_data() { cachedExports_data(); } // NOLINT(readability-identifier-naming)
+    void deletingNotesClearsCache() {
+        QFETCH(QString, type);
+        QTemporaryDir source;
+        QTemporaryDir destination;
+        const bool folders = type == "normal";
+        NotebookStore store;
+        store.notebooks.append({"book", "删除缓存", type, {
+            {"parent", {}, "Parent", "Parent", folders, {}},
+            {"child", "parent", "Child", "Child", folders, {}},
+            {"leaf", "child", "Leaf", "Leaf", false, {}},
+            {"keep", {}, "Keep", "Keep", false, {}}
+        }, {}, source.path()});
+        QString error;
+        QVERIFY2(store.save(&error), qPrintable(error));
+        auto &book = store.notebooks.first();
+        book.notes.append({"unsaved", {}, "Unsaved", "Unsaved", false, {}});
+        QVERIFY2(!EbookExporter::exportBook(book, {}, EbookExporter::Format::Html, destination.path(), &error).isEmpty(), qPrintable(error));
+        const auto directory = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/notebooks/" +
+            QString::fromLatin1(QCryptographicHash::hash(QDir(book.path).absolutePath().toUtf8(), QCryptographicHash::Sha256).toHex()) + "/articles/";
+        const auto cachePath = [&](const QByteArray &id) {
+            return directory + QString::fromLatin1(QCryptographicHash::hash(id, QCryptographicHash::Sha256).toHex());
+        };
+        for (const auto &id: {"parent", "child", "leaf", "keep", "unsaved"}) QVERIFY(QFile::exists(cachePath(id)));
+        const auto keep = readFile(cachePath("keep"));
+        NotebookStore::removeNoteFiles(book, book.notes.last());
+        QVERIFY(!QFile::exists(cachePath("unsaved")));
+        NotebookStore::removeNoteFiles(book, book.notes[2]);
+        QVERIFY(!QFile::exists(cachePath("leaf")));
+        QVERIFY(QFile::exists(cachePath("parent")));
+        QVERIFY(QFile::exists(cachePath("child")));
+        QCOMPARE(readFile(cachePath("keep")), keep);
+
+        // Regenerate the leaf cache before deleting the whole subtree.
+        QVERIFY2(!EbookExporter::exportBook(book, {}, EbookExporter::Format::Html, destination.path(), &error).isEmpty(), qPrintable(error));
+        QVERIFY(QFile::exists(cachePath("leaf")));
+        NotebookStore::removeNoteFiles(book, book.notes.first());
+        for (const auto &id: {"parent", "child", "leaf"}) QVERIFY(!QFile::exists(cachePath(id)));
+        QCOMPARE(readFile(cachePath("keep")), keep);
+        QVERIFY(QFile::exists(book.path + '/' + book.notes[3].path));
+        QVERIFY(QFile::exists(QDir(destination.path()).entryInfoList(QDir::Files).first().absoluteFilePath()));
+    }
+    void cachedExports() {
+        QFETCH(QString, type);
+        QTemporaryDir source;
+        QTemporaryDir destination;
+        auto book = fixture(source.path());
+        book.type = type;
+        book.notes[0].content += "\n\n$x^2$\n\n```mermaid\ngraph LR\nA --> B\n```";
+        QString error;
+        const auto first = EbookExporter::exportBook(book, {}, EbookExporter::Format::Html, destination.path(), &error);
+        QVERIFY2(!first.isEmpty(), qPrintable(error));
+        const auto cacheDirectory = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/notebooks/" +
+            QString::fromLatin1(QCryptographicHash::hash(QDir(book.path).absolutePath().toUtf8(), QCryptographicHash::Sha256).toHex()) + "/articles/";
+        const auto cachePath = cacheDirectory + QString::fromLatin1(QCryptographicHash::hash("one", QCryptographicHash::Sha256).toHex());
+        QFile cache(cachePath);
+        QVERIFY(cache.open(QIODevice::ReadWrite));
+        const auto timestamp = QDateTime::fromSecsSinceEpoch(1000000000);
+        QVERIFY(cache.setFileTime(timestamp, QFileDevice::FileModificationTime));
+        cache.close();
+        const auto unchanged = EbookExporter::exportBook(book, {}, EbookExporter::Format::Html, destination.path(), &error);
+        QVERIFY2(!unchanged.isEmpty(), qPrintable(error));
+        QCOMPARE(readFile(unchanged), readFile(first));
+        QCOMPARE(QFileInfo(cachePath).lastModified(), timestamp);
+        for (const auto format: {EbookExporter::Format::Pdf, EbookExporter::Format::Chm}) {
+            if (format == EbookExporter::Format::Chm && EbookExporter::chmCompiler().isEmpty()) continue;
+            const auto output = EbookExporter::exportBook(book, {}, format, destination.path(), &error);
+            QVERIFY2(!output.isEmpty(), qPrintable(error));
+            QVERIFY(readFile(output).startsWith(format == EbookExporter::Format::Pdf ? "%PDF-" : "ITSF"));
+            QCOMPARE(QFileInfo(cachePath).lastModified(), timestamp);
+        }
+
+        const auto single = EbookExporter::exportBook(book, "one", EbookExporter::Format::Html, destination.path(), &error);
+        QVERIFY2(!single.isEmpty(), qPrintable(error));
+        QVERIFY(!readFile(single).contains("href=\"#chapter-2-"));
+        QVERIFY(readFile(single).contains("id=\"chapter-1-开始\""));
+        QCOMPARE(QFileInfo(cachePath).lastModified(), timestamp);
+
+        // Packaging, links, titles and authored images must reflect this export, not the cached one.
+        book.notes[0].title = "新标题";
+        book.notes.move(1, 0);
+        QImage image(80, 40, QImage::Format_RGB32);
+        image.fill(Qt::green);
+        QVERIFY(image.save(source.path() + "/图 片.png"));
+        const auto epub = EbookExporter::exportBook(book, {}, EbookExporter::Format::Epub, destination.path(), &error);
+        QVERIFY2(!epub.isEmpty(), qPrintable(error));
+        QZipReader zip(epub);
+        const auto html = zip.fileData("book.xhtml");
+        QVERIFY(html.contains("<h1>新标题</h1>"));
+        QVERIFY(html.contains("href=\"#chapter-3-%E5%BC%80%E5%A7%8B\""));
+        QVERIFY(html.contains("id=\"chapter-2-开始\""));
+        QVERIFY(!html.contains("chapter-2-chapter-1-"));
+        QCOMPARE(QImage::fromData(zip.fileData("image-1.png")).pixelColor(0, 0), QColor(Qt::green));
+        QCOMPARE(QFileInfo(cachePath).lastModified(), timestamp);
+
+        book.notes[1].content.replace("第一章内容", "更新后内容");
+        const auto changed = EbookExporter::exportBook(book, {}, EbookExporter::Format::Html, destination.path(), &error);
+        QVERIFY2(!changed.isEmpty(), qPrintable(error));
+        QVERIFY(readFile(changed).contains("更新后内容"));
+        QVERIFY(!readFile(changed).contains("第一章内容"));
+        QVERIFY(QFileInfo(cachePath).lastModified() != timestamp);
+        const auto published = QDir(destination.path()).entryList(QDir::Files);
+        book.notes[1].content = "```mermaid\nnot a diagram\n```";
+        QVERIFY(EbookExporter::exportBook(book, {}, EbookExporter::Format::Html, destination.path(), &error).isEmpty());
+        QVERIFY(error.contains("新标题"));
+        QCOMPARE(QDir(destination.path()).entryList(QDir::Files), published);
+        QVERIFY(!QFile::exists(source.path() + "/.qsnote-cache"));
+    }
     void chapterNumbering_data() { // NOLINT(readability-identifier-naming)
         QTest::addColumn<int>("format");
         QTest::addColumn<bool>("numbered");

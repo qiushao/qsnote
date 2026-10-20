@@ -314,7 +314,7 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
     }
     QMap<QString, QByteArray> assets;
     QMap<QString, QString> imagePaths;
-    ArticleRenderer renderer;
+    ArticleRenderer renderer(book.path, "notebooks");
     QString body = "<nav epub:type=\"toc\"><h2>目录</h2>" + contents(chapters, false) + "</nav>";
     body.replace("book.html#", "#");
     for (const auto &chapter: chapters) {
@@ -322,7 +322,7 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
         const auto source = QDir(book.path).absoluteFilePath(note.path.isEmpty() ? "document.md" : note.path);
         const auto base = QUrl::fromLocalFile(source);
         QDomDocument document;
-        if (!renderer.render(note.folder ? QString() : note.content, document, error)) {
+        if (!renderer.render(note.folder ? QString() : note.content, note.id, document, error)) {
             *error = QCoreApplication::translate("EbookExporter", "无法渲染章节（%1）：%2").arg(note.title, *error);
             return {};
         }

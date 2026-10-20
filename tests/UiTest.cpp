@@ -4,6 +4,7 @@
 #include "core/DiagramRuntime.h"
 #include "core/StaticSite.h"
 #include "core/UpdateChecker.h"
+#include <QCryptographicHash>
 #include <QDateEdit>
 #include <QDialogButtonBox>
 #include <QSystemTrayIcon>
@@ -3509,14 +3510,34 @@ gantt
         QVERIFY(restored.config["autoNumberChapters"].toBool());
     }
 
+    void closeAndReopenNotebook_data() { // NOLINT(readability-identifier-naming)
+        QTest::addColumn<QString>("type");
+        for (const auto &type: {"normal", "ebook", "site"}) QTest::newRow(type) << QString(type);
+    }
     void closeAndReopenNotebook() {
+        QFETCH(QString, type);
         NotebookStore fixture;
-        Notebook first{"book-a", "笔记本甲", "normal", {}, {}, fixturePath("book-a")};
+        Notebook first{"book-a", "笔记本甲", type, {}, {}, fixturePath("book-a")};
         first.notes.append({"note-x", {}, "笔记X.md", "内容X", false, {}});
         fixture.notebooks.append(first);
         fixture.notebooks.append({"book-b", "笔记本乙", "normal", {}, {}, fixturePath("book-b")});
         QString error;
         QVERIFY2(fixture.save(&error), qPrintable(error));
+        const auto notePath = fixture.notebooks.first().notes.first().path;
+        const auto cacheDirectory = [](const Notebook &book) {
+            return QStandardPaths::writableLocation(QStandardPaths::CacheLocation) +
+                (book.type == "site" ? "/sites/" : "/notebooks/") + QString::fromLatin1(
+                    QCryptographicHash::hash(QDir(book.path).absolutePath().toUtf8(), QCryptographicHash::Sha256).toHex());
+        };
+        const auto firstCache = cacheDirectory(fixture.notebooks.first());
+        const auto secondCache = cacheDirectory(fixture.notebooks.last());
+        // Closing must clear the whole notebook cache, including orphaned entries.
+        for (const auto &directory: {firstCache, secondCache}) {
+            QVERIFY(QDir().mkpath(directory + "/articles"));
+            QFile cached(directory + "/articles/orphan");
+            QVERIFY(cached.open(QIODevice::WriteOnly));
+            QCOMPARE(cached.write("cached"), qint64(6));
+        }
         MainWindow window;
         window.resize(1280, 800);
         window.show();
@@ -3525,7 +3546,9 @@ gantt
         auto *tree = window.findChild<QTreeWidget *>("noteTree");
         auto *tabs = window.findChild<QTabBar *>("noteTabs");
         QCOMPARE(notebooks->count(), 2);
-        openTreeNote(tree, tree->topLevelItem(0));
+        const auto items = tree->findItems("笔记X.md", Qt::MatchExactly | Qt::MatchRecursive);
+        QCOMPARE(items.size(), 1);
+        openTreeNote(tree, items.first());
         QCOMPARE(tabs->count(), 1);
         auto triggerAction = [](const QString &text) {
             auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
@@ -3540,22 +3563,31 @@ gantt
             }
             match->trigger();
         };
-        QTimer::singleShot(20, &window, [triggerAction] {
-            // 触发动作会同步进入模态循环，对话框处理必须先注册。
-            QTimer::singleShot(20, qApp, [] {
-                auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
-                QVERIFY(box);
-                box->button(QMessageBox::Yes)->click();
+        const auto closeNotebook = [&](QMessageBox::StandardButton answer) {
+            QTimer::singleShot(20, &window, [triggerAction, answer] {
+                // 触发动作会同步进入模态循环，对话框处理必须先注册。
+                QTimer::singleShot(20, qApp, [answer] {
+                    auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+                    QVERIFY(box);
+                    box->button(answer)->click();
+                });
+                triggerAction("关闭笔记本");
             });
-            triggerAction("关闭笔记本");
-        });
-        emit tree->customContextMenuRequested(QPoint(20, tree->height() - 20));
+            emit tree->customContextMenuRequested(QPoint(20, tree->height() - 20));
+        };
+        closeNotebook(QMessageBox::Cancel);
+        QCOMPARE(notebooks->count(), 2);
+        QCOMPARE(tabs->count(), 1);
+        QVERIFY(QFile::exists(firstCache + "/articles/orphan"));
+        closeNotebook(QMessageBox::Yes);
         QTRY_COMPARE(notebooks->count(), 1);
         QCOMPARE(tabs->count(), 0);
+        QVERIFY(!QFile::exists(firstCache));
+        QVERIFY(QFile::exists(secondCache + "/articles/orphan"));
         QCOMPARE(notebooks->currentText(), QString("笔记本乙"));
         // 关闭只移除登记，磁盘目录与索引保留
         QVERIFY(QFile::exists(fixturePath("book-a") + "/_index.json"));
-        QVERIFY(QFile::exists(fixturePath("book-a") + "/笔记X.md"));
+        QVERIFY(QFile::exists(fixturePath("book-a") + '/' + notePath));
         NotebookStore reloaded;
         QVERIFY2(reloaded.load(&error), qPrintable(error));
         QCOMPARE(reloaded.notebooks.size(), 1);
@@ -3583,8 +3615,8 @@ gantt
         emit tree->customContextMenuRequested(QPoint(20, tree->height() - 20));
         QTRY_COMPARE(notebooks->count(), 2);
         QCOMPARE(notebooks->currentText(), QString("笔记本甲"));
-        QCOMPARE(tree->topLevelItemCount(), 1);
-        QCOMPARE(tree->topLevelItem(0)->text(0), QString("笔记X.md"));
+        if (type != "site") QCOMPARE(tree->topLevelItemCount(), 1);
+        QCOMPARE(tree->findItems("笔记X.md", Qt::MatchExactly | Qt::MatchRecursive).size(), 1);
     }
 
     void ebookExportOptionsAndUnsavedDocument_data() { // NOLINT(readability-identifier-naming)

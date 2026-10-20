@@ -2,18 +2,44 @@
 #include <QCoreApplication>
 #include "PlantUmlRenderer.h"
 #include "WebTranslations.h"
+#include <QCryptographicHash>
+#include <QDir>
+#include <QDirIterator>
 #include <QEventLoop>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QPointer>
 #include <QRegularExpression>
+#include <QSaveFile>
+#include <QStandardPaths>
 #include <QTimer>
 #include <QWebEnginePage>
 #include <QWebEngineSettings>
 #include <QWebEngineUrlRequestInterceptor>
 
 namespace {
+QByteArray rendererFingerprint() {
+    // Include bundled scripts, styles and fonts so application upgrades invalidate old renders.
+    static const auto resources = [] {
+        QCryptographicHash hash(QCryptographicHash::Sha256);
+        hash.addData(qVersion());
+        QStringList paths;
+        QDirIterator files(":/web", QDir::Files, QDirIterator::Subdirectories);
+        while (files.hasNext()) paths.append(files.next());
+        paths.sort();
+        for (const auto &path: paths) {
+            QFile file(path);
+            if (file.open(QIODevice::ReadOnly)) {
+                hash.addData(path.toUtf8());
+                hash.addData(file.readAll());
+            }
+        }
+        return hash.result();
+    }();
+    return resources + QCoreApplication::translate("Web", "zh-CN").toUtf8();
+}
+
 class ExportRequests : public QWebEngineUrlRequestInterceptor {
 public:
     using QWebEngineUrlRequestInterceptor::QWebEngineUrlRequestInterceptor;
@@ -56,8 +82,24 @@ QString mathStylesheet() {
 }
 }
 
-ArticleRenderer::ArticleRenderer() = default;
+ArticleRenderer::ArticleRenderer(const QString &notebookPath, const QString &cacheGroup) {
+    const auto notebookKey = QCryptographicHash::hash(QDir(notebookPath).absolutePath().toUtf8(), QCryptographicHash::Sha256).toHex();
+    cacheDirectory_ = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+        + '/' + cacheGroup + '/' + QString::fromLatin1(notebookKey) + "/articles";
+}
 ArticleRenderer::~ArticleRenderer() = default;
+
+QString ArticleRenderer::cachePath(const QString &documentId) const {
+    return cacheDirectory_ + "/" + QString::fromLatin1(QCryptographicHash::hash(documentId.toUtf8(), QCryptographicHash::Sha256).toHex());
+}
+
+void ArticleRenderer::removeCache(const QString &documentId) {
+    QFile::remove(cachePath(documentId));
+}
+
+void ArticleRenderer::clearCache() {
+    QDir(QDir(cacheDirectory_).absoluteFilePath("..")).removeRecursively();
+}
 
 QString ArticleRenderer::stylesheet() {
     QFile file(":/web/article.css");
@@ -85,7 +127,31 @@ QString ArticleRenderer::html(const QDomDocument &document) {
     return markup;
 }
 
-bool ArticleRenderer::render(const QString &markdown, QDomDocument &document, QString *error) {
+bool ArticleRenderer::render(const QString &markdown, const QString &documentId, QDomDocument &document, QString *error) {
+    // Cache before callers resolve links, number chapters or package authored images.
+    // PlantUML can include external files, so those articles must be rendered again.
+    const bool cacheable = !markdown.contains("plantuml", Qt::CaseInsensitive);
+    const auto path = cachePath(documentId);
+    const auto key = QCryptographicHash::hash("article-v1\n" + rendererFingerprint() + markdown.toUtf8(), QCryptographicHash::Sha256).toHex() + '\n';
+    QFile cache(path);
+    if (cacheable && cache.open(QIODevice::ReadOnly)) {
+        const auto data = cache.readAll();
+        const bool cached = data.startsWith(key) && document.setContent(data.mid(key.size()), false)
+            && document.documentElement().tagName() == "article";
+        cache.close();
+        if (cached) return true;
+    }
+    if (!renderUncached(markdown, document, error)) return false;
+    // Cache failures must not prevent preview or export.
+    if (cacheable && QDir().mkpath(cacheDirectory_)) {
+        QSaveFile output(path);
+        const auto data = key + document.toByteArray(-1);
+        if (output.open(QIODevice::WriteOnly) && output.write(data) == data.size()) output.commit();
+    }
+    return true;
+}
+
+bool ArticleRenderer::renderUncached(const QString &markdown, QDomDocument &document, QString *error) {
     if (!browser_) {
         browser_ = std::make_unique<QWebEnginePage>();
         installWebTranslations(browser_.get());

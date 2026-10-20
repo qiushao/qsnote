@@ -1,4 +1,5 @@
 #include "NotebookStore.h"
+#include "ArticleRenderer.h"
 #include <QCoreApplication>
 #include "StaticSite.h"
 #include <QDir>
@@ -168,7 +169,20 @@ QString NotebookStore::relativePath(const Notebook &book, const Note &note) {
 }
 
 void NotebookStore::removeNoteFiles(const Notebook &book, const Note &note) {
-    if (book.path.isEmpty() || note.path.isEmpty()) return;
+    if (book.path.isEmpty()) return;
+    ArticleRenderer renderer(book.path, book.type == "site" ? "sites" : "notebooks");
+    QList<const Note *> pending{&note};
+    QSet<QString> removed;
+    while (!pending.isEmpty()) {
+        const auto *entry = pending.takeLast();
+        if (removed.contains(entry->id)) continue;
+        removed.insert(entry->id);
+        renderer.removeCache(book.type == "site" ? entry->path : entry->id);
+        for (const auto &child: book.notes) {
+            if (child.parentId == entry->id) pending.append(&child);
+        }
+    }
+    if (note.path.isEmpty()) return;
     const QDir root(book.path);
     const QString absolute = root.absoluteFilePath(note.path);
     if (note.folder) {

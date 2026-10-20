@@ -3,6 +3,7 @@
 #include "MarkdownEditor.h"
 #include "MarkdownPreview.h"
 #include "core/StaticSite.h"
+#include "core/ArticleRenderer.h"
 #include "core/SitePublisher.h"
 #include "core/EbookExporter.h"
 #include "core/UpdateChecker.h"
@@ -2611,6 +2612,7 @@ void MainWindow::closeNotebook() {
     if (QMessageBox::question(this, tr("关闭笔记本"), hint, QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
     // 先落盘，保证笔记本目录中的索引包含最新元信息，供之后恢复。
     if (!save()) return;
+    ArticleRenderer(book->path, book->type == "site" ? "sites" : "notebooks").clearCache();
     const QString id = book->id;
     {
         const QSignalBlocker blocker(tabs_);

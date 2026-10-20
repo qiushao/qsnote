@@ -135,7 +135,7 @@ QString comments(const Notebook &book, const Page &page) {
 class Generator {
 public:
     Generator(const Notebook &book, QString output, QString *error)
-        : book_(book), output_(std::move(output)), error_(error), root_(StaticSite::rootPath(book)) {}
+        : book_(book), output_(std::move(output)), error_(error), renderer_(book.path, "sites"), root_(StaticSite::rootPath(book)) {}
 
     bool generate() {
         if (customTheme() && !loadCustomTheme()) return false;
@@ -332,7 +332,7 @@ private:
     [[nodiscard]] QString href(const QString &route) const { return urlPath(root_ + route); }
     bool render(Page &page) {
         QDomDocument document;
-        if (!renderer_.render(page.body, document, error_)) {
+        if (!renderer_.render(page.body, QDir(book_.path).relativeFilePath(page.source), document, error_)) {
             *error_ = page.title + "：" + *error_;
             return false;
         }
@@ -352,7 +352,7 @@ private:
         const auto elements = ArticleRenderer::elements(document);
         for (auto node: elements) {
             const auto tag = node.tagName();
-            if (QRegularExpression("^h[1-6]$").match(tag).hasMatch()) {
+            if (tag.size() == 2 && tag[0] == 'h' && tag[1] >= '1' && tag[1] <= '6') {
                 const auto title = node.text();
                 const auto id = node.attribute("id");
                 const auto level = tag.mid(1).toInt();
@@ -361,16 +361,15 @@ private:
             }
             if (tag != "a" && tag != "img") continue;
             const auto attribute = tag == "img" ? "src" : "href";
-            const QUrl original(node.attribute(attribute));
-            if (tag == "img" && node.attribute(attribute).startsWith("data:image/png;base64,")) {
-                const auto encoded = original.toString(QUrl::FullyEncoded).toLatin1();
-                const auto comma = encoded.indexOf(',');
-                const auto bytes = QByteArray::fromBase64(encoded.mid(comma + 1));
+            const auto value = node.attribute(attribute);
+            if (tag == "img" && value.startsWith("data:image/png;base64,")) {
+                const auto bytes = QByteArray::fromBase64(value.mid(value.indexOf(',') + 1).toLatin1());
                 const auto path = "assets/qsnote/" + QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()) + ".png";
                 if (!outputs_.contains(path) && !write(path, bytes)) return false;
                 node.setAttribute(attribute, href(path));
                 continue;
             }
+            const QUrl original(value);
             if (!original.isRelative() || original.path().isEmpty()) continue;
             QString target;
             if (original.path().startsWith('/')) target = href(original.path().mid(1));

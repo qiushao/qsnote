@@ -1,5 +1,6 @@
 #include "core/StaticSite.h"
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -20,12 +21,137 @@ bool write(const QString &path, const QByteArray &data) {
     QFile file(path);
     return file.open(QIODevice::WriteOnly) && file.write(data) == data.size();
 }
+QString siteCacheDirectory(const Notebook &site) {
+    return QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/sites/" +
+        QString::fromLatin1(QCryptographicHash::hash(QDir(site.path).absolutePath().toUtf8(), QCryptographicHash::Sha256).toHex());
+}
 }
 
 // NOLINTBEGIN(readability-convert-member-functions-to-static)
 class StaticSiteTest : public QObject {
     Q_OBJECT
 private slots:
+    void initTestCase() {
+        QStandardPaths::setTestModeEnabled(true);
+    }
+    void cachedArticlesTrackContentAndDependencies() {
+        QTemporaryDir directory;
+        Notebook site{"site", "缓存测试", "site", {}, {}, directory.path()};
+        QString error;
+        QVERIFY2(StaticSite::prepare(site, &error), qPrintable(error));
+        const auto source = directory.path() + "/source/_posts/article.md";
+        const auto linked = directory.path() + "/source/_posts/linked.md";
+        const auto image = directory.path() + "/source/_posts/image.svg";
+        const QByteArray body = "# Heading\n\nOLD [link](linked.md#target) ![image](image.svg)\n\n$x^2$\n\n```mermaid\ngraph LR\nA --> B\n```\n";
+        QVERIFY(write(source, body));
+        QVERIFY(write(linked, "---\nslug: before\n---\n# Target"));
+        QVERIFY(write(image, "<svg xmlns=\"http://www.w3.org/2000/svg\"/>"));
+        QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
+        const auto output = directory.path() + "/public/";
+        const auto first = read(output + "article/index.html");
+        const auto assets = QDir(output + "assets/qsnote").entryList(QDir::Files);
+        QCOMPARE(assets.size(), 2);
+        QMap<QString, QByteArray> graphics;
+        for (const auto &asset: assets) graphics[asset] = read(output + "assets/qsnote/" + asset);
+        QVERIFY(first.contains("/before/#target"));
+        QVERIFY(!QFile::exists(directory.path() + "/.qsnote-cache"));
+        const auto cachePath = siteCacheDirectory(site) + "/articles/" +
+            QString::fromLatin1(QCryptographicHash::hash("source/_posts/article.md", QCryptographicHash::Sha256).toHex());
+        QFile cache(cachePath);
+        QVERIFY(cache.open(QIODevice::ReadWrite));
+        const auto timestamp = QDateTime::fromSecsSinceEpoch(1000000000);
+        QVERIFY(cache.setFileTime(timestamp, QFileDevice::FileModificationTime));
+        cache.close();
+        QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
+        QCOMPARE(QFileInfo(cachePath).lastModified(), timestamp); // Unchanged articles did not render again.
+        QCOMPARE(read(output + "article/index.html"), first);
+        for (auto it = graphics.cbegin(); it != graphics.cend(); ++it)
+            QCOMPARE(read(output + "assets/qsnote/" + it.key()), it.value());
+
+        site.config["domain"] = "https://example.com/blog/";
+        site.config["theme"] = "next";
+        QVERIFY(write(linked, "---\nslug: after\n---\n# Target"));
+        const QByteArray updatedImage = R"(<svg xmlns="http://www.w3.org/2000/svg" width="42"/>)";
+        QVERIFY(write(image, updatedImage));
+        QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
+        QCOMPARE(QFileInfo(cachePath).lastModified(), timestamp);
+        const auto changed = read(output + "article/index.html");
+        QVERIFY(changed.contains("/blog/after/#target"));
+        QVERIFY(changed.contains("/blog/assets/posts/image.svg"));
+        QVERIFY(changed.contains("/blog/assets/qsnote/"));
+        QVERIFY(changed.contains("/blog/css/main.css"));
+        QVERIFY(!changed.contains("/before/#target"));
+        QCOMPARE(read(output + "assets/posts/image.svg"), updatedImage);
+        QVERIFY(!QFile::exists(output + "before/index.html"));
+        QVERIFY(!QFile::exists(output + ".qsnote-cache"));
+
+        // A same-size edit with unchanged mtime must still invalidate the render.
+        const auto sourceTime = QFileInfo(source).lastModified();
+        QVERIFY(write(source, QByteArray(body).replace("OLD", "NEW")));
+        QFile article(source);
+        QVERIFY(article.open(QIODevice::ReadWrite));
+        QVERIFY(article.setFileTime(sourceTime, QFileDevice::FileModificationTime));
+        article.close();
+        QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
+        QVERIFY(read(output + "article/index.html").contains("NEW"));
+        QVERIFY(!read(output + "article/index.html").contains("OLD"));
+        QVERIFY(read(output + "search.json").contains("NEW"));
+        QVERIFY(QFile::remove(source));
+        QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
+        QVERIFY(!QFile::exists(output + "article/index.html"));
+        QVERIFY(!read(output + "search.json").contains("NEW"));
+    }
+    void unusableArticleCache_data() { // NOLINT(readability-identifier-naming)
+        QTest::addColumn<QString>("failure");
+        for (const auto &failure: {"missing", "old-version", "truncated", "unwritable"})
+            QTest::newRow(failure) << QString(failure);
+    }
+    void unusableArticleCache() {
+        QFETCH(QString, failure);
+        QTemporaryDir directory;
+        Notebook site{"site", "缓存测试", "site", {}, {}, directory.path()};
+        QString error;
+        QVERIFY2(StaticSite::prepare(site, &error), qPrintable(error));
+        QVERIFY(write(directory.path() + "/source/_posts/article.md", "# Content\n\n**正文**"));
+        QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
+        const auto output = directory.path() + "/public/article/index.html";
+        const auto previous = read(output);
+        const auto cacheDirectory = siteCacheDirectory(site);
+        const auto cachePath = cacheDirectory + "/articles/" +
+            QString::fromLatin1(QCryptographicHash::hash("source/_posts/article.md", QCryptographicHash::Sha256).toHex());
+        if (failure == "missing") QVERIFY(QFile::remove(cachePath));
+        else if (failure == "old-version") QVERIFY(write(cachePath, "obsolete\n<article>STALE</article>"));
+        else if (failure == "truncated") QVERIFY(write(cachePath, read(cachePath).left(70)));
+        else {
+            QVERIFY(QDir(cacheDirectory).removeRecursively());
+            QVERIFY(write(cacheDirectory, "not a directory"));
+        }
+        QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
+        QCOMPARE(read(output), previous);
+    }
+    void articleCachesAreIsolatedBySitePath() {
+        QTemporaryDir first, second;
+        Notebook site{"same-id", "站点", "site", {}, {}, first.path()};
+        QString error;
+        QVERIFY2(StaticSite::prepare(site, &error), qPrintable(error));
+        QVERIFY(write(site.path + "/source/_posts/article.md", "First site"));
+        QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
+        const auto firstCache = siteCacheDirectory(site);
+        const auto filename = "/articles/" + QString::fromLatin1(
+            QCryptographicHash::hash("source/_posts/article.md", QCryptographicHash::Sha256).toHex());
+        const auto firstRender = read(firstCache + filename);
+        QVERIFY(!firstRender.isEmpty());
+
+        site.path = second.path();
+        QVERIFY2(StaticSite::prepare(site, &error), qPrintable(error));
+        QVERIFY(write(site.path + "/source/_posts/article.md", "Second site"));
+        QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
+        QVERIFY(siteCacheDirectory(site) != firstCache);
+        QVERIFY(read(siteCacheDirectory(site) + filename).contains("Second site"));
+        QCOMPARE(read(firstCache + filename), firstRender);
+        QVERIFY(!QFile::exists(first.path() + "/.qsnote-cache"));
+        QVERIFY(!QFile::exists(second.path() + "/.qsnote-cache"));
+    }
     void customTheme_data() { // NOLINT(readability-identifier-naming)
         QTest::addColumn<bool>("relative");
         QTest::newRow("relative") << true;
@@ -227,7 +353,16 @@ private slots:
         QTemporaryDir exported;
         QVERIFY2(StaticSite::copyDirectory(directory.path() + "/public", exported.path(), &error), qPrintable(error));
         QCOMPARE(read(exported.path() + "/article/index.html"), read(directory.path() + "/public/article/index.html"));
+        const auto articleCache = siteCacheDirectory(site) + "/articles/" +
+            QString::fromLatin1(QCryptographicHash::hash(site.notes.first().path.toUtf8(), QCryptographicHash::Sha256).toHex());
+        const auto aboutCache = siteCacheDirectory(site) + "/articles/" +
+            QString::fromLatin1(QCryptographicHash::hash("source/about/index.md", QCryptographicHash::Sha256).toHex());
+        QVERIFY(QFile::exists(articleCache));
+        const auto aboutRender = read(aboutCache);
+        QVERIFY(!aboutRender.isEmpty());
         NotebookStore::removeNoteFiles(site, site.notes.first());
+        QVERIFY(!QFile::exists(articleCache));
+        QCOMPARE(read(aboutCache), aboutRender);
         site.notes.removeFirst();
         QVERIFY2(store.save(&error), qPrintable(error));
         QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
