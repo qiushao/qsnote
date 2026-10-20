@@ -3946,6 +3946,75 @@ gantt
         QTRY_COMPARE(window.findChild<QPushButton *>("exportNotebook")->text(), QString("发布"));
     }
 
+    void customSiteThemeConfigAndPreview() {
+        NotebookStore fixture;
+        Notebook site{"site", "自定义站点", "site", {}, {{"domain", "https://example.com/blog/"}}, fixturePath("custom-theme")};
+        site.notes.append({"post", {}, "自定义文章", "# Heading\n\nTheme content", false, {{"slug", "article"}}});
+        fixture.notebooks.append(site);
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        QVERIFY2(StaticSite::copyDirectory(QFINDTESTDATA("../examples/site-theme"), site.path + "/themes/example", &error), qPrintable(error));
+        MainWindow window;
+        window.resize(960, 800);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QTimer::singleShot(30, &window, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            const auto close = qScopeGuard([dialog] { dialog->accept(); });
+            dialog->findChild<QTabBar *>("siteConfigTabs")->setCurrentIndex(2);
+            auto *theme = dialog->findChild<QComboBox *>("config_theme");
+            auto *directory = dialog->findChild<QLineEdit *>("config_themeDirectory");
+            auto *choose = dialog->findChild<QPushButton *>("chooseSiteTheme");
+            QVERIFY(theme && directory && choose);
+            QVERIFY(!directory->isVisible());
+            QVERIFY(!choose->isVisible());
+            theme->setCurrentIndex(theme->findData("custom"));
+            QVERIFY(directory->isVisible());
+            QVERIFY(choose->isVisible());
+            directory->setText("themes/example");
+            emit directory->textEdited(directory->text());
+            theme->setCurrentIndex(theme->findData("pure"));
+            QVERIFY(!directory->isVisible());
+            theme->setCurrentIndex(theme->findData("custom"));
+            QCOMPARE(directory->text(), QString("themes/example"));
+        });
+        window.findChild<QPushButton *>("siteConfig")->click();
+        Notebook restored;
+        QVERIFY2(NotebookStore::readNotebook(site.path, restored, &error), qPrintable(error));
+        QCOMPARE(restored.config["theme"].toString(), QString("custom"));
+        QCOMPARE(restored.config["themeDirectory"].toString(), QString("themes/example"));
+        QTimer::singleShot(30, &window, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            const auto close = qScopeGuard([dialog] { dialog->accept(); });
+            QCOMPARE(dialog->findChild<QComboBox *>("config_theme")->currentData().toString(), QString("custom"));
+            QCOMPARE(dialog->findChild<QLineEdit *>("config_themeDirectory")->text(), QString("themes/example"));
+        });
+        window.findChild<QPushButton *>("siteConfig")->click();
+        QTimer previewTimer;
+        previewTimer.setInterval(100);
+        bool previewed = false;
+        connect(&previewTimer, &QTimer::timeout, &window, [&] {
+            auto *dialog = QApplication::activeModalWidget();
+            if (!dialog || dialog->objectName() != "sitePreviewDialog") return;
+            previewTimer.stop();
+            const auto close = qScopeGuard([dialog] { QMetaObject::invokeMethod(dialog, "reject"); });
+            auto *browser = dialog->findChild<QWebEngineView *>("siteBrowser");
+            QVERIFY(browser);
+            QTRY_VERIFY_WITH_TIMEOUT(browser->title().contains("自定义站点"), 15000);
+            QCOMPARE(browser->url().path(), QString("/blog/"));
+            QTRY_VERIFY(javascript(*browser, "Array.from(document.styleSheets).some(s => s.href && s.href.includes('/css/theme.css') && s.cssRules.length > 0)").toBool());
+            javascript(*browser, "document.querySelector('main .card a').click()");
+            QTRY_COMPARE(browser->url().path(), QString("/blog/article/"));
+            QTRY_VERIFY(javascript(*browser, "document.querySelector('main').textContent.includes('Theme content')").toBool());
+            previewed = true;
+        });
+        previewTimer.start();
+        window.findChild<QPushButton *>("sitePreview")->click();
+        QVERIFY(previewed);
+    }
+
     void siteMetadataConfigAndPreview_data() { // NOLINT(readability-identifier-naming): Qt Test data-provider convention.
         QTest::addColumn<QString>("theme");
         QTest::newRow("pure") << QString("pure");

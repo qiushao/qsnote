@@ -1,0 +1,16 @@
+:root { color-scheme: light; font-family: system-ui, sans-serif; color: #263238; background: #f8fafb; }
+body { max-width: 880px; margin: auto; padding: 24px; line-height: 1.7; }
+a { color: #176b87; text-decoration: none; }
+a:hover { text-decoration: underline; }
+header { border-bottom: 1px solid #dce4e8; padding-bottom: 20px; }
+.site-title { font-size: 1.6rem; font-weight: bold; }
+nav, .meta { display: flex; flex-wrap: wrap; gap: 16px; }
+main { margin: 32px 0; }
+.card { padding: 16px 0; border-bottom: 1px solid #dce4e8; }
+.meta, footer { color: #52636c; font-size: 0.9rem; }
+.pagination, .post-navigation { margin-top: 28px; }
+.current { font-weight: bold; }
+details { margin: 16px 0; }
+img { max-width: 100%; }
+footer { padding-top: 20px; border-top: 1px solid #dce4e8; }
+@media (max-width: 600px) { body { padding: 16px; } nav { gap: 12px; } }

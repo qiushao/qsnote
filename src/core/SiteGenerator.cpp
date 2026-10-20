@@ -138,6 +138,7 @@ public:
         : book_(book), output_(std::move(output)), error_(error), root_(StaticSite::rootPath(book)) {}
 
     bool generate() {
+        if (customTheme() && !loadCustomTheme()) return false;
         const auto source = book_.path + "/source";
         if (!QFileInfo(source).isDir()) return fail(QCoreApplication::translate("SiteGenerator", "找不到站点 source 目录"));
         QDirIterator files(source, QDir::Files | QDir::Hidden, QDirIterator::Subdirectories);
@@ -214,7 +215,7 @@ public:
                 if (!listing(group.first + "/" + it.key() + "/", it.key(), it.value())) return false;
         for (const auto &page: pages_) {
             QString body;
-            if (page.post) body = article(page) + (nextTheme() || yiliaTheme() || threeTheme() ? QString() : postNavigation(page));
+            if (page.post) body = article(page) + (nextTheme() || yiliaTheme() || threeTheme() || customTheme() ? QString() : postNavigation(page));
             else if (page.route == "categories/" || page.route == "tags/") body = taxonomy(page.route.section('/', 0, 0)) + page.html;
             else {
                 auto content = page.html;
@@ -224,12 +225,12 @@ public:
                         const auto item = entry.toObject();
                         const QUrl url(item["url"].toString());
                         if (url.scheme() != "http" && url.scheme() != "https") continue;
-                        friends += nextTheme() || yiliaTheme() || threeTheme() ? "<li><a href=\"" + escaped(url.toString()) + "\">" + escaped(item["name"].toString()) + "</a></li>"
+                        friends += nextTheme() || yiliaTheme() || threeTheme() || customTheme() ? "<li><a href=\"" + escaped(url.toString()) + "\">" + escaped(item["name"].toString()) + "</a></li>"
                             : themeTemplate("friend", {{"url", escaped(url.toString())}, {"title", escaped(item["name"].toString())}});
                     }
-                    content += nextTheme() || yiliaTheme() || threeTheme() ? "<ul>" + friends + "</ul>" : themeTemplate("links", {{"links", friends}});
+                    content += nextTheme() || yiliaTheme() || threeTheme() || customTheme() ? "<ul>" + friends + "</ul>" : themeTemplate("links", {{"links", friends}});
                 }
-                body = !nextTheme() && !yiliaTheme() && !threeTheme() && page.route == "links/" ? content : themeTemplate("page", {{"title", escaped(page.title)}, {"body", content}});
+                body = !nextTheme() && !yiliaTheme() && !threeTheme() && !customTheme() && page.route == "links/" ? content : themeTemplate("page", {{"title", escaped(page.title)}, {"body", content}});
             }
             if (!html(page.route, page.title, body, &page)) return false;
         }
@@ -247,10 +248,19 @@ public:
         }
         if (!write("content.json", QJsonDocument(QJsonObject{{"posts", insightPosts}, {"pages", insightPages}}).toJson(QJsonDocument::Compact))) return false;
         if (!write("css/qsnote-article.css", ArticleRenderer::stylesheet().toUtf8())) return false;
-        const auto assets = ":/site/" + themeName() + "/assets";
+        const auto assets = customTheme() ? customThemePath_ + "/source" : ":/site/" + themeName() + "/assets";
         QDirIterator resources(assets, QDir::Files, QDirIterator::Subdirectories);
         while (resources.hasNext()) {
             const auto path = resources.next();
+            if (customTheme()) {
+                const auto segments = QDir(assets).relativeFilePath(path).split('/');
+                bool excluded = false;
+                for (const auto &segment: segments) if (segment.startsWith('.') || segment.startsWith('_')) excluded = true;
+                if (excluded) continue;
+                const auto suffix = QFileInfo(path).suffix().toLower();
+                if (QStringList{"styl", "stylus", "scss", "sass", "less", "ejs", "njk", "nunjucks", "pug", "swig"}.contains(suffix))
+                    return fail(QCoreApplication::translate("SiteGenerator", "自定义主题资源需要预编译：") + path);
+            }
             QFile file(path);
             if (!file.open(QIODevice::ReadOnly)) return fail(QCoreApplication::translate("SiteGenerator", "无法读取站点资源：") + path);
             if (!write(path.mid(assets.size() + 1), file.readAll())) return false;
@@ -265,6 +275,42 @@ public:
 
 private:
     bool fail(const QString &message) { *error_ = message; return false; }
+    bool loadCustomTheme() {
+        const auto configured = book_.config["themeDirectory"].toString().trimmed();
+        if (configured.isEmpty()) return fail(QCoreApplication::translate("SiteGenerator", "请选择自定义主题目录"));
+        customThemePath_ = QDir::cleanPath(QDir(book_.path).absoluteFilePath(configured));
+        if (!QFileInfo(customThemePath_).isDir())
+            return fail(QCoreApplication::translate("SiteGenerator", "找不到自定义主题目录：") + customThemePath_);
+        for (const auto &name: {"layout", "index", "post", "page", "card", "archive", "category", "tag"}) {
+            QFile file(customThemePath_ + "/layout/" + name + ".html");
+            const bool optional = QStringList{"archive", "category", "tag"}.contains(name);
+            if (optional && !file.exists()) continue;
+            if (!file.open(QIODevice::ReadOnly))
+                return fail(QCoreApplication::translate("SiteGenerator", "无法读取自定义主题模板（Hexo 模板需先适配为 QSNote HTML）：") + file.fileName());
+            const auto source = QString::fromUtf8(file.readAll());
+            if (source.trimmed().isEmpty() || source.contains("<%") || source.contains("{%"))
+                return fail(QCoreApplication::translate("SiteGenerator", "自定义主题模板为空或包含不支持的模板语法：") + file.fileName());
+            const QStringList variables{"root", "siteTitle", "author", "city", "githubSocial", "avatar", "avatarImage", "description", "footer", "domain",
+                "title", "headTitle", "body", "permalink", "keywords", "articleStyle", "url", "date", "meta", "tags", "categories",
+                "navigation", "comments", "toc", "excerpt", "pagination", "pageNumber", "pageCount", "postCount"};
+            const QRegularExpression token(R"(\{\{([#/]?)([A-Za-z]+)\}\})");
+            auto tokens = token.globalMatch(source);
+            QString block;
+            while (tokens.hasNext()) {
+                const auto match = tokens.next();
+                const auto prefix = match.captured(1), key = match.captured(2);
+                if (!variables.contains(key) || (prefix == "#" && !block.isEmpty()) || (prefix == "/" && block != key))
+                    return fail(QCoreApplication::translate("SiteGenerator", "自定义主题占位符或条件块无效：") + file.fileName() + " " + match.captured());
+                if (prefix == "#") block = key;
+                if (prefix == "/") block.clear();
+            }
+            const auto remaining = QString(source).remove(token);
+            if (!block.isEmpty() || remaining.contains("{{"))
+                return fail(QCoreApplication::translate("SiteGenerator", "自定义主题占位符或条件块无效：") + file.fileName());
+            customTemplates_[name] = source;
+        }
+        return true;
+    }
     bool validPath(const QString &path) {
         const auto decoded = QUrl::fromPercentEncoding(path.toUtf8());
         if (path.startsWith('/') || decoded.contains("//") || decoded.contains('\\') || decoded.contains(':') || decoded.contains('?') || decoded.contains('#') || decoded.contains(QChar::Null))
@@ -344,11 +390,16 @@ private:
     [[nodiscard]] bool nextTheme() const { return book_.config["theme"].toString() == "next"; }
     [[nodiscard]] bool yiliaTheme() const { return book_.config["theme"].toString() == "yilia"; }
     [[nodiscard]] bool threeTheme() const { return book_.config["theme"].toString() == "3-jekyll"; }
+    [[nodiscard]] bool customTheme() const { return book_.config["theme"].toString() == "custom"; }
     [[nodiscard]] QString themeName() const { return nextTheme() ? "next" : yiliaTheme() ? "yilia" : threeTheme() ? "3-jekyll" : "pure"; }
     [[nodiscard]] QString themeTemplate(const QString &name, QMap<QString, QString> values = {}) const {
-        QFile file(":/site/" + themeName() + "/templates/" + name + ".html");
-        if (!file.open(QIODevice::ReadOnly)) return {};
-        auto source = QString::fromUtf8(file.readAll());
+        QString source;
+        if (customTheme()) source = customTemplates_.value(name);
+        else {
+            QFile file(":/site/" + themeName() + "/templates/" + name + ".html");
+            if (!file.open(QIODevice::ReadOnly)) return {};
+            source = QString::fromUtf8(file.readAll());
+        }
         values["root"] = escaped(href({}));
         values["siteTitle"] = escaped(book_.config["title"].toString(book_.name));
         values["author"] = escaped(book_.config["author"].toString());
@@ -357,7 +408,7 @@ private:
         const QUrl githubUrl(github);
         values["githubSocial"] = githubUrl.scheme() == "https" || githubUrl.scheme() == "http" ? escaped(github) : QString();
         auto avatar = book_.config["avatar"].toString().trimmed();
-        if (avatar.isEmpty() && !yiliaTheme())
+        if (avatar.isEmpty() && !yiliaTheme() && !customTheme())
             avatar = nextTheme() ? "images/avatar.gif" : threeTheme() ? "assets/img/avatar.jpg" : "images/avatar.jpg";
         const QUrl avatarUrl(avatar);
         if (!avatar.isEmpty() && avatarUrl.isRelative() && !avatar.startsWith('/'))
@@ -412,6 +463,7 @@ private:
     }
     [[nodiscard]] QString meta(const Page &page, bool card = false) const {
         const auto date = escaped(page.date.left(10));
+        if (customTheme()) return "<time datetime=\"" + escaped(page.date) + "\">" + date + "</time>";
         if (yiliaTheme()) return R"(<a class="archive-article-date" href=")" + escaped(href(page.route)) +
             R"("><time itemprop="datePublished" datetime=")" + escaped(page.date) + R"("><i class="icon-calendar icon"></i>)" + date + "</time></a>";
         if (threeTheme()) return R"(<span class="post-meta-span date"><time datetime=")" + escaped(page.date) + "\">" + date +
@@ -434,6 +486,10 @@ private:
         return domain.scheme() + "://" + domain.authority() + href(route);
     }
     [[nodiscard]] QString article(const Page &page, bool index = false) const {
+        if (customTheme()) return themeTemplate("post", {{"title", escaped(page.title)}, {"body", page.html},
+            {"url", escaped(href(page.route))}, {"permalink", escaped(permalink(page.route))}, {"date", escaped(page.date.left(10))},
+            {"meta", meta(page)}, {"tags", taxonomyLinks(page, true)}, {"categories", taxonomyLinks(page)},
+            {"navigation", postNavigation(page)}, {"comments", comments(book_, page)}, {"toc", page.toc.isEmpty() ? QString() : "<ol>" + page.toc + "</ol>"}});
         if (!nextTheme() && !yiliaTheme() && !threeTheme()) {
             auto result = themeTemplate("post", {{"articleId", escaped("post-" + page.route)}, {"title", escaped(page.title)}, {"meta", meta(page)}, {"body", page.html},
                 {"url", escaped(href(page.route))}, {"permalink", escaped(permalink(page.route))}, {"comments", index ? QString() : comments(book_, page)}});
@@ -447,6 +503,8 @@ private:
         const auto index = allPosts_.indexOf(&page);
         const auto *previous = index > 0 ? allPosts_[index - 1] : nullptr;
         const auto *next = index + 1 < allPosts_.size() ? allPosts_[index + 1] : nullptr;
+        if (customTheme()) return (previous ? link(previous->route, "‹ " + previous->title, "prev") : QString())
+            + (next ? link(next->route, next->title + " ›", "next") : QString());
         if ((nextTheme() || yiliaTheme() || threeTheme()) && !previous && !next) return {};
         if (yiliaTheme()) {
             QString result = R"(<nav id="article-nav">)";
@@ -472,7 +530,7 @@ private:
     [[nodiscard]] QString taxonomy(const QString &kind, const QString &selected = {}, const QList<const Page *> &subset = {}) const {
         const auto &groups = kind == "categories" ? categories_ : tags_;
         const auto title = kind == "categories" ? "分类" : "标签";
-        if (yiliaTheme() || threeTheme()) {
+        if (yiliaTheme() || threeTheme() || customTheme()) {
             QString terms;
             for (auto it = groups.cbegin(); it != groups.cend(); ++it)
                 terms += "<li>" + link(kind + "/" + it.key() + "/", it.key()) + " (" + QString::number(it.value().size()) + ")</li>";
@@ -526,6 +584,13 @@ private:
     bool html(QString route, const QString &title, const QString &body, const Page *page = nullptr) {
         auto keywords = page && !page->keywords.isEmpty() ? page->keywords : book_.config["keywords"].toString().trimmed();
         keywords.replace(QChar(0xff0c), QChar(','));
+        if (customTheme()) {
+            const auto markup = themeTemplate("layout", {{"headTitle", escaped(title + " | " + book_.config["title"].toString(book_.name))},
+                {"title", escaped(title)}, {"body", body}, {"permalink", escaped(permalink(route))}, {"keywords", escaped(keywords)},
+                {"articleStyle", R"(<link rel="stylesheet" href=")" + escaped(href("css/qsnote-article.css")) + "\">"}});
+            if (route.isEmpty() || route.endsWith('/')) route += "index.html";
+            return write(route, markup.toUtf8());
+        }
         QMap<QString, QString> values{{"headTitle", escaped(title + " | " + book_.config["title"].toString(book_.name))}, {"content", body},
             {"keywordsMeta", keywords.isEmpty() ? QString() : R"(<meta name="keywords" content=")" + escaped(keywords) + "\">"},
             {"title", escaped(title)}, {"permalink", escaped(permalink(route))}, {"sidebarRecent", sidebarRecent()},
@@ -585,7 +650,7 @@ private:
         return write(route, markup.toUtf8());
     }
     [[nodiscard]] QString pagination(const QString &route, int page, int count) const {
-        if (nextTheme() || yiliaTheme() || threeTheme()) {
+        if (nextTheme() || yiliaTheme() || threeTheme() || customTheme()) {
             if (count == 1) return {};
             QString result = yiliaTheme() ? R"(<nav id="page-nav">)" : R"(<nav class="pagination">)";
             if (page > 1) result += link(route + (page == 2 ? QString() : "page/" + QString::number(page - 1) + "/"), "‹", "extend prev");
@@ -601,6 +666,20 @@ private:
         for (int page = 1; page <= count; ++page) {
             const auto subset = posts.mid((page - 1) * pageSize, pageSize);
             QString body;
+            if (customTheme()) {
+                QString entries;
+                for (const auto *post: subset) entries += themeTemplate("card", {{"title", escaped(post->title)}, {"url", escaped(href(post->route))},
+                    {"meta", meta(*post, true)}, {"date", escaped(post->date.left(10))}, {"tags", taxonomyLinks(*post, true)},
+                    {"categories", taxonomyLinks(*post)}, {"excerpt", escaped(post->text.size() > 128 ? post->text.left(125) + "..." : post->text)}});
+                auto name = route.startsWith("categories/") ? QString("category") : route.startsWith("tags/") ? QString("tag")
+                    : route.startsWith("archives/") ? QString("archive") : QString("index");
+                if (!customTemplates_.contains(name)) name = name == "category" || name == "tag" ? "archive" : "index";
+                if (!customTemplates_.contains(name)) name = "index";
+                body = themeTemplate(name, {{"title", escaped(title)}, {"body", entries}, {"pagination", pagination(route, page, count)},
+                    {"pageNumber", QString::number(page)}, {"pageCount", QString::number(count)}, {"postCount", QString::number(posts.size())}});
+                if (!html(route + (page == 1 ? QString() : "page/" + QString::number(page) + "/"), title, body)) return false;
+                continue;
+            }
             if (threeTheme()) {
                 QString entries;
                 for (const auto *post: subset) entries += themeTemplate("card", {{"title", escaped(post->title)}, {"url", escaped(href(post->route))},
@@ -642,6 +721,8 @@ private:
     QString *error_;
     ArticleRenderer renderer_;
     QString root_;
+    QString customThemePath_;
+    QMap<QString, QString> customTemplates_;
     QList<Page> pages_;
     QMap<QString, QString> links_;
     QList<const Page *> allPosts_;

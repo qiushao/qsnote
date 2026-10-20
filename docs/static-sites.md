@@ -2,6 +2,48 @@
 
 QSNote 使用 C++ 和内置 Qt WebEngine 生成静态站点，创建、预览和生成均可离线完成，不需要 Hexo、Node.js、npm 或额外下载。Pure、NexT（Muse）和 Yilia 保持原主题的页面布局、导航和配色，文章正文使用编辑器预览的默认样式，可在「站点配置 → 主题与页脚」切换。C++ 按原模板的 DOM 结构输出 HTML，使用原主题的 CSS、字体和图片，按主题接入浏览器脚本；NexT 的 Stylus 已预编译为随程序分发的静态 CSS，Yilia 使用上游预编译 CSS。构建和生成不读取 EJS、Nunjucks、Stylus，不执行 Hexo 插件。旧配置中的 `stellar` 在读取或保存时自动迁移为 `next`，重新生成会清除旧主题输出资源。
 
+## 自定义主题与 Hexo 适配
+
+在「站点配置 → 主题与页脚」选择 **自定义**，填写或选择主题目录。路径可以相对于站点根目录（例如 `themes/my-theme`），也可以是完整路径；选择站点内部目录时自动保存相对路径。切回内置主题会保留目录设置。主题直接从该目录读取，修改后重新预览即可生效。
+
+可先将仓库中的 [`examples/site-theme`](../examples/site-theme) 复制到站点的 `themes/my-theme`，再选择它。这是可直接生成的最小示例。
+
+兼容范围为 Hexo 的目录组织与已编译静态资源，**不是直接运行任意 Hexo 主题**。参见 [Hexo 主题结构](https://hexo.io/docs/themes)。QSNote 不读取主题 `_config.yml`、`languages/`，不执行 `scripts/`、插件、Hexo helper 或模板中的 JavaScript；标题、头像、页脚、评论等继续使用站点配置。迁移时将 EJS / Nunjucks / Pug / Swig 模板改写为下面的 HTML 占位符格式，将 Stylus / Sass / Less 预编译为 CSS，再放入主题 `source/`。生成和使用适配后的主题不需要 Node.js 或网络。
+
+```text
+themes/my-theme/
+├── layout/
+│   ├── layout.html     # 必需：完整 HTML 文档，{{body}} 为当前页面
+│   ├── index.html      # 必需：文章列表，{{body}} 为本页列表项
+│   ├── card.html       # 必需：单篇文章的列表项
+│   ├── post.html       # 必需：文章正文页
+│   ├── page.html       # 必需：普通页、分类/标签总览、友链页
+│   ├── archive.html    # 可选：归档列表，缺省使用 index.html
+│   ├── category.html   # 可选：某个分类，缺省使用 archive → index
+│   └── tag.html        # 可选：某个标签，缺省使用 archive → index
+└── source/
+    ├── css/theme.css
+    ├── js/theme.js
+    └── images/...
+```
+
+`source/` 中的文件按原路径输出到 `public/`，忽略名称以 `.` 或 `_` 开头的文件及目录；可以省略该目录。浏览器 JS 原样复制，在浏览页面时执行。`.styl`、`.stylus`、`.scss`、`.sass`、`.less`、`.ejs`、`.njk`、`.nunjucks`、`.pug`、`.swig` 文件会提示预编译错误；构建工具源码应放在 `source/` 外。主题根目录可选的 `LICENSE`、`THIRD-PARTY-NOTICES.md` 分别输出为 `theme-LICENSE`、`theme-THIRD-PARTY-NOTICES.md`。主题资源与文章附件、生成页面等重名时报告冲突，不覆盖。
+
+模板只支持 `{{变量}}` 和非嵌套条件块 `{{#变量}}内容{{/变量}}`。变量非空时保留条件块；不支持循环、表达式、include 和嵌套条件。文章循环、排序、每页 10 篇的分页由生成器完成。未知变量、格式错误、未闭合/嵌套条件块和缺失/空模板会报告文件路径，并保留原有 `public/`。
+
+| 适用模板 | 变量 |
+| --- | --- |
+| 所有模板 | `root`、`siteTitle`、`author`、`city`、`githubSocial`、`avatar`、`avatarImage`、`description`、`footer`、`domain` |
+| `layout` | `headTitle`、`title`、`body`、`permalink`、`keywords`、`articleStyle` |
+| `index` / `archive` / `category` / `tag` | `title`、`body`、`pagination`、`pageNumber`、`pageCount`、`postCount` |
+| `card` | `title`、`url`、`date`、`meta`、`categories`、`tags`、`excerpt` |
+| `post` | `title`、`body`、`url`、`permalink`、`date`、`meta`、`categories`、`tags`、`navigation`、`comments`、`toc` |
+| `page` | `title`、`body` |
+
+文本和 URL 变量已进行 HTML 转义。`body`、`meta`、`categories`、`tags`、`navigation`、`comments`、`toc`、`pagination`、`avatarImage`、`articleStyle` 为生成器提供的 HTML，直接插入。变量值不会被当成模板再次执行；当前模板未提供的变量为空。没有配置头像时 `avatar` 与 `avatarImage` 为空。
+
+在 `layout.html` 的 `<head>` 中放入 `{{articleStyle}}`，以加载应用的正文样式；`post.html`、`page.html` 使用 `{{body}}` 输出已渲染正文，无需再次解析 Markdown。在页面外框中引用资源使用 `{{root}}css/theme.css`，`root` 已包含域名子路径及末尾 `/`，例如 `/blog/`。CSS 中的相对图片路径按 CSS 所在位置解析。自定义主题自行提供导航、搜索界面和交互；生成器仍输出 `search.json` 与 `content.json`，评论通过文章模板的 `{{comments}}` 接入。
+
 ## 文件结构
 
 ```text
@@ -71,3 +113,5 @@ ctest --test-dir build --output-on-failure
 ```
 
 `qsnote_site` 在清空 PATH 后验证 Pure/NexT/Yilia 生成，并覆盖文章与元数据、分页、分类标签、归档、搜索、评论、资源和站内链接、中文子路径、失败保留输出和过期页面清理。`qsnote_publish` 验证本地 Git 发布及模拟 SSH/SCP 参数；`qsnote_ui` 验证三套主题的 WebEngine 预览、实际搜索交互、手机菜单开合、配置持久化及发布入口。主题 CSS 的 SHA-256 校验可防止原有布局和配色被意外改动。资源来源见 `src/resources/site/README.md`。
+
+自定义主题测试使用上述示例，覆盖无外部程序生成、相对/完整目录、模板回退、分页和分类标签、文本转义、资源复制、切换主题后的旧资源清理，以及无效模板/预处理资源/输出冲突时保留上次输出。UI 测试验证主题目录设置持久化、字段显隐与实际 WebEngine 预览。

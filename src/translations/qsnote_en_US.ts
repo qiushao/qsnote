@@ -151,6 +151,30 @@
     <context>
         <name>MainWindow</name>
         <message>
+            <source>自定义</source>
+            <translation>Custom</translation>
+        </message>
+        <message>
+            <source>主题目录</source>
+            <translation>Theme directory</translation>
+        </message>
+        <message>
+            <source>站点内相对路径或完整路径</source>
+            <translation>Path relative to the site, or an absolute path</translation>
+        </message>
+        <message>
+            <source>选择主题目录…</source>
+            <translation>Choose theme directory…</translation>
+        </message>
+        <message>
+            <source>选择主题目录</source>
+            <translation>Choose theme directory</translation>
+        </message>
+        <message>
+            <source>使用含 layout/*.html 和 source/ 的适配主题。支持 QSNote 占位符；Hexo 的 EJS、Nunjucks 和样式预处理文件需先转换，不执行主题插件或读取 _config.yml。</source>
+            <translation>Use an adapted theme with layout/*.html and source/. QSNote placeholders are supported; convert Hexo EJS, Nunjucks and stylesheet sources first. Theme plugins and _config.yml are not loaded.</translation>
+        </message>
+        <message>
             <source>撤销</source>
             <translation>Undo</translation>
         </message>
@@ -2209,6 +2233,30 @@ It will be removed from the list. Files on disk will be kept, and you can add it
     </context>
     <context>
         <name>SiteGenerator</name>
+        <message>
+            <source>请选择自定义主题目录</source>
+            <translation>Please choose a custom theme directory</translation>
+        </message>
+        <message>
+            <source>找不到自定义主题目录：</source>
+            <translation>Custom theme directory not found: </translation>
+        </message>
+        <message>
+            <source>无法读取自定义主题模板（Hexo 模板需先适配为 QSNote HTML）：</source>
+            <translation>Unable to read the custom theme template (adapt Hexo templates to QSNote HTML first): </translation>
+        </message>
+        <message>
+            <source>自定义主题模板为空或包含不支持的模板语法：</source>
+            <translation>The custom theme template is empty or contains unsupported template syntax: </translation>
+        </message>
+        <message>
+            <source>自定义主题占位符或条件块无效：</source>
+            <translation>Invalid custom theme placeholder or conditional block: </translation>
+        </message>
+        <message>
+            <source>自定义主题资源需要预编译：</source>
+            <translation>Custom theme assets must be precompiled: </translation>
+        </message>
         <message>
             <location filename="../core/SiteGenerator.cpp" line="+57" />
             <source>front matter 缺少结束分隔符</source>

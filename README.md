@@ -45,7 +45,7 @@
 
 ### 从笔记到网站
 
-- 内置 Pure、NexT、Yilia 与 3-Jekyll 风格主题，也可以使用自定义主题，离线生成完整静态站点。
+- 内置 Pure、NexT、Yilia 与 3-Jekyll 风格主题，支持采用 Hexo 目录结构的自定义适配主题，离线生成完整静态站点（无需 Node.js；Hexo 模板需转换为 QSNote 格式）。
 - 分类、标签、归档、搜索与评论一应俱全。
 - 一键发布到 GitHub Pages，或通过 SSH 上传到自己的服务器。
 

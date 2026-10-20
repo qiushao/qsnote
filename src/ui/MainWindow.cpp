@@ -3027,7 +3027,32 @@ void MainWindow::showSiteConfig() {
     commentField("valineAppId", "Valine App ID", "valine");
     commentField("valineAppKey", "Valine App Key", "valine");
     section("siteThemeCard", tr("主题与页脚"));
-    field("theme", tr("站点主题"), {"Pure", "NexT", "Yilia", "3-Jekyll"}, {"pure", "next", "yilia", "3-jekyll"});
+    auto *theme = field("theme", tr("站点主题"), {"Pure", "NexT", "Yilia", "3-Jekyll", tr("自定义")},
+                        {"pure", "next", "yilia", "3-jekyll", "custom"})->findChild<QComboBox *>();
+    auto *themeDirectoryField = field("themeDirectory", tr("主题目录"));
+    auto *themeDirectory = themeDirectoryField->findChild<QLineEdit *>();
+    themeDirectory->setPlaceholderText(tr("站点内相对路径或完整路径"));
+    auto *chooseTheme = button(tr("选择主题目录…"), "chooseSiteTheme", card);
+    form->addWidget(chooseTheme, 0, Qt::AlignLeft);
+    auto *themeHint = label(tr("使用含 layout/*.html 和 source/ 的适配主题。支持 QSNote 占位符；Hexo 的 EJS、Nunjucks 和样式预处理文件需先转换，不执行主题插件或读取 _config.yml。"), card, true);
+    themeHint->setWordWrap(true);
+    form->addWidget(themeHint);
+    const auto updateThemeFields = [theme, themeDirectoryField, chooseTheme, themeHint] {
+        const bool custom = theme->currentData().toString() == "custom";
+        themeDirectoryField->setVisible(custom);
+        chooseTheme->setVisible(custom);
+        themeHint->setVisible(custom);
+    };
+    connect(theme, &QComboBox::currentIndexChanged, &dialog, updateThemeFields);
+    updateThemeFields();
+    connect(chooseTheme, &QPushButton::clicked, &dialog, [book, themeDirectory, &dialog] {
+        const auto path = QFileDialog::getExistingDirectory(&dialog, tr("选择主题目录"),
+            QDir(book->path).absoluteFilePath(themeDirectory->text().trimmed()));
+        if (path.isEmpty()) return;
+        const auto relative = QDir(book->path).relativeFilePath(path);
+        themeDirectory->setText(relative != ".." && !relative.startsWith("../") ? relative : path);
+        emit themeDirectory->textEdited(themeDirectory->text());
+    });
     field("footer", tr("页脚文字"));
     section("siteCategoriesCard", tr("分类管理"));
     auto *categories = new QListWidget(card);
@@ -3207,7 +3232,7 @@ void MainWindow::showSitePreview() {
     bar->setObjectName("dialogBar");
     auto *barLayout = row(bar, 14, 8, 10);
     barLayout->addWidget(label(tr("站点预览"), bar));
-    barLayout->addWidget(label(book->config["theme"].toString() == "next" ? "NexT" : book->config["theme"].toString() == "yilia" ? "Yilia" : book->config["theme"].toString() == "3-jekyll" ? "3-Jekyll" : "Pure", bar, true));
+    barLayout->addWidget(label(book->config["theme"].toString() == "custom" ? tr("自定义") : book->config["theme"].toString() == "next" ? "NexT" : book->config["theme"].toString() == "yilia" ? "Yilia" : book->config["theme"].toString() == "3-jekyll" ? "3-Jekyll" : "Pure", bar, true));
     barLayout->addStretch();
     auto *close = button(tr("关闭"), "closeSitePreview", bar);
     barLayout->addWidget(close);

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{headTitle}}</title>
+  <meta name="description" content="{{description}}">
+  <meta name="keywords" content="{{keywords}}">
+  <link rel="canonical" href="{{permalink}}">
+  {{articleStyle}}
+  <link rel="stylesheet" href="{{root}}css/theme.css">
+</head>
+<body>
+  <header>
+    <a class="site-title" href="{{root}}">{{siteTitle}}</a>
+    <p>{{description}}</p>
+    <nav>
+      <a href="{{root}}">首页</a>
+      <a href="{{root}}archives/">归档</a>
+      <a href="{{root}}categories/">分类</a>
+      <a href="{{root}}tags/">标签</a>
+      <a href="{{root}}links/">友链</a>
+      <a href="{{root}}about/">关于</a>
+    </nav>
+  </header>
+  <main>{{body}}</main>
+  <footer>{{footer}}{{#author}} · {{author}}{{/author}}</footer>
+</body>
+</html>

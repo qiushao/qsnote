@@ -26,6 +26,104 @@ bool write(const QString &path, const QByteArray &data) {
 class StaticSiteTest : public QObject {
     Q_OBJECT
 private slots:
+    void customTheme_data() { // NOLINT(readability-identifier-naming)
+        QTest::addColumn<bool>("relative");
+        QTest::newRow("relative") << true;
+        QTest::newRow("absolute") << false;
+    }
+    void customTheme() {
+        QFETCH(bool, relative);
+        QTemporaryDir directory;
+        const auto themePath = directory.path() + "/themes/自定义";
+        QString error;
+        QVERIFY2(StaticSite::copyDirectory(QFINDTESTDATA("../examples/site-theme"), themePath, &error), qPrintable(error));
+        QVERIFY(write(themePath + "/layout/layout.html", read(themePath + "/layout/layout.html")
+            + "<script>if (true) { if (true) { window.themeReady = true; }}</script>"));
+        NotebookStore store;
+        store.notebooks.append({"site", "自定义站点", "site", {},
+            {{"theme", "custom"}, {"themeDirectory", relative ? QString("themes/自定义") : themePath},
+             {"domain", "https://example.com/blog/"}, {"author", "<作者>{{body}}"}, {"token", "PRIVATE-TOKEN"},
+             {"links", QJsonArray{QJsonObject{{"name", "友链"}, {"url", "https://example.org"}}}}}, directory.path()});
+        auto &site = store.notebooks.first();
+        for (int i = 0; i < 11; ++i)
+            site.notes.append({QString::number(i), {}, "Post " + QString::number(i), "# Heading\n\n**Content**",
+                false, {{"slug", "post-" + QString::number(i)}, {"date", "2026-10-20"}, {"category", "分类"}, {"tags", "标签"}}});
+        const auto path = qgetenv("PATH");
+        const auto restorePath = qScopeGuard([path] { qputenv("PATH", path); });
+        qputenv("PATH", QByteArray());
+        QVERIFY2(store.save(&error), qPrintable(error));
+        Notebook restored;
+        QVERIFY2(NotebookStore::readNotebook(directory.path(), restored, &error), qPrintable(error));
+        QCOMPARE(restored.config["theme"].toString(), QString("custom"));
+        QCOMPARE(restored.config["themeDirectory"], site.config["themeDirectory"]);
+        QVERIFY(write(themePath + "/source/_ignored.txt", "ignored"));
+        QVERIFY(write(themePath + "/source/.hidden", "hidden"));
+        QVERIFY(write(themePath + "/_config.yml", "secret: NOT-PUBLISHED"));
+        QVERIFY(write(themePath + "/scripts/test.js", "throw new Error('must not execute');"));
+        QVERIFY2(StaticSite::generate(restored, &error), qPrintable(error));
+        const auto output = directory.path() + "/public/";
+        const auto index = read(output + "index.html");
+        QVERIFY(index.contains("/blog/css/theme.css"));
+        QVERIFY(index.contains("/blog/page/2/"));
+        QVERIFY(index.contains("&lt;作者&gt;{{body}}"));
+        QVERIFY(!index.contains("PRIVATE-TOKEN"));
+        QVERIFY(!index.contains("NOT-PUBLISHED"));
+        QVERIFY(!index.contains("class=\"main-center\""));
+        QVERIFY(!QFile::exists(output + "_config.yml"));
+        QVERIFY(!QFile::exists(output + "_ignored.txt"));
+        QVERIFY(!QFile::exists(output + ".hidden"));
+        QVERIFY(!QFile::exists(output + "scripts/test.js"));
+        QCOMPARE(read(output + "css/theme.css"), read(themePath + "/source/css/theme.css"));
+        QVERIFY(!read(output + "css/qsnote-article.css").isEmpty());
+        for (const auto &route: {"post-0/", "page/2/", "archives/", "archives/2026/", "archives/2026/10/", "categories/", "categories/分类/", "tags/", "tags/标签/", "about/", "links/"})
+            QVERIFY2(read(output + route + "index.html").contains("css/theme.css"), route);
+        const auto post = read(output + "post-0/index.html");
+        QVERIFY(post.contains("<strong>Content</strong>"));
+        QVERIFY(post.contains("class=\"markdown-body\""));
+        QVERIFY(post.contains("class=\"post-navigation\""));
+        QVERIFY(post.contains("Heading</span>"));
+        QVERIFY(read(output + "links/index.html").contains("https://example.org"));
+        QVERIFY(write(themePath + "/layout/archive.html", "ARCHIVE {{body}} {{pagination}}"));
+        QVERIFY(write(themePath + "/layout/tag.html", "TAG {{body}} {{pagination}}"));
+        QVERIFY2(StaticSite::generate(restored, &error), qPrintable(error));
+        QVERIFY(read(output + "archives/index.html").contains("ARCHIVE"));
+        QVERIFY(read(output + "categories/分类/index.html").contains("ARCHIVE"));
+        QVERIFY(read(output + "tags/标签/index.html").contains("TAG"));
+        restored.config["theme"] = "pure";
+        QVERIFY2(StaticSite::generate(restored, &error), qPrintable(error));
+        QVERIFY(!QFile::exists(output + "css/theme.css"));
+        QVERIFY(read(output + "index.html").contains("class=\"main-center\""));
+    }
+    void customThemeFailure_data() { // NOLINT(readability-identifier-naming)
+        QTest::addColumn<QString>("failure");
+        for (const auto &failure: {"empty-path", "missing-path", "missing-template", "empty-template", "ejs", "nunjucks", "unknown-variable", "nested-block", "unclosed-block", "styles", "collision"})
+            QTest::newRow(failure) << QString(failure);
+    }
+    void customThemeFailure() {
+        QFETCH(QString, failure);
+        QTemporaryDir directory;
+        Notebook site{"site", "站点", "site", {}, {{"theme", "custom"}, {"themeDirectory", "themes/test"}}, directory.path()};
+        QString error;
+        const auto themePath = directory.path() + "/themes/test";
+        QVERIFY2(StaticSite::prepare(site, &error), qPrintable(error));
+        QVERIFY2(StaticSite::copyDirectory(QFINDTESTDATA("../examples/site-theme"), themePath, &error), qPrintable(error));
+        QVERIFY(write(directory.path() + "/public/index.html", "PREVIOUS"));
+        if (failure == "empty-path") site.config["themeDirectory"] = "";
+        else if (failure == "missing-path") site.config["themeDirectory"] = "absent";
+        else if (failure == "missing-template") QVERIFY(QFile::remove(themePath + "/layout/post.html"));
+        else if (failure == "empty-template") QVERIFY(write(themePath + "/layout/index.html", " "));
+        else if (failure == "ejs") QVERIFY(write(themePath + "/layout/index.html", "<%= page.title %>"));
+        else if (failure == "nunjucks") QVERIFY(write(themePath + "/layout/index.html", "{{ page.title }}"));
+        else if (failure == "unknown-variable") QVERIFY(write(themePath + "/layout/index.html", "{{typo}}"));
+        else if (failure == "nested-block") QVERIFY(write(themePath + "/layout/index.html", "{{#body}}{{#title}}{{title}}{{/title}}{{/body}}"));
+        else if (failure == "unclosed-block") QVERIFY(write(themePath + "/layout/index.html", "{{#body}}{{body}}"));
+        else if (failure == "styles") QVERIFY(write(themePath + "/source/css/theme.styl", "body\n  color red"));
+        else if (failure == "collision") QVERIFY(write(themePath + "/source/index.html", "collision"));
+        QVERIFY(!StaticSite::generate(site, &error));
+        QVERIFY2(!error.isEmpty(), qPrintable(failure));
+        QCOMPARE(read(directory.path() + "/public/index.html"), QByteArray("PREVIOUS"));
+        QVERIFY(QDir(directory.path()).entryList({".qsnote-site-*"}, QDir::Dirs | QDir::Hidden).isEmpty());
+    }
     void generateWithoutExternalPrograms_data() { // NOLINT(readability-identifier-naming): Qt Test data-provider convention.
         QTest::addColumn<QString>("theme");
         QTest::newRow("pure") << QString("pure");
