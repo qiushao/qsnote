@@ -360,11 +360,16 @@ void MarkdownEditor::reloadSettings() {
     config_ = editorConfig();
     setConfig(config_);
     QSettings settings;
-    setInplacePreviewEnabled(settings.value("editor/inplacePreview", true).toBool());
+    setInplacePreviewEnabled(!splitMode_ && settings.value("editor/inplacePreview", true).toBool());
     setSpellCheckLanguage(settings.value("editor/spellLanguage", "en_US").toString());
     setAutoDetectLanguageEnabled(settings.value("editor/autoDetectLanguage", false).toBool());
     setSpellCheckEnabled(settings.value("editor/spellCheck", false).toBool());
     zoom(settings.value("editor/zoom", 0).toInt());
+}
+
+void MarkdownEditor::setSplitMode(bool enabled) {
+    splitMode_ = enabled;
+    setInplacePreviewEnabled(!splitMode_ && QSettings().value("editor/inplacePreview", true).toBool());
 }
 
 void MarkdownEditor::zoom(int delta) {

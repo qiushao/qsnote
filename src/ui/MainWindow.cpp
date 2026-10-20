@@ -133,6 +133,18 @@ QIcon icon(const QString &kind) {
         painter.drawPolyline(QPolygonF{QPointF(center - direction * 1.5, 8.5),
                                        QPointF(center + direction * 1.5, 12),
                                        QPointF(center - direction * 1.5, 15.5)});
+    } else if (kind == "undo" || kind == "redo") {
+        outline();
+        if (kind == "redo") {
+            painter.translate(24, 0);
+            painter.scale(-1, 1);
+        }
+        QPainterPath path;
+        path.moveTo(4, 8);
+        path.lineTo(13, 8);
+        path.cubicTo(22, 8, 22, 19, 13, 19);
+        painter.drawPath(path);
+        painter.drawPolyline(QPolygonF{QPointF(9, 3), QPointF(4, 8), QPointF(9, 13)});
     } else if (kind == "settings") {
         outline();
         painter.drawEllipse(QRectF(6, 6, 12, 12));
@@ -946,6 +958,27 @@ void MainWindow::buildToolbar() {
         separator->setFixedSize(11, 24);
         layout->addWidget(separator);
     };
+
+    undo_ = button({}, "toolundo", toolbar_);
+    redo_ = button({}, "toolredo", toolbar_);
+    for (auto *action: {undo_, redo_}) {
+        const bool undo = action == undo_;
+        action->setProperty("tool", true);
+        action->setIcon(icon(undo ? "undo" : "redo"));
+        action->setIconSize(QSize(24, 24));
+        action->setToolTip(undo ? tr("撤销") : tr("重做"));
+        action->setFocusPolicy(Qt::NoFocus);
+        action->setEnabled(false);
+        layout->addWidget(action);
+        connect(action, &QPushButton::clicked, this, [this, undo] {
+            if (!documentNote(currentNoteId())) return;
+            if (viewMode_ == ViewMode::Preview) setPreview(false);
+            if (undo) editor_->undo();
+            else editor_->redo();
+            editor_->setFocus();
+        });
+    }
+    addSeparator();
 
     auto *heading = button({}, "heading", toolbar_);
     heading->setProperty("tool", true);
@@ -1861,6 +1894,12 @@ void MainWindow::activateEditor(const QString &id) {
         session.editor = documentEditor;
         editors_->addWidget(documentEditor);
         editorSessions_.insert(id, session);
+        connect(textEdit, &QTextEdit::undoAvailable, this, [this, id](bool available) {
+            if (activeEditorId_ == id) undo_->setEnabled(available);
+        });
+        connect(textEdit, &QTextEdit::redoAvailable, this, [this, id](bool available) {
+            if (activeEditorId_ == id) redo_->setEnabled(available);
+        });
         connect(documentEditor, &MarkdownEditor::settingsChanged, this, [this, documentEditor] {
             for (const auto &session: editorSessions_) {
                 if (session.editor != documentEditor) session.editor->reloadSettings();
@@ -1903,6 +1942,8 @@ void MainWindow::activateEditor(const QString &id) {
     activeEditorId_ = id;
     markdownEditor_ = session.editor;
     editor_ = markdownEditor_->getTextEdit();
+    undo_->setEnabled(editor_->document()->isUndoAvailable());
+    redo_->setEnabled(editor_->document()->isRedoAvailable());
     markdownEditor_->setObjectName("markdownEditor");
     editor_->setObjectName("editor");
     editors_->setCurrentWidget(markdownEditor_);
@@ -1987,6 +2028,7 @@ void MainWindow::setViewMode(ViewMode mode) {
     const int line = sessionMode == ViewMode::Preview ? editorSessions_[activeEditorId_].previewLine : markdownEditor_->getTopLine();
     const QScopedValueRollback<bool> guard(syncingPreviewScroll_, true);
     viewMode_ = mode;
+    markdownEditor_->setSplitMode(mode == ViewMode::Split);
     previewModeEnabled_ = mode == ViewMode::Preview;
     editMode_->setChecked(mode == ViewMode::Edit);
     previewMode_->setChecked(mode == ViewMode::Preview);

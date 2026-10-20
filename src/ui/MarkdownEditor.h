@@ -16,6 +16,7 @@ public:
     void showSettings();
     QWidget *createSettingsPage(QWidget *parent, std::function<void()> &apply);
     void reloadSettings();
+    void setSplitMode(bool enabled);
     void zoom(int delta) override;
     QMenu *createEditorMenu(QWidget *parent);
 
@@ -32,6 +33,7 @@ private:
     QSharedPointer<vte::MarkdownEditorConfig> config_;
     InplacePreview *inplacePreview_ = nullptr;
     bool applyingSettings_ = false;
+    bool splitMode_ = false;
 };
 
 #endif

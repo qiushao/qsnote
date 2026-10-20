@@ -151,6 +151,14 @@
     <context>
         <name>MainWindow</name>
         <message>
+            <source>撤销</source>
+            <translation>Undo</translation>
+        </message>
+        <message>
+            <source>重做</source>
+            <translation>Redo</translation>
+        </message>
+        <message>
             <source>事项排序</source>
             <translation>Task sorting</translation>
         </message>

@@ -1701,6 +1701,45 @@ gantt
         QCOMPARE(editor->getTextEdit()->textCursor().anchor(), cursor.anchor());
     }
 
+    void splitModeDisablesInplacePreview() {
+        NotebookStore fixture;
+        Notebook book{"split-book", "Split", "normal", {}, {}, fixturePath("split-book")};
+        const QString source = "$x^2$\n\n```dot\ndigraph G { a -> b }\n```";
+        book.notes.append({"split-note", {}, "Split.md", source, false, {}});
+        fixture.notebooks.append(book);
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *tree = window.findChild<QTreeWidget *>("noteTree");
+        openTreeNote(tree, tree->topLevelItem(0));
+        auto *editor = window.findChild<MarkdownEditor *>("markdownEditor");
+        QTRY_COMPARE(previewImages(*editor, vte::PreviewData::MathBlock).size(), 1);
+        QTRY_COMPARE(previewImages(*editor, vte::PreviewData::CodeBlock).size(), 1);
+        window.findChild<QPushButton *>("splitMode")->click();
+        QTRY_COMPARE(previewImages(*editor, vte::PreviewData::MathBlock).size(), 0);
+        QTRY_COMPARE(previewImages(*editor, vte::PreviewData::CodeBlock).size(), 0);
+        editor->reloadSettings();
+        QTest::qWait(500);
+        QCOMPARE(previewImages(*editor, vte::PreviewData::MathBlock).size(), 0);
+        QCOMPARE(previewImages(*editor, vte::PreviewData::CodeBlock).size(), 0);
+        auto *preview = window.findChild<MarkdownPreview *>("preview");
+        QTRY_COMPARE_WITH_TIMEOUT(preview->renderedRevision(), preview->revision(), 30000);
+        window.findChild<QPushButton *>("editMode")->click();
+        QTRY_COMPARE(previewImages(*editor, vte::PreviewData::MathBlock).size(), 1);
+        QTRY_COMPARE(previewImages(*editor, vte::PreviewData::CodeBlock).size(), 1);
+        QSettings().setValue("editor/inplacePreview", false);
+        editor->reloadSettings();
+        window.findChild<QPushButton *>("splitMode")->click();
+        window.findChild<QPushButton *>("editMode")->click();
+        QTest::qWait(500);
+        QCOMPARE(previewImages(*editor, vte::PreviewData::MathBlock).size(), 0);
+        QCOMPARE(previewImages(*editor, vte::PreviewData::CodeBlock).size(), 0);
+        QCOMPARE(editor->getText(), source);
+        QVERIFY(!QSettings().value("editor/inplacePreview").toBool());
+    }
+
     void splitPreviewScrollsBothWays() {
         NotebookStore fixture;
         Notebook book{"scroll-book", "Scroll", "normal", {}, {}, fixturePath("scroll-book")};
@@ -2029,6 +2068,8 @@ gantt
         QVERIFY(editor);
         QCOMPARE(editor->getTextEdit()->placeholderText(), QString("Start writing Markdown..."));
         QCOMPARE(window.findChild<QPushButton *>("editMode")->toolTip(), QString("Edit"));
+        QCOMPARE(window.findChild<QPushButton *>("toolundo")->toolTip(), QString("Undo"));
+        QCOMPARE(window.findChild<QPushButton *>("toolredo")->toolTip(), QString("Redo"));
         QCOMPARE(window.findChild<QTabBar *>("noteTabs")->tabText(0), QString("中文标题"));
         auto *menu = editor->createEditorMenu(&window);
         QCOMPARE(menu->actions().first()->text(), QString("Find and Replace…"));
@@ -3122,9 +3163,16 @@ gantt
         open(0);
         auto *a = window.findChild<vte::VTextEdit *>("editor");
         QVERIFY(a);
+        auto *undo = window.findChild<QPushButton *>("toolundo");
+        auto *redo = window.findChild<QPushButton *>("toolredo");
+        QVERIFY(undo && redo);
+        QVERIFY(!undo->isEnabled());
+        QVERIFY(!redo->isEnabled());
         QTest::qWait(50);
         a->moveCursor(QTextCursor::End);
         a->insertPlainText("A edit");
+        QVERIFY(undo->isEnabled());
+        QVERIFY(!redo->isEnabled());
         QTextCursor selection(a->document()->findBlockByNumber(30));
         selection.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor, 5);
         a->setTextCursor(selection);
@@ -3135,6 +3183,8 @@ gantt
         auto *b = window.findChild<vte::VTextEdit *>("editor");
         QVERIFY(b && b != a);
         QVERIFY(!a->isVisible());
+        QVERIFY(!undo->isEnabled());
+        QVERIFY(!redo->isEnabled());
         b->moveCursor(QTextCursor::End);
         b->insertPlainText(" B edit");
         tabs->setCurrentIndex(0);
@@ -3142,21 +3192,30 @@ gantt
         QCOMPARE(a->textCursor().anchor(), selection.anchor());
         QCOMPARE(a->textCursor().position(), selection.position());
         QTRY_COMPARE(a->verticalScrollBar()->value(), scroll);
-        a->undo();
+        undo->click();
         QCOMPARE(a->toPlainText(), originalA);
+        QVERIFY(!undo->isEnabled());
+        QVERIFY(redo->isEnabled());
         QCOMPARE(b->toPlainText(), originalB + " B edit");
-        a->redo();
+        redo->click();
         QCOMPARE(a->toPlainText(), originalA + "A edit");
+        QVERIFY(undo->isEnabled());
+        QVERIFY(!redo->isEnabled());
         tabs->setCurrentIndex(1);
-        b->undo();
+        undo->click();
         QCOMPARE(b->toPlainText(), originalB);
-        b->redo();
+        redo->click();
         QCOMPARE(b->toPlainText(), originalB + " B edit");
         QTest::mouseClick(window.findChild<QPushButton *>("splitMode"), Qt::LeftButton);
         tabs->setCurrentIndex(0);
         QVERIFY(window.findChild<QPushButton *>("editMode")->isChecked());
         tabs->setCurrentIndex(1);
         QVERIFY(window.findChild<QPushButton *>("splitMode")->isChecked());
+        undo->click();
+        QCOMPARE(b->toPlainText(), originalB);
+        QVERIFY(window.findChild<QPushButton *>("splitMode")->isChecked());
+        redo->click();
+        QCOMPARE(b->toPlainText(), originalB + " B edit");
         auto *preview = window.findChild<MarkdownPreview *>("preview");
         QTRY_COMPARE_WITH_TIMEOUT(preview->renderedRevision(), preview->revision(), 30000);
         QVERIFY(preview->matchesDocument(b->toPlainText(), "tabs-b"));
