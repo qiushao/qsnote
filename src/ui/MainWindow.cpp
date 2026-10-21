@@ -324,6 +324,30 @@ public:
     }
 };
 
+class TodoDelegate : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+    void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override {
+        const auto due = index.data(Qt::UserRole + 1).toString();
+        if (due.isEmpty()) {
+            QStyledItemDelegate::paint(painter, option, index);
+            return;
+        }
+        auto dateOption = option;
+        initStyleOption(&dateOption, index);
+        dateOption.features &= ~QStyleOptionViewItem::HasCheckIndicator;
+        dateOption.text = due;
+        dateOption.displayAlignment = Qt::AlignRight | Qt::AlignVCenter;
+        auto *style = option.widget->style();
+        const int dateWidth = qMin(option.rect.width(), style->sizeFromContents(QStyle::CT_ItemViewItem, &dateOption, {}, option.widget).width());
+        auto titleOption = option;
+        titleOption.rect.adjust(0, 0, -dateWidth, 0);
+        QStyledItemDelegate::paint(painter, titleOption, index);
+        dateOption.rect.setLeft(titleOption.rect.right() + 1);
+        style->drawControl(QStyle::CE_ItemViewItem, &dateOption, painter, option.widget);
+    }
+};
+
 class NoteDelegate : public QStyledItemDelegate {
 public:
     using QStyledItemDelegate::QStyledItemDelegate;
@@ -1127,13 +1151,12 @@ void MainWindow::buildTodoUi() {
     todoList_->setHeaderHidden(true);
     todoList_->setRootIsDecorated(false);
     todoList_->setMinimumSize(0, 0);
-    todoList_->setColumnCount(3);
+    todoList_->setColumnCount(2);
+    todoList_->setItemDelegateForColumn(0, new TodoDelegate(todoList_));
     todoList_->header()->setStretchLastSection(false);
     todoList_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     todoList_->header()->setSectionResizeMode(1, QHeaderView::Fixed);
-    todoList_->header()->resizeSection(1, 96);
-    todoList_->header()->setSectionResizeMode(2, QHeaderView::Fixed);
-    todoList_->header()->resizeSection(2, 40);
+    todoList_->header()->resizeSection(1, 40);
     listLayout->addWidget(todoList_, 1);
     todoPagination_ = new QWidget(todoListPage_);
     auto *paginationLayout = row(todoPagination_, 0, 0);
@@ -1373,10 +1396,10 @@ void MainWindow::refreshTodoList(const QString &selectedId) {
     todoPageInfo_->setText(tr("第 %1 / %2 页，共 %3 项").arg(todoPage_ + 1).arg(pageCount).arg(count));
     for (int index = todoPage_ * pageSize; index < qMin(count, (todoPage_ + 1) * pageSize); ++index) {
         const auto &note = *matches.at(index);
-        auto *item = new QTreeWidgetItem(todoList_, {note.title, note.metadata["due"].toString()});
+        auto *item = new QTreeWidgetItem(todoList_, {note.title});
         item->setData(0, Qt::UserRole, note.id);
+        item->setData(0, Qt::UserRole + 1, note.metadata["due"].toString());
         item->setToolTip(0, note.title);
-        item->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
         item->setCheckState(0, note.metadata["completed"].toBool() ? Qt::Checked : Qt::Unchecked);
         auto *remove = button("×", "todoDelete", todoList_);
         remove->setProperty("iconButton", true);
@@ -1387,7 +1410,7 @@ void MainWindow::refreshTodoList(const QString &selectedId) {
             todoList_->setCurrentItem(item);
             deleteTodo(noteId);
         });
-        todoList_->setItemWidget(item, 2, remove);
+        todoList_->setItemWidget(item, 1, remove);
         if (note.id == id) todoList_->setCurrentItem(item);
     }
     if (!todoList_->currentItem() && todoList_->topLevelItemCount()) todoList_->setCurrentItem(todoList_->topLevelItem(0));

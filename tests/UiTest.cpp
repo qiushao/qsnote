@@ -2545,7 +2545,7 @@ gantt
         auto *content = window.findChild<QPlainTextEdit *>("todoContent");
         auto *first = list->topLevelItem(0);
         auto *second = list->topLevelItem(1);
-        auto *remove = qobject_cast<QPushButton *>(list->itemWidget(second, 2));
+        auto *remove = qobject_cast<QPushButton *>(list->itemWidget(second, 1));
         QVERIFY(remove);
         list->setCurrentItem(first);
         list->setFocus();
@@ -2690,7 +2690,7 @@ gantt
             QVERIFY(dialog);
             dialog->button(QMessageBox::Yes)->click();
         });
-        auto *remove = qobject_cast<QPushButton *>(list->itemWidget(list->currentItem(), 2));
+        auto *remove = qobject_cast<QPushButton *>(list->itemWidget(list->currentItem(), 1));
         QVERIFY(remove);
         QTest::mouseClick(remove, Qt::LeftButton);
         QCOMPARE(list->topLevelItemCount(), 20);
@@ -2771,6 +2771,41 @@ gantt
         QCOMPARE(list->topLevelItemCount(), 1);
     }
 
+    void todoTitleUsesEmptyDueDateSpace() {
+        NotebookStore fixture;
+        fixture.notebooks.append({"todo", "待办", "todo",
+                                  {{"none", {}, "无截止日期", {}},
+                                   {"dated", {}, "有截止日期", {}, false, {{"due", "2026-10-20"}}}},
+                                  {}, fixturePath("todo-title-width")});
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.resize(1600, 800);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *list = window.findChild<QTreeWidget *>("todoList");
+        QVERIFY(list);
+        auto *item = list->topLevelItem(0);
+        auto *remove = list->findChild<QPushButton *>("todoDelete");
+        QVERIFY(remove);
+        const int titleWidth = remove->mapTo(list->viewport(), QPoint()).x() - 60;
+        const QFontMetrics metrics(list->font());
+        QString prefix;
+        while (metrics.horizontalAdvance(prefix + "WA") < titleWidth) prefix += 'W';
+        item->setText(0, prefix + "A");
+        const auto first = list->viewport()->grab(list->visualItemRect(item)).toImage();
+        item->setText(0, prefix + "B");
+        const auto second = list->viewport()->grab(list->visualItemRect(item)).toImage();
+        // A title that fits before the delete button must show its final character.
+        QVERIFY2(first != second, "The title suffix is hidden despite sufficient space before the delete button");
+        auto *dated = list->topLevelItem(1);
+        const auto beforeDateChange = list->viewport()->grab(list->visualItemRect(dated)).toImage();
+        dated->setData(0, Qt::UserRole + 1, "2026-10-21");
+        const auto afterDateChange = list->viewport()->grab(list->visualItemRect(dated)).toImage();
+        QVERIFY2(beforeDateChange != afterDateChange, "The due date must show its final digit");
+        window.grab().save("todo-title-width.png");
+    }
+
     void todoDueDate() {
         NotebookStore fixture;
         Notebook book{"todo", "待办", "todo",
@@ -2794,14 +2829,14 @@ gantt
         QVERIFY(dueEnabled->isChecked());
         QVERIFY(due->isEnabled());
         QCOMPARE(due->date(), QDate(2026, 10, 20));
-        QCOMPARE(list->currentItem()->text(1), QString("2026-10-20"));
+        QCOMPARE(list->currentItem()->data(0, Qt::UserRole + 1).toString(), QString("2026-10-20"));
         due->setDate(QDate(2026, 11, 1));
-        QCOMPARE(list->currentItem()->text(1), QString("2026-11-01"));
+        QCOMPARE(list->currentItem()->data(0, Qt::UserRole + 1).toString(), QString("2026-11-01"));
 
         QTest::mouseClick(dueEnabled, Qt::LeftButton, Qt::NoModifier, QPoint(8, dueEnabled->height() / 2));
         QVERIFY(!dueEnabled->isChecked());
         QVERIFY(!due->isEnabled());
-        QCOMPARE(list->currentItem()->text(1), QString());
+        QCOMPARE(list->currentItem()->data(0, Qt::UserRole + 1).toString(), QString());
 
         list->setCurrentItem(list->topLevelItem(1));
         QCOMPARE(list->currentItem()->data(0, Qt::UserRole).toString(), QString("none"));
@@ -2809,7 +2844,7 @@ gantt
         QTest::mouseClick(dueEnabled, Qt::LeftButton, Qt::NoModifier, QPoint(8, dueEnabled->height() / 2));
         QVERIFY(dueEnabled->isChecked());
         QVERIFY(due->isEnabled());
-        QCOMPARE(list->currentItem()->text(1), QDate::currentDate().toString(Qt::ISODate));
+        QCOMPARE(list->currentItem()->data(0, Qt::UserRole + 1).toString(), QDate::currentDate().toString(Qt::ISODate));
 
         QVERIFY(window.close());
         NotebookStore reloaded;
