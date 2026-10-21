@@ -34,6 +34,62 @@ private slots:
     void initTestCase() {
         QStandardPaths::setTestModeEnabled(true);
     }
+    void siteCodeInjection_data() { // NOLINT(readability-identifier-naming): Qt Test data-provider convention.
+        QTest::addColumn<QString>("theme");
+        for (const auto &theme: {"pure", "next", "yilia", "3-jekyll", "custom"}) QTest::newRow(theme) << QString(theme);
+    }
+    void siteCodeInjection() {
+        QFETCH(QString, theme);
+        QTemporaryDir directory;
+        Notebook site{"site", "代码配置", "site", {}, {{"theme", theme}, {"themeDirectory", "themes/example"}}, directory.path()};
+        QString error;
+        QVERIFY2(StaticSite::prepare(site, &error), qPrintable(error));
+        if (theme == "custom") {
+            const auto themePath = directory.path() + "/themes/example";
+            QVERIFY2(StaticSite::copyDirectory(QFINDTESTDATA("../examples/site-theme"), themePath, &error), qPrintable(error));
+            auto layout = read(themePath + "/layout/layout.html");
+            layout.replace("</head>", "</HEAD>").replace("</body>", "</BODY>");
+            QVERIFY(write(themePath + "/layout/layout.html", layout));
+        }
+        for (int i = 0; i < 11; ++i)
+            QVERIFY(write(directory.path() + "/source/_posts/post" + QString::number(i) + ".md",
+                          "---\ndate: 2026-10-21\ncategories: [category]\ntags: [tag]\n---\nContent"));
+        QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
+        const auto output = directory.path() + "/public/";
+        const QStringList routes{"index.html", "page/2/index.html", "post0/index.html", "about/index.html",
+                                 "archives/index.html", "categories/index.html", "categories/category/index.html", "tags/tag/index.html"};
+        QMap<QString, QByteArray> originals;
+        for (const auto &route: routes) {
+            originals[route] = read(output + route);
+            QVERIFY(!originals[route].isEmpty());
+        }
+        const QString head = "<style>body { --label: '{{body}} & 中文'; }</style>\n<meta name=\"custom-test\" content=\"yes\">";
+        const QString analytics = "<script>\nwindow.analyticsTest = '统计 & {{root}}';\n</script>";
+        const QString body = "<div id=\"custom-body\">自定义</div>\n<script>window.customTest = true;</script>";
+        site.config["customHeadCode"] = head;
+        site.config["analyticsCode"] = analytics;
+        site.config["customBodyCode"] = body;
+        QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
+        for (const auto &route: routes) {
+            const auto html = QString::fromUtf8(read(output + route));
+            QCOMPARE(html.count(head), 1);
+            QCOMPARE(html.count(analytics), 1);
+            QCOMPARE(html.count(body), 1);
+            QVERIFY(html.indexOf(head) < html.indexOf("</head>", 0, Qt::CaseInsensitive));
+            QVERIFY(html.indexOf(analytics) > html.indexOf("<body", 0, Qt::CaseInsensitive));
+            QVERIFY(html.indexOf(body) > html.indexOf(analytics));
+            QVERIFY(html.indexOf(body) < html.indexOf("</body>", 0, Qt::CaseInsensitive));
+        }
+        for (const auto &path: {"search.json", "content.json"}) {
+            const auto json = read(output + path);
+            QVERIFY(!json.contains("analyticsTest"));
+            QVERIFY(!json.contains("customTest"));
+            QVERIFY(!json.contains("custom-test"));
+        }
+        for (const auto &key: {"customHeadCode", "analyticsCode", "customBodyCode"}) site.config[key] = "";
+        QVERIFY2(StaticSite::generate(site, &error), qPrintable(error));
+        for (const auto &route: routes) QCOMPARE(read(output + route), originals[route]);
+    }
     void cachedArticlesTrackContentAndDependencies() {
         QTemporaryDir directory;
         Notebook site{"site", "缓存测试", "site", {}, {}, directory.path()};

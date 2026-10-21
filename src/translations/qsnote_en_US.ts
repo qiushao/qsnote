@@ -1304,6 +1304,46 @@ It will be removed from the list. Files on disk will be kept, and you can add it
             <translation>Footer text</translation>
         </message>
         <message>
+            <source>站长统计</source>
+            <translation>Site Analytics</translation>
+        </message>
+        <message>
+            <source>统计代码</source>
+            <translation>Analytics code</translation>
+        </message>
+        <message>
+            <source>粘贴统计平台提供的完整 HTML / JavaScript 代码，将原样插入所有页面的 &lt;/body&gt; 前。留空关闭统计；预览时也会加载。</source>
+            <translation>Paste the complete HTML / JavaScript code from your analytics provider. It is inserted unchanged before &lt;/body&gt; on every page, including previews. Leave blank to disable analytics.</translation>
+        </message>
+        <message>
+            <source>例如统计平台提供的 &lt;script&gt;…&lt;/script&gt;</source>
+            <translation>For example, the &lt;script&gt;…&lt;/script&gt; code from your analytics provider</translation>
+        </message>
+        <message>
+            <source>自定义代码</source>
+            <translation>Custom Code</translation>
+        </message>
+        <message>
+            <source>代码原样应用于所有主题的生成页面，预览时也会执行。JavaScript 请包含 &lt;script&gt; 标签，CSS 请包含 &lt;style&gt; 标签；留空不插入。</source>
+            <translation>Code is inserted unchanged into generated pages for all themes and also runs in previews. Include &lt;script&gt; tags for JavaScript and &lt;style&gt; tags for CSS. Leave blank to insert nothing.</translation>
+        </message>
+        <message>
+            <source>Head 代码</source>
+            <translation>Head code</translation>
+        </message>
+        <message>
+            <source>插入 &lt;/head&gt; 前，例如 &lt;meta&gt;、&lt;style&gt; 或 &lt;script&gt; 标签</source>
+            <translation>Inserted before &lt;/head&gt;, for example &lt;meta&gt;, &lt;style&gt; or &lt;script&gt; tags</translation>
+        </message>
+        <message>
+            <source>Body 底部代码</source>
+            <translation>Body end code</translation>
+        </message>
+        <message>
+            <source>插入 &lt;/body&gt; 前，位于统计代码之后</source>
+            <translation>Inserted before &lt;/body&gt;, after the analytics code</translation>
+        </message>
+        <message>
             <location line="+1" />
             <source>分类管理</source>
             <translation>Categories</translation>

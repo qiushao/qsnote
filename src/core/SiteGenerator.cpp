@@ -580,15 +580,28 @@ private:
         }
         return result;
     }
-    bool html(QString route, const QString &title, const QString &body, const Page *page = nullptr) {
+    bool writeHtml(QString route, QString markup) {
+        const auto headEnd = markup.lastIndexOf("</head>", -1, Qt::CaseInsensitive);
+        const auto bodyEnd = markup.lastIndexOf("</body>", -1, Qt::CaseInsensitive);
+        QString bodyCode;
+        for (const auto &key: {"analyticsCode", "customBodyCode"}) {
+            const auto code = book_.config[key].toString();
+            if (!code.isEmpty()) bodyCode += code + '\n';
+        }
+        if (bodyEnd >= 0 && !bodyCode.isEmpty()) markup.insert(bodyEnd, bodyCode);
+        const auto headCode = book_.config["customHeadCode"].toString();
+        if (headEnd >= 0 && !headCode.isEmpty()) markup.insert(headEnd, headCode + '\n');
+        if (route.isEmpty() || route.endsWith('/')) route += "index.html";
+        return write(route, markup.toUtf8());
+    }
+    bool html(const QString &route, const QString &title, const QString &body, const Page *page = nullptr) {
         auto keywords = page && !page->keywords.isEmpty() ? page->keywords : book_.config["keywords"].toString().trimmed();
         keywords.replace(QChar(0xff0c), QChar(','));
         if (customTheme()) {
             const auto markup = themeTemplate("layout", {{"headTitle", escaped(title + " | " + book_.config["title"].toString(book_.name))},
                 {"title", escaped(title)}, {"body", body}, {"permalink", escaped(permalink(route))}, {"keywords", escaped(keywords)},
                 {"articleStyle", R"(<link rel="stylesheet" href=")" + escaped(href("css/qsnote-article.css")) + "\">"}});
-            if (route.isEmpty() || route.endsWith('/')) route += "index.html";
-            return write(route, markup.toUtf8());
+            return writeHtml(route, markup);
         }
         QMap<QString, QString> values{{"headTitle", escaped(title + " | " + book_.config["title"].toString(book_.name))}, {"content", body},
             {"keywordsMeta", keywords.isEmpty() ? QString() : R"(<meta name="keywords" content=")" + escaped(keywords) + "\">"},
@@ -645,8 +658,7 @@ private:
         }
         auto markup = themeTemplate("shell", values);
         markup.replace("</head>", R"(<link rel="stylesheet" href=")" + escaped(href("css/qsnote-article.css")) + "\"></head>");
-        if (route.isEmpty() || route.endsWith('/')) route += "index.html";
-        return write(route, markup.toUtf8());
+        return writeHtml(route, markup);
     }
     [[nodiscard]] QString pagination(const QString &route, int page, int count) const {
         if (nextTheme() || yiliaTheme() || threeTheme() || customTheme()) {

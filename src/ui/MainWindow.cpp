@@ -2929,6 +2929,7 @@ void MainWindow::showSiteConfig() {
     auto *book = store_.notebook(currentNotebookId_);
     if (!book || book->type != "site") return;
     OverlayDialog dialog(this, "siteConfigDialog", true);
+    dialog.resize(qMin(960, width() * 92 / 100), dialog.height());
     auto *layout = column(&dialog);
     auto *bar = new QWidget(&dialog);
     bar->setObjectName("dialogBar");
@@ -2938,22 +2939,21 @@ void MainWindow::showSiteConfig() {
     auto *close = button(tr("关闭"), "closeSiteConfig", bar);
     barLayout->addWidget(close);
     layout->addWidget(bar);
-    auto *navigation = new QWidget(&dialog);
-    navigation->setObjectName("siteConfigNavigation");
-    auto *navigationLayout = row(navigation, 16, 10);
-    auto *sections = new QTabBar(navigation);
-    sections->setObjectName("siteConfigTabs");
-    sections->setExpanding(false);
-    sections->setUsesScrollButtons(true);
-    sections->setElideMode(Qt::ElideNone);
-    sections->setMinimumWidth(0);
-    navigationLayout->addWidget(sections);
-    layout->addWidget(navigation);
-    auto *scroll = new QScrollArea(&dialog);
+    auto *content = new QWidget(&dialog);
+    auto *contentLayout = row(content, 0, 0, 0);
+    auto *sections = new QListWidget(content);
+    sections->setObjectName("siteConfigNavigation");
+    sections->setFixedWidth(qBound(112, dialog.width() / 5, 192));
+    sections->setWordWrap(true);
+    sections->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    contentLayout->addWidget(sections);
+    layout->addWidget(content, 1);
+    auto *scroll = new QScrollArea(content);
+    scroll->setObjectName("siteConfigScroll");
     scroll->setWidgetResizable(true);
     auto *body = new QWidget(scroll);
-    body->setObjectName("configBody");
-    auto *cards = column(body, 20, 16);
+    body->setObjectName("siteConfigBody");
+    auto *cards = column(body, 12, 16);
     QWidget *card = nullptr;
     QVBoxLayout *form = nullptr;
     auto section = [&](const QString &name, const QString &text) {
@@ -2961,12 +2961,13 @@ void MainWindow::showSiteConfig() {
         card->setObjectName(name);
         card->setProperty("configCard", true);
         card->setAttribute(Qt::WA_StyledBackground, true);
-        form = column(card, 18, 12);
+        form = column(card, 12, 12);
         auto *title = label(text, card);
         title->setProperty("heading", true);
         form->addWidget(title);
         cards->addWidget(card);
-        card->setVisible(sections->addTab(text) == 0);
+        sections->addItem(text);
+        card->setVisible(sections->count() == 1);
     };
     auto field = [&](const QString &key, const QString &caption, const QStringList &choices = QStringList(), const QStringList &values = QStringList()) {
         auto *container = new QWidget(card);
@@ -3215,10 +3216,38 @@ void MainWindow::showSiteConfig() {
     updatePublishHint();
     form->addWidget(publishHint);
     form->addWidget(label(tr("内置生成器离线生成 public 目录；第三方评论服务需要联网。"), card, true));
+    auto codeField = [&](const QString &key, const QString &caption, const QString &hint) {
+        auto *captionLabel = label(caption, card);
+        form->addWidget(captionLabel);
+        auto *input = new QPlainTextEdit(book->config[key].toString(), card);
+        input->setObjectName("config_" + key);
+        input->setMinimumWidth(0);
+        input->setMinimumHeight(150);
+        input->setTabChangesFocus(true);
+        input->setPlaceholderText(hint);
+        captionLabel->setBuddy(input);
+        form->addWidget(input);
+        connect(input, &QPlainTextEdit::textChanged, &dialog, [this, book, key, input] {
+            book->config[key] = input->toPlainText();
+            saveTimer_->start();
+        });
+    };
+    section("siteAnalyticsCard", tr("站长统计"));
+    auto *analyticsHint = label(tr("粘贴统计平台提供的完整 HTML / JavaScript 代码，将原样插入所有页面的 </body> 前。留空关闭统计；预览时也会加载。"), card, true);
+    analyticsHint->setTextFormat(Qt::PlainText);
+    form->addWidget(analyticsHint);
+    codeField("analyticsCode", tr("统计代码"), tr("例如统计平台提供的 <script>…</script>"));
+    section("siteCustomCodeCard", tr("自定义代码"));
+    auto *customCodeHint = label(tr("代码原样应用于所有主题的生成页面，预览时也会执行。JavaScript 请包含 <script> 标签，CSS 请包含 <style> 标签；留空不插入。"), card, true);
+    customCodeHint->setTextFormat(Qt::PlainText);
+    form->addWidget(customCodeHint);
+    codeField("customHeadCode", tr("Head 代码"), tr("插入 </head> 前，例如 <meta>、<style> 或 <script> 标签"));
+    codeField("customBodyCode", tr("Body 底部代码"), tr("插入 </body> 前，位于统计代码之后"));
     cards->addStretch();
     scroll->setWidget(body);
-    layout->addWidget(scroll, 1);
-    connect(sections, &QTabBar::currentChanged, &dialog, [cards, scroll](int index) {
+    contentLayout->addWidget(scroll, 1);
+    sections->setCurrentRow(0);
+    connect(sections, &QListWidget::currentRowChanged, &dialog, [cards, scroll](int index) {
         for (int i = 0; i < cards->count() - 1; ++i) cards->itemAt(i)->widget()->setVisible(i == index);
         scroll->verticalScrollBar()->setValue(0);
     });

@@ -3848,21 +3848,29 @@ gantt
             auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
             QVERIFY(dialog);
             const auto close = qScopeGuard([dialog] { dialog->accept(); });
-            auto *sections = dialog->findChild<QTabBar *>("siteConfigTabs");
+            auto *sections = dialog->findChild<QListWidget *>("siteConfigNavigation");
             QVERIFY(sections);
-            QCOMPARE(sections->currentIndex(), 0);
+            QCOMPARE(sections->currentRow(), 0);
             const QStringList cardNames{"siteBasicCard", "siteCommentsCard", "siteThemeCard",
-                                        "siteCategoriesCard", "siteLinksCard", "sitePublishCard"};
+                                        "siteCategoriesCard", "siteLinksCard", "sitePublishCard", "siteAnalyticsCard", "siteCustomCodeCard"};
             QCOMPARE(sections->count(), cardNames.size());
+            auto *contentScroll = dialog->findChild<QScrollArea *>("siteConfigScroll");
+            QVERIFY(contentScroll);
+            QVERIFY(sections->geometry().right() < contentScroll->geometry().left());
+            QCOMPARE(sections->horizontalScrollBar()->maximum(), 0);
+            QCOMPARE(sections->verticalScrollBar()->maximum(), 0);
             for (int index = 0; index < sections->count(); ++index) {
-                sections->setCurrentIndex(index);
+                const auto itemRect = sections->visualItemRect(sections->item(index));
+                QVERIFY(sections->viewport()->rect().contains(itemRect));
+                QTest::mouseClick(sections->viewport(), Qt::LeftButton, Qt::NoModifier, itemRect.center());
+                QCOMPARE(sections->currentRow(), index);
                 for (int card = 0; card < cardNames.size(); ++card) {
                     auto *widget = dialog->findChild<QWidget *>(cardNames[card]);
                     QVERIFY(widget);
                     QCOMPARE(widget->isVisible(), card == index);
                 }
             }
-            sections->setCurrentIndex(3);
+            sections->setCurrentRow(3);
             auto *scroll = dialog->findChild<QScrollArea *>();
             QVERIFY(scroll);
             QCOMPARE(scroll->horizontalScrollBar()->maximum(), 0);
@@ -3971,7 +3979,7 @@ gantt
         QTimer::singleShot(30, &window, [&] {
             auto *dialog = QApplication::activeModalWidget();
             QVERIFY(dialog);
-            dialog->findChild<QTabBar *>("siteConfigTabs")->setCurrentIndex(5);
+            dialog->findChild<QListWidget *>("siteConfigNavigation")->setCurrentRow(5);
             auto *method = dialog->findChild<QComboBox *>("config_publishMethod");
             QVERIFY(method);
             QCOMPARE(method->currentData().toString(), QString());
@@ -3997,7 +4005,7 @@ gantt
         QTimer::singleShot(30, &window, [&] {
             auto *dialog = QApplication::activeModalWidget();
             QVERIFY(dialog);
-            dialog->findChild<QTabBar *>("siteConfigTabs")->setCurrentIndex(5);
+            dialog->findChild<QListWidget *>("siteConfigNavigation")->setCurrentRow(5);
             QCOMPARE(dialog->findChild<QComboBox *>("config_publishMethod")->currentData().toString(), QString("scp"));
             for (const auto &group: groups) {
                 for (const auto &key: group.second) {
@@ -4012,6 +4020,64 @@ gantt
         window.findChild<QPushButton *>("siteConfig")->click();
         window.setFixedSize(420, 800);
         QTRY_COMPARE(window.findChild<QPushButton *>("exportNotebook")->text(), QString("发布"));
+    }
+
+    void siteCodeConfigPersists() {
+        NotebookStore fixture;
+        Notebook site{"site", "代码站点", "site", {}, {}, fixturePath("site-code")};
+        fixture.notebooks.append(site);
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.resize(960, 800);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        const QMap<QString, QString> code{
+                {"analyticsCode", "<script>\nwindow.analyticsTest = '中文';\n</script>"},
+                {"customHeadCode", "<style>\nbody { color: red; }\n</style>"},
+                {"customBodyCode", "<div>自定义 & {{body}}</div>\n<script>window.customTest = true;</script>"}};
+        for (int pass = 0; pass < 3; ++pass) {
+            if (pass == 1) window.setFixedSize(420, 800);
+            QTimer::singleShot(30, &window, [&] {
+                auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                QVERIFY(dialog);
+                const auto close = qScopeGuard([dialog] { dialog->accept(); });
+                auto *sections = dialog->findChild<QListWidget *>("siteConfigNavigation");
+                QVERIFY(sections);
+                auto *contentScroll = dialog->findChild<QScrollArea *>("siteConfigScroll");
+                QVERIFY(contentScroll);
+                QVERIFY(sections->geometry().right() < contentScroll->geometry().left());
+                QCOMPARE(sections->verticalScrollBar()->maximum(), 0);
+                sections->setFocus();
+                QTest::keyClick(sections, Qt::Key_End);
+                QCOMPARE(sections->currentRow(), sections->count() - 1);
+                QTest::keyClick(sections, Qt::Key_Home);
+                QCOMPARE(sections->currentRow(), 0);
+                for (auto it = code.cbegin(); it != code.cend(); ++it) {
+                    sections->setCurrentRow(it.key() == "analyticsCode" ? 6 : 7);
+                    auto *input = dialog->findChild<QPlainTextEdit *>("config_" + it.key());
+                    QVERIFY(input);
+                    QVERIFY(input->isVisible());
+                    QCOMPARE(input->toPlainText(), pass == 1 ? it.value() : QString());
+                    if (pass == 0) input->setPlainText(it.value());
+                    sections->setCurrentRow(0);
+                    sections->setCurrentRow(it.key() == "analyticsCode" ? 6 : 7);
+                    QCOMPARE(input->toPlainText(), pass == 2 ? QString() : it.value());
+                    if (pass == 1) input->clear();
+                }
+                auto *scroll = dialog->findChild<QScrollArea *>();
+                QVERIFY(scroll);
+                QTest::qWait(30);
+                QCOMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+                if (pass == 0) dialog->grab().save("site-config-custom-code.png");
+                if (pass == 1) dialog->grab().save("site-config-custom-code-narrow.png");
+            });
+            window.findChild<QPushButton *>("siteConfig")->click();
+            Notebook restored;
+            QVERIFY2(NotebookStore::readNotebook(site.path, restored, &error), qPrintable(error));
+            for (auto it = code.cbegin(); it != code.cend(); ++it)
+                QCOMPARE(restored.config[it.key()].toString(), pass == 0 ? it.value() : QString());
+        }
     }
 
     void customSiteThemeConfigAndPreview() {
@@ -4030,7 +4096,7 @@ gantt
             auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
             QVERIFY(dialog);
             const auto close = qScopeGuard([dialog] { dialog->accept(); });
-            dialog->findChild<QTabBar *>("siteConfigTabs")->setCurrentIndex(2);
+            dialog->findChild<QListWidget *>("siteConfigNavigation")->setCurrentRow(2);
             auto *theme = dialog->findChild<QComboBox *>("config_theme");
             auto *directory = dialog->findChild<QLineEdit *>("config_themeDirectory");
             auto *choose = dialog->findChild<QPushButton *>("chooseSiteTheme");
@@ -4174,10 +4240,10 @@ gantt
             auto *title = dialog->findChild<QLineEdit *>("config_title");
             title->setText("Edited title");
             emit title->textEdited(title->text());
-            auto *sections = dialog->findChild<QTabBar *>("siteConfigTabs");
+            auto *sections = dialog->findChild<QListWidget *>("siteConfigNavigation");
             QVERIFY(sections);
-            QTest::mouseClick(sections, Qt::LeftButton, Qt::NoModifier, sections->tabRect(1).center());
-            QCOMPARE(sections->currentIndex(), 1);
+            QTest::mouseClick(sections->viewport(), Qt::LeftButton, Qt::NoModifier, sections->visualItemRect(sections->item(1)).center());
+            QCOMPARE(sections->currentRow(), 1);
             auto *comments = dialog->findChild<QComboBox *>("config_commentPlatform");
             QVERIFY(comments);
             QVERIFY(comments->findData("valine") >= 0);
@@ -4201,7 +4267,7 @@ gantt
                 QVERIFY(input);
                 QTest::keyClicks(input, QString("test-") + key);
             }
-            QTest::mouseClick(sections, Qt::LeftButton, Qt::NoModifier, sections->tabRect(2).center());
+            QTest::mouseClick(sections->viewport(), Qt::LeftButton, Qt::NoModifier, sections->visualItemRect(sections->item(2)).center());
             auto *themes = dialog->findChild<QComboBox *>("config_theme");
             QVERIFY(themes);
             QCOMPARE(themes->currentData().toString(), QString("pure"));
@@ -4211,7 +4277,7 @@ gantt
             QCOMPARE(themes->findData("stellar"), -1);
             themes->setCurrentIndex(themes->findData(theme));
             QVERIFY(!dialog->findChild<QLineEdit *>("config_token"));
-            QTest::mouseClick(sections, Qt::LeftButton, Qt::NoModifier, sections->tabRect(0).center());
+            QTest::mouseClick(sections->viewport(), Qt::LeftButton, Qt::NoModifier, sections->visualItemRect(sections->item(0)).center());
             QCOMPARE(title->text(), QString("Edited title"));
             QTRY_VERIFY(avatar->height() >= avatar->sizeHint().height());
             auto *chooseAvatar = dialog->findChild<QPushButton *>("chooseSiteAvatar");
@@ -4228,7 +4294,7 @@ gantt
             QCOMPARE(dialog->findChild<QLineEdit *>("config_github")->text(), QString("https://github.com/example"));
             QCOMPARE(dialog->findChild<QLineEdit *>("config_city")->text(), QString("Hangzhou"));
             QCOMPARE(dialog->findChild<QLineEdit *>("config_keywords")->text(), QString("site, seo"));
-            dialog->findChild<QTabBar *>("siteConfigTabs")->setCurrentIndex(1);
+            dialog->findChild<QListWidget *>("siteConfigNavigation")->setCurrentRow(1);
             auto *comments = dialog->findChild<QComboBox *>("config_commentPlatform");
             QVERIFY(comments);
             QCOMPARE(comments->currentData().toString(), QString("valine"));
