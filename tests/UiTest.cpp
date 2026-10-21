@@ -1771,6 +1771,7 @@ gantt
         QVERIFY(QTest::qWaitForWindowExposed(&window));
         auto *tree = window.findChild<QTreeWidget *>("noteTree");
         openTreeNote(tree, tree->topLevelItem(0));
+        window.findChild<QPushButton *>("editMode")->click();
         auto &editor = *window.findChild<MarkdownEditor *>("markdownEditor");
         QTRY_COMPARE_WITH_TIMEOUT(previewImages(editor, vte::PreviewData::CodeBlock).size(), 5, 30000);
         qint64 rasterBytes = 0;

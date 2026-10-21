@@ -1797,7 +1797,6 @@ void MainWindow::openNote(const QString &id) {
         tabs_->setTabToolTip(index, note->title);
         tabs_->setCurrentIndex(index);
     }
-    previewModeEnabled_ = false;
     refreshEditor();
 }
 
@@ -2693,6 +2692,7 @@ void MainWindow::createNote(const QString &parentId, bool folder, const QString 
         save();
         refreshTree();
         openNote(note.id);
+        setViewMode(ViewMode::Edit);
         return;
     }
     const auto kind = folder ? tr("文件夹") : book->type == "ebook" ? tr("章节")
@@ -2709,7 +2709,10 @@ void MainWindow::createNote(const QString &parentId, bool folder, const QString 
     book->notes.append(note);
     save();
     refreshTree();
-    if (!folder) openNote(note.id);
+    if (!folder) {
+        openNote(note.id);
+        setViewMode(ViewMode::Edit);
+    }
 }
 
 void MainWindow::showTreeMenu(const QPoint &position) {

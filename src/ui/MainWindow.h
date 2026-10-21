@@ -82,7 +82,7 @@ private:
     struct EditorSession {
         MarkdownEditor *editor = nullptr;
         QVector<Heading> headings;
-        ViewMode mode = ViewMode::Edit;
+        ViewMode mode = ViewMode::Preview;
         int verticalScroll = 0;
         int horizontalScroll = 0;
         int previewLine = 0;
@@ -157,7 +157,7 @@ private:
     MarkdownPreview *preview_ = nullptr;
     QSplitter *editorSplitter_ = nullptr;
     QTimer *previewTimer_ = nullptr;
-    ViewMode viewMode_ = ViewMode::Edit;
+    ViewMode viewMode_ = ViewMode::Preview;
     bool syncingPreviewScroll_ = false;
     QTreeWidget *outline_ = nullptr;
     QLabel *outlineHint_ = nullptr;
