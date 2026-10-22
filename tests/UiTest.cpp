@@ -2467,6 +2467,35 @@ gantt
         for (const auto &book: reloaded.notebooks) QVERIFY(book.notes.isEmpty());
     }
 
+    void todoActionsFitNarrowWindow() {
+        NotebookStore fixture;
+        fixture.notebooks.append({"todo", "待办", "todo", {}, {}, fixturePath("todo-responsive")});
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        QSettings().setValue("General/uiFontSize", 18);
+        MainWindow window;
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        for (const int width: {1280, 480, 360}) {
+            window.setFixedSize(width, 800);
+            QTest::qWait(30);
+            auto *page = window.findChild<QWidget *>("todoListPage");
+            QList<QRect> controls;
+            for (const auto *name: {"newTodoCategory", "newTodo", "todoSort"}) {
+                auto *control = page->findChild<QWidget *>(name);
+                QVERIFY(control);
+                const QRect rect(control->mapTo(page, QPoint()), control->size());
+                QVERIFY2(page->rect().contains(rect), name);
+                QVERIFY2(control->width() >= control->sizeHint().width(), name);
+                for (const auto &other: controls) QVERIFY(!rect.intersects(other));
+                controls.append(rect);
+            }
+            auto *list = page->findChild<QTreeWidget *>("todoList");
+            for (const auto &rect: controls) QVERIFY(rect.bottom() < list->y());
+            window.grab().save(QStringLiteral("todo-responsive-%1.png").arg(width));
+        }
+    }
+
     void todoPrioritySortingAndCreation() {
         NotebookStore fixture;
         Notebook book{"todo", "待办", "todo", {}, {{"categories", QJsonArray{"工作"}}}, fixturePath("todo-sort")};

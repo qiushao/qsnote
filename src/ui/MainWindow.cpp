@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "UiStyle.h"
 #include "FlowLayout.h"
 #include "MarkdownEditor.h"
 #include "MarkdownPreview.h"
@@ -1125,13 +1126,15 @@ void MainWindow::buildTodoUi() {
     todoListPage_ = new QWidget(pages_);
     todoListPage_->setObjectName("todoListPage");
     auto *listLayout = column(todoListPage_, 16, 12);
-    auto *actionsLayout = new QHBoxLayout;
-    actionsLayout->setSpacing(12);
-    listLayout->addLayout(actionsLayout);
+    auto *actions = new QWidget(todoListPage_);
+    actions->setObjectName("todoActions");
+    auto *actionsLayout = new FlowLayout(actions, 0, 8);
+    listLayout->addWidget(actions);
     auto *addCategory = button(tr("新建分类"), "newTodoCategory", todoListPage_);
     actionsLayout->addWidget(addCategory);
     connect(addCategory, &QPushButton::clicked, this, &MainWindow::createTodoCategory);
     todoAdd_ = button(tr("＋ 新建事项"), "newTodo", todoListPage_);
+    setPrimaryButton(todoAdd_);
     actionsLayout->addWidget(todoAdd_);
     todoClearCompleted_ = button(tr("清空已完成事项"), "clearCompletedTodos", todoListPage_);
     actionsLayout->addWidget(todoClearCompleted_);
@@ -1139,7 +1142,8 @@ void MainWindow::buildTodoUi() {
     todoSort_->setObjectName("todoSort");
     todoSort_->setAccessibleName(tr("事项排序"));
     todoSort_->addItems({tr("按优先级（高到低）"), tr("按创建日期（新到旧）"), tr("按截止日期（近到远）")});
-    actionsLayout->addWidget(todoSort_, 1);
+    todoSort_->setProperty("alignRight", true);
+    actionsLayout->addWidget(todoSort_);
     connect(todoSort_, &QComboBox::currentIndexChanged, this, [this] {
         todoPage_ = 0;
         refreshTodoList();
@@ -1453,6 +1457,10 @@ void MainWindow::createTodo() {
     QDialog dialog(this);
     dialog.setWindowTitle(tr("新建事项"));
     auto *layout = new QFormLayout(&dialog);
+    layout->setContentsMargins(20, 20, 20, 20);
+    layout->setSpacing(12);
+    layout->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    layout->setRowWrapPolicy(QFormLayout::WrapLongRows);
     auto *titleEdit = new QLineEdit(&dialog);
     titleEdit->setObjectName("newTodoTitle");
     layout->addRow(tr("事项标题："), titleEdit);
@@ -1464,6 +1472,7 @@ void MainWindow::createTodo() {
     category->setCurrentIndex(category->findData(todoCategoryFilter_.isEmpty() ? QStringLiteral("默认") : todoCategoryFilter_));
     layout->addRow(tr("分类"), category);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    setPrimaryButton(buttons->button(QDialogButtonBox::Ok));
     layout->addRow(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -2398,7 +2407,9 @@ void MainWindow::showSettings() {
     auto *bar = new QWidget(&dialog);
     bar->setObjectName("dialogBar");
     auto *barLayout = row(bar, 16, 11);
-    barLayout->addWidget(label(tr("设置"), bar));
+    auto *title = label(tr("设置"), bar);
+    title->setProperty("dialogTitle", true);
+    barLayout->addWidget(title);
     barLayout->addStretch();
     auto *close = button(tr("关闭"), "closeSettings", bar);
     barLayout->addWidget(close);
@@ -2409,6 +2420,7 @@ void MainWindow::showSettings() {
     auto *sections = new QTabBar(navigation);
     sections->setObjectName("settingsTabs");
     sections->setExpanding(false);
+    sections->setDrawBase(false);
     sections->setUsesScrollButtons(true);
     sections->setElideMode(Qt::ElideNone);
     navigationLayout->addWidget(sections);
@@ -2434,6 +2446,8 @@ void MainWindow::showSettings() {
     QSettings settings;
     auto *general = section("generalSettingsCard", tr("常用设置"));
     auto *fields = new QFormLayout;
+    fields->setSpacing(12);
+    fields->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     fields->setRowWrapPolicy(QFormLayout::WrapLongRows);
     fields->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     auto *language = new QComboBox(body);
@@ -2503,10 +2517,11 @@ void MainWindow::showSettings() {
         scroll->verticalScrollBar()->setValue(0);
     });
     auto *footer = new QWidget(&dialog);
+    footer->setObjectName("dialogFooter");
     auto *footerLayout = row(footer, 16, 12);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, footer);
     buttons->button(QDialogButtonBox::Save)->setText(tr("保存"));
-    buttons->button(QDialogButtonBox::Save)->setProperty("primary", true);
+    setPrimaryButton(buttons->button(QDialogButtonBox::Save));
     buttons->button(QDialogButtonBox::Cancel)->setText(tr("取消"));
     footerLayout->addWidget(buttons);
     layout->addWidget(footer);
@@ -2529,7 +2544,7 @@ void MainWindow::createNotebook() {
     OverlayDialog dialog(this, "newNotebookDialog");
     auto *layout = column(&dialog, 22, 12);
     auto *title = label(tr("新建笔记本"), &dialog);
-    title->setStyleSheet("font-size: 15px; font-weight: 600;");
+    title->setProperty("dialogTitle", true);
     layout->addWidget(title);
     auto *name = new QLineEdit(&dialog);
     name->setObjectName("notebookName");
@@ -2575,7 +2590,7 @@ void MainWindow::createNotebook() {
     actionsLayout->addStretch();
     auto *cancel = button(tr("取消"), "cancelNotebook", actions);
     auto *create = button(tr("创建"), "confirmNotebook", actions);
-    create->setProperty("primary", true);
+    setPrimaryButton(create);
     create->setDefault(true);
     actionsLayout->addWidget(cancel);
     actionsLayout->addWidget(create);
@@ -2679,6 +2694,10 @@ void MainWindow::createNote(const QString &parentId, bool folder, const QString 
         QDialog dialog(this);
         dialog.setWindowTitle(tr("新建文章"));
         auto *layout = new QFormLayout(&dialog);
+        layout->setContentsMargins(20, 20, 20, 20);
+        layout->setSpacing(12);
+        layout->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        layout->setRowWrapPolicy(QFormLayout::WrapLongRows);
         auto *titleInput = new QLineEdit(&dialog);
         layout->addRow(tr("名称："), titleInput);
         auto *categoryInput = new QComboBox(&dialog);
@@ -2697,6 +2716,7 @@ void MainWindow::createNote(const QString &parentId, bool folder, const QString 
         auto *draftInput = new QCheckBox(tr("保存为草稿"), &dialog);
         layout->addRow(draftInput);
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+        setPrimaryButton(buttons->button(QDialogButtonBox::Ok));
         connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
         layout->addRow(buttons);
@@ -2836,6 +2856,10 @@ void MainWindow::showTreeMenu(const QPoint &position) {
                 QDialog dialog(this);
                 dialog.setWindowTitle(tr("文章属性"));
                 auto *layout = new QFormLayout(&dialog);
+                layout->setContentsMargins(20, 20, 20, 20);
+                layout->setSpacing(12);
+                layout->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+                layout->setRowWrapPolicy(QFormLayout::WrapLongRows);
                 auto *titleInput = new QLineEdit(target->title, &dialog);
                 layout->addRow(tr("名称："), titleInput);
                 auto *categoryInput = new QComboBox(&dialog);
@@ -2860,6 +2884,7 @@ void MainWindow::showTreeMenu(const QPoint &position) {
                 draftInput->setChecked(target->metadata["draft"].toBool());
                 layout->addRow(draftInput);
                 auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+                setPrimaryButton(buttons->button(QDialogButtonBox::Ok));
                 connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
                 connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
                 layout->addRow(buttons);
@@ -2934,7 +2959,9 @@ void MainWindow::showSiteConfig() {
     auto *bar = new QWidget(&dialog);
     bar->setObjectName("dialogBar");
     auto *barLayout = row(bar, 16, 11);
-    barLayout->addWidget(label(tr("站点配置"), bar));
+    auto *title = label(tr("站点配置"), bar);
+    title->setProperty("dialogTitle", true);
+    barLayout->addWidget(title);
     barLayout->addStretch();
     auto *close = button(tr("关闭"), "closeSiteConfig", bar);
     barLayout->addWidget(close);
@@ -2973,6 +3000,8 @@ void MainWindow::showSiteConfig() {
         auto *container = new QWidget(card);
         auto *fieldLayout = new QFormLayout(container);
         fieldLayout->setContentsMargins(0, 0, 0, 0);
+        fieldLayout->setHorizontalSpacing(16);
+        fieldLayout->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
         fieldLayout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
         fieldLayout->setRowWrapPolicy(QFormLayout::WrapLongRows);
         auto *captionLabel = label(caption, container, true);
@@ -3221,6 +3250,7 @@ void MainWindow::showSiteConfig() {
         form->addWidget(captionLabel);
         auto *input = new QPlainTextEdit(book->config[key].toString(), card);
         input->setObjectName("config_" + key);
+        input->setProperty("codeInput", true);
         input->setMinimumWidth(0);
         input->setMinimumHeight(150);
         input->setTabChangesFocus(true);
@@ -3288,7 +3318,9 @@ void MainWindow::showSitePreview() {
     auto *bar = new QWidget(&dialog);
     bar->setObjectName("dialogBar");
     auto *barLayout = row(bar, 14, 8, 10);
-    barLayout->addWidget(label(tr("站点预览"), bar));
+    auto *title = label(tr("站点预览"), bar);
+    title->setProperty("dialogTitle", true);
+    barLayout->addWidget(title);
     barLayout->addWidget(label(book->config["theme"].toString() == "custom" ? tr("自定义") : book->config["theme"].toString() == "next" ? "NexT" : book->config["theme"].toString() == "yilia" ? "Yilia" : book->config["theme"].toString() == "3-jekyll" ? "3-Jekyll" : "Pure", bar, true));
     barLayout->addStretch();
     auto *close = button(tr("关闭"), "closeSitePreview", bar);
@@ -3341,9 +3373,13 @@ void MainWindow::exportNotebook() {
     QDialog dialog(this);
     dialog.setObjectName("ebookExportDialog");
     dialog.setWindowTitle(tr("导出电子书"));
-    dialog.resize(540, 300);
-    auto *layout = new QVBoxLayout(&dialog);
+    dialog.resize(560, 300);
+    auto *layout = column(&dialog, 20, 16);
     auto *form = new QFormLayout;
+    form->setSpacing(12);
+    form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     auto *scope = new QComboBox(&dialog);
     scope->setObjectName("exportScope");
     scope->addItem((book->type == "normal" ? tr("整本笔记本 · ") : tr("整本电子书 · ")) + book->name, QString());
@@ -3379,6 +3415,7 @@ void MainWindow::exportNotebook() {
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
     auto *confirm = buttons->button(QDialogButtonBox::Save);
     confirm->setObjectName("confirmExport");
+    setPrimaryButton(confirm);
     confirm->setText(tr("导出"));
     buttons->button(QDialogButtonBox::Cancel)->setText(tr("取消"));
     const auto validate = [&] {
@@ -3392,6 +3429,7 @@ void MainWindow::exportNotebook() {
     connect(directory, &QLineEdit::textChanged, &dialog, validate);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addStretch();
     layout->addWidget(buttons);
     validate();
     if (dialog.exec() != QDialog::Accepted) return;

@@ -1,4 +1,5 @@
 #include "MarkdownEditor.h"
+#include "UiStyle.h"
 #include "InplacePreview.h"
 #include <QActionGroup>
 #include <QBuffer>
@@ -227,6 +228,10 @@ void MarkdownEditor::type(vte::TypeAction action, const QVariant &data) {
         QDialog dialog(this);
         dialog.setWindowTitle(tr("插入链接"));
         auto *layout = new QFormLayout(&dialog);
+        layout->setContentsMargins(20, 20, 20, 20);
+        layout->setSpacing(12);
+        layout->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        layout->setRowWrapPolicy(QFormLayout::WrapLongRows);
         auto *text = new QLineEdit(getTextEdit()->textCursor().selectedText(), &dialog);
         auto *url = new QLineEdit(&dialog);
         text->setObjectName("linkText");
@@ -234,6 +239,7 @@ void MarkdownEditor::type(vte::TypeAction action, const QVariant &data) {
         layout->addRow(tr("文字"), text);
         layout->addRow(tr("地址"), url);
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+        setPrimaryButton(buttons->button(QDialogButtonBox::Ok));
         layout->addRow(buttons);
         connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -244,6 +250,10 @@ void MarkdownEditor::type(vte::TypeAction action, const QVariant &data) {
         QDialog dialog(this);
         dialog.setWindowTitle(tr("插入表格"));
         auto *layout = new QFormLayout(&dialog);
+        layout->setContentsMargins(20, 20, 20, 20);
+        layout->setSpacing(12);
+        layout->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        layout->setRowWrapPolicy(QFormLayout::WrapLongRows);
         auto *rows = new QSpinBox(&dialog);
         auto *columns = new QSpinBox(&dialog);
         rows->setRange(1, 100);
@@ -253,6 +263,7 @@ void MarkdownEditor::type(vte::TypeAction action, const QVariant &data) {
         layout->addRow(tr("数据行数"), rows);
         layout->addRow(tr("列数"), columns);
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+        setPrimaryButton(buttons->button(QDialogButtonBox::Ok));
         layout->addRow(buttons);
         connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -307,7 +318,11 @@ void MarkdownEditor::showFindReplace() {
     dialog.setWindowTitle(tr("查找和替换"));
     dialog.setObjectName("findReplace");
     auto *layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(20, 20, 20, 20);
+    layout->setSpacing(12);
     auto *fields = new QFormLayout;
+    fields->setSpacing(12);
+    fields->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     auto *query = new QLineEdit(getTextEdit()->textCursor().selectedText(), &dialog);
     auto *replacement = new QLineEdit(&dialog);
     query->setObjectName("findText");
@@ -323,6 +338,7 @@ void MarkdownEditor::showFindReplace() {
     layout->addLayout(options);
     auto *result = new QLabel(&dialog);
     result->setObjectName("findResult");
+    result->setProperty("dim", true);
     layout->addWidget(result);
     auto *actions = new QHBoxLayout;
     const QStringList labels = {tr("上一个"), tr("下一个"), tr("替换"), tr("全部替换")};
@@ -409,9 +425,12 @@ void MarkdownEditor::showSettings() {
     dialog.setObjectName("editorSettings");
     dialog.setWindowTitle(tr("编辑器设置（所有笔记）"));
     auto *layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(20, 20, 20, 20);
+    layout->setSpacing(12);
     std::function<void()> apply;
     layout->addWidget(createSettingsPage(&dialog, apply));
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    setPrimaryButton(buttons->button(QDialogButtonBox::Ok));
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -420,10 +439,14 @@ void MarkdownEditor::showSettings() {
 
 QWidget *MarkdownEditor::createSettingsPage(QWidget *parent, std::function<void()> &apply) {
     auto *tabs = new QTabWidget(parent);
+    tabs->setObjectName("editorSettingsTabs");
     auto page = [&tabs](const QString &title) {
         auto *widget = new QWidget(tabs);
         tabs->addTab(widget, title);
         auto *form = new QFormLayout(widget);
+        form->setContentsMargins(0, 16, 0, 12);
+        form->setSpacing(12);
+        form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
         form->setRowWrapPolicy(QFormLayout::WrapLongRows);
         form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
         return form;

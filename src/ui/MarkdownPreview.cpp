@@ -1,4 +1,5 @@
 #include "MarkdownPreview.h"
+#include "UiStyle.h"
 #include "core/PlantUmlRenderer.h"
 #include "core/WebTranslations.h"
 #include <QDesktopServices>
@@ -126,6 +127,10 @@ void MarkdownPreview::showSettings() {
     dialog.setObjectName("readerSettings");
     dialog.setWindowTitle(tr("阅读设置（所有笔记）"));
     auto *layout = new QFormLayout(&dialog);
+    layout->setContentsMargins(20, 20, 20, 20);
+    layout->setSpacing(12);
+    layout->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    layout->setRowWrapPolicy(QFormLayout::WrapLongRows);
     QSettings settings;
     settings.beginGroup("reader");
     auto *theme = new QComboBox(&dialog);
@@ -136,6 +141,8 @@ void MarkdownPreview::showSettings() {
     theme->setCurrentIndex(qMax(0, theme->findData(settings.value("theme", "light"))));
     layout->addRow(tr("配色"), theme);
     auto *font = new QComboBox(&dialog);
+    font->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    font->setMinimumContentsLength(16);
     font->setObjectName("readerFont");
     font->addItem(tr("系统默认"), QString());
     for (const auto &family: QFontDatabase::families()) font->addItem(family, family);
@@ -158,6 +165,7 @@ void MarkdownPreview::showSettings() {
     width->setValue(settings.value("contentWidth", 0).toInt());
     layout->addRow(tr("最大正文宽度（px，0 为不限）"), width);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    setPrimaryButton(buttons->button(QDialogButtonBox::Ok));
     layout->addRow(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -185,6 +193,8 @@ void MarkdownPreview::showHeadingNavigation() {
     dialog->setWindowTitle(tr("跳转到标题"));
     dialog->resize(420, 360);
     auto *layout = new QVBoxLayout(dialog);
+    layout->setContentsMargins(20, 20, 20, 20);
+    layout->setSpacing(12);
     auto *query = new QLineEdit(dialog);
     query->setObjectName("readerHeadingFilter");
     query->setPlaceholderText(tr("搜索标题"));
@@ -193,6 +203,8 @@ void MarkdownPreview::showHeadingNavigation() {
     list->setObjectName("readerHeadingList");
     layout->addWidget(list);
     auto *hint = new QLabel(tr("正在读取标题…"), dialog);
+    hint->setProperty("dim", true);
+    hint->setWordWrap(true);
     layout->addWidget(hint);
     auto filter = [list](const QString &text) {
         QListWidgetItem *first = nullptr;
@@ -239,6 +251,8 @@ void MarkdownPreview::showFind() {
         findDialog_->setObjectName("previewFind");
         findDialog_->setWindowTitle(tr("阅读区查找"));
         auto *layout = new QVBoxLayout(findDialog_);
+        layout->setContentsMargins(20, 20, 20, 20);
+        layout->setSpacing(12);
         findQuery_ = new QLineEdit(findDialog_);
         findQuery_->setObjectName("previewFindText");
         findQuery_->setPlaceholderText(tr("查找阅读内容（会展开折叠章节）"));
@@ -247,6 +261,7 @@ void MarkdownPreview::showFind() {
         layout->addWidget(findCase_);
         findResult_ = new QLabel(findDialog_);
         findResult_->setObjectName("previewFindResult");
+        findResult_->setProperty("dim", true);
         layout->addWidget(findResult_);
         auto *buttons = new QHBoxLayout;
         layout->addLayout(buttons);
