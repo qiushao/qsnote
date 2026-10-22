@@ -35,6 +35,7 @@ class MainWindow : public QMainWindow {
 
 public:
     explicit MainWindow(QWidget *parent = nullptr);
+    void maximizeWindow();
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
@@ -62,6 +63,7 @@ private:
     void updateStatus();
     void updatePanels();
     void updateResizeHandles();
+    void updateMaximizeButton();
     void createNotebook();
     void openNotebook();
     void closeNotebook();
@@ -177,6 +179,8 @@ private:
     bool leftRequested_ = true;
     bool rightRequested_ = true;
     bool storageReady_ = true;
+    bool maximized_ = false;
+    QRect normalGeometry_;
 };
 
 #endif// QSNOTE_MAINWINDOW_H

@@ -21,7 +21,8 @@ int main(int argc, char *argv[]) {
     ApplicationLanguage language;
 
     MainWindow window;
-    window.showMaximized();
+    window.maximizeWindow();
+    window.show();
 
     return QApplication::exec();
 }

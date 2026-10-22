@@ -497,7 +497,7 @@ protected:
         QDialog::resizeEvent(event);
         if (testAttribute(Qt::WA_TranslucentBackground)) return;
         QPainterPath shape;
-        shape.addRoundedRect(QRectF(rect()), 10, 10);
+        shape.addRoundedRect(QRectF(rect()), 4, 4);
         setMask(QRegion(shape.toFillPolygon().toPolygon()));
     }
     void showEvent(QShowEvent *event) override {
@@ -2202,7 +2202,7 @@ void MainWindow::updateResizeHandles() {
         const int x = edges.testFlag(Qt::LeftEdge) ? 0 : edges.testFlag(Qt::RightEdge) ? width() - margin : margin;
         const int y = edges.testFlag(Qt::TopEdge) ? 0 : edges.testFlag(Qt::BottomEdge) ? height() - margin : margin;
         it.key()->setGeometry(x, y, horizontal ? margin : width() - 2 * margin, vertical ? margin : height() - 2 * margin);
-        it.key()->setVisible(!isMaximized() && !isFullScreen());
+        it.key()->setVisible(!maximized_ && !isFullScreen());
     }
 }
 
@@ -2212,15 +2212,43 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
     updateResizeHandles();
 }
 
-void MainWindow::toggleMaximized() { setWindowState(windowState() ^ Qt::WindowMaximized); }
+void MainWindow::maximizeWindow() {
+    const auto available = screen()->availableGeometry();
+    normalGeometry_ = QRect(available.x() + available.width() / 10, available.y() + available.height() / 10,
+                            available.width() * 4 / 5, available.height() * 4 / 5);
+    maximized_ = true;
+    setWindowState(windowState() | Qt::WindowMaximized);
+    setGeometry(available);
+    updateMaximizeButton();
+}
+
+void MainWindow::toggleMaximized() {
+    if (maximized_) {
+        maximized_ = false;
+        setWindowState(windowState() & ~Qt::WindowMaximized);
+        setGeometry(normalGeometry_);
+    } else {
+        normalGeometry_ = geometry();
+        maximized_ = true;
+        setWindowState(windowState() | Qt::WindowMaximized);
+        setGeometry(screen()->availableGeometry());
+    }
+    updateResizeHandles();
+    updateMaximizeButton();
+}
+
+void MainWindow::updateMaximizeButton() {
+    if (!maximize_) return;
+    maximize_->setIcon(icon(maximized_ ? "restore" : "maximize"));
+    maximize_->setToolTip(maximized_ ? tr("还原") : tr("最大化"));
+    maximize_->setAccessibleName(maximize_->toolTip());
+}
 
 void MainWindow::changeEvent(QEvent *event) {
     QMainWindow::changeEvent(event);
-    if (event->type() == QEvent::WindowStateChange) updateResizeHandles();
-    if (event->type() == QEvent::WindowStateChange && maximize_) {
-        maximize_->setIcon(icon(isMaximized() ? "restore" : "maximize"));
-        maximize_->setToolTip(isMaximized() ? tr("还原") : tr("最大化"));
-        maximize_->setAccessibleName(maximize_->toolTip());
+    if (event->type() == QEvent::WindowStateChange) {
+        updateResizeHandles();
+        updateMaximizeButton();
     }
 }
 
@@ -2250,7 +2278,7 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
         if (watched == left_) toggleLeft_->setIcon(icon(left_->isHidden() ? "leftCollapsed" : "left"));
         if (watched == right_) toggleRight_->setIcon(icon(right_->isHidden() ? "rightCollapsed" : "right"));
     }
-    if (event->type() == QEvent::MouseButtonPress && !isMaximized() && !isFullScreen()) {
+    if (event->type() == QEvent::MouseButtonPress && !maximized_ && !isFullScreen()) {
         const auto edges = resizeHandles_.value(qobject_cast<QWidget *>(watched));
         auto *mouse = dynamic_cast<QMouseEvent *>(event);
         if (edges && mouse && mouse->button() == Qt::LeftButton && windowHandle()) {
