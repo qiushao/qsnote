@@ -49,10 +49,10 @@ QSpinBox, QDoubleSpinBox { padding-right: 28px; }
 QSpinBox::up-button, QDoubleSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right; width: 24px; border: none; border-left: 1px solid #e7ebf0; border-top-right-radius: 7px; margin: 1px 1px 0 0; }
 QSpinBox::down-button, QDoubleSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right; width: 24px; border: none; border-left: 1px solid #e7ebf0; border-bottom-right-radius: 7px; margin: 0 1px 1px 0; }
 QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover, QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover { background: #e8effc; }
-QSpinBox::up-arrow, QDoubleSpinBox::up-arrow { image: url(:/icons/up.xpm); width: 8px; height: 6px; }
-QSpinBox::down-arrow, QDoubleSpinBox::down-arrow { image: url(:/icons/caret.xpm); width: 8px; height: 6px; }
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow { image: url(:/icons/up.svg); width: 8px; height: 6px; }
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow { image: url(:/icons/caret.svg); width: 8px; height: 6px; }
 QComboBox::drop-down, QDateEdit::drop-down { border: none; width: 24px; }
-QComboBox::down-arrow, QDateEdit::down-arrow { image: url(:/icons/caret.xpm); width: 8px; height: 6px; }
+QComboBox::down-arrow, QDateEdit::down-arrow { image: url(:/icons/caret.svg); width: 8px; height: 6px; }
 QComboBox QAbstractItemView { background: #ffffff; border: 1px solid #dfe5ed; selection-background-color: #e8effc; selection-color: #3b6fd4; padding: 5px; outline: none; }
 QWidget#notebookPicker { background: #ffffff; border: 1px solid #dfe5ed; border-radius: 8px; }
 QComboBox#notebooks { background: transparent; border: none; font-weight: 600; }
@@ -66,8 +66,8 @@ QTreeWidget::item:selected { background: #e5edfb; color: #315fb8; }
 QTreeWidget::item:focus { border-color: #a9bfe8; }
 QTreeWidget#noteTree::item, QTreeWidget#outline::item { border: none; border-radius: 0; }
 QTreeWidget::branch { background: transparent; }
-QTreeWidget#noteTree::branch:has-children:closed { image: url(:/icons/right.xpm); }
-QTreeWidget#noteTree::branch:has-children:open { image: url(:/icons/caret.xpm); }
+QTreeWidget#noteTree::branch:has-children:closed { image: url(:/icons/right.svg); }
+QTreeWidget#noteTree::branch:has-children:open { image: url(:/icons/down.svg); }
 QTreeWidget#outline::item { min-height: 28px; color: #66758a; }
 QTreeWidget#outline::item:selected { color: #315fb8; }
 QTabWidget#editorSettingsTabs::pane { border: none; border-top: 1px solid #e7ebf0; background: #ffffff; top: -1px; }
@@ -76,8 +76,7 @@ QTabBar { background: transparent; }
 QTabBar::tab { background: transparent; color: #758195; border: 1px solid transparent; border-radius: 6px; margin: 0 3px; padding: 6px 12px; font-size: 13px; }
 QTabBar::tab:hover { background: #eef2f8; color: #526176; }
 QTabBar::tab:selected { background: #ffffff; color: #315fb8; border-color: #dfe5ed; }
-QTabBar::close-button { image: url(:/icons/close.xpm); subcontrol-position: right; width: 16px; height: 16px; border-radius: 4px; }
-QTabBar::close-button:hover { background: #e8eef7; }
+QPushButton#noteTabClose { padding: 0; min-width: 0; min-height: 0; border-radius: 4px; }
 QTextEdit#editor, QTextEdit#inactiveEditor { border: none; background: #ffffff; padding: 2px 2px; selection-background-color: #e8effc; }
 QTextBrowser { border: none; background: #ffffff; padding: 20px 24px; selection-background-color: #e8effc; }
 QScrollBar:vertical { background: transparent; width: 8px; margin: 0; }
@@ -113,7 +112,7 @@ QListWidget#siteCategories::item:selected { background: #e5edfb; color: #315fb8;
 QCheckBox { spacing: 7px; font-size: 13px; }
 QTreeWidget#todoList::item { min-height: 38px; border: none; border-radius: 0; }
 QCheckBox::indicator, QTreeWidget#todoList::indicator { width: 14px; height: 14px; border: 1px solid #b7c3d4; border-radius: 4px; background: #ffffff; }
-QCheckBox::indicator:checked, QTreeWidget#todoList::indicator:checked { background: #3b6fd4; border-color: #3b6fd4; image: url(:/icons/check.xpm); }
+QCheckBox::indicator:checked, QTreeWidget#todoList::indicator:checked { background: #3b6fd4; border-color: #3b6fd4; image: url(:/icons/check.svg); }
 QCheckBox::indicator:hover, QCheckBox::indicator:focus { border-color: #3b6fd4; }
 QCheckBox::indicator:disabled { background: #edf0f4; border-color: #dfe5ed; }
 QLineEdit#todoTitle { font-size: 16px; font-weight: 600; padding: 9px 10px; }

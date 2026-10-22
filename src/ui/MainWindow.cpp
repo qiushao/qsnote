@@ -298,6 +298,26 @@ public:
     [[nodiscard]] QSize tabSizeHint(int index) const override {
         return {qBound(76, fontMetrics().horizontalAdvance(tabText(index)) + 64 + (tabIcon(index).isNull() ? 0 : 20), 200), 32};
     }
+
+protected:
+    void tabInserted(int index) override {
+        QTabBar::tabInserted(index);
+        const auto side = static_cast<QTabBar::ButtonPosition>(style()->styleHint(QStyle::SH_TabBar_CloseButtonPosition, nullptr, this));
+        auto *close = button("×", "noteTabClose", this);
+        close->setProperty("iconButton", true);
+        close->setFixedSize(20, 20);
+        close->setFocusPolicy(Qt::NoFocus);
+        close->setToolTip(QCoreApplication::translate("MainWindow", "关闭标签"));
+        close->setAccessibleName(close->toolTip());
+        setTabButton(index, side, close);
+        connect(close, &QPushButton::clicked, this, [this, close, side] {
+            for (int tab = 0; tab < count(); ++tab) {
+                if (tabButton(tab, side) != close) continue;
+                emit tabCloseRequested(tab);
+                return;
+            }
+        });
+    }
 };
 
 class NotebookDelegate : public QStyledItemDelegate {

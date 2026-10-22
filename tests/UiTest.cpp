@@ -3215,6 +3215,40 @@ gantt
         QCOMPARE(window.findChild<QStackedWidget *>("editorPages")->currentIndex(), 0);
     }
 
+    void tabCloseButtonAfterMovingTab() {
+        NotebookStore fixture;
+        fixture.notebooks.append({"close-book", "Close", "normal", {{"close-a", {}, "A.md", "# A", false, {}}, {"close-b", {}, "B.md", "# B", false, {}}}, {}, fixturePath("close-book")});
+        QString error;
+        QVERIFY2(fixture.save(&error), qPrintable(error));
+        MainWindow window;
+        window.resize(1400, 800);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *tree = window.findChild<QTreeWidget *>("noteTree");
+        auto *tabs = window.findChild<QTabBar *>("noteTabs");
+        openTreeNote(tree, tree->topLevelItem(0));
+        openTreeNote(tree, tree->topLevelItem(1));
+        QCOMPARE(tabs->count(), 2);
+        auto closeButton = [tabs](int index) {
+            auto *close = qobject_cast<QPushButton *>(tabs->tabButton(index, QTabBar::RightSide));
+            return close ? close : qobject_cast<QPushButton *>(tabs->tabButton(index, QTabBar::LeftSide));
+        };
+        auto *close = closeButton(0);
+        QVERIFY(close);
+        const auto closedId = tabs->tabData(0);
+        const auto keptId = tabs->tabData(1);
+        tabs->moveTab(0, 1);
+        QCOMPARE(closeButton(1), close);
+        QTest::mouseClick(close, Qt::LeftButton);
+        QCOMPARE(tabs->count(), 1);
+        QCOMPARE(tabs->tabData(0), keptId);
+        QVERIFY(tabs->tabData(0) != closedId);
+        QVERIFY(closeButton(0));
+        QTest::mouseClick(closeButton(0), Qt::LeftButton);
+        QCOMPARE(tabs->count(), 0);
+        QCOMPARE(window.findChild<QStackedWidget *>("editorPages")->currentIndex(), 0);
+    }
+
     void tabContextActions() {
         NotebookStore fixture;
         Notebook book{"menu-book", "Menu", "normal", {}, {}, fixturePath("menu-book")};
