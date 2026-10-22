@@ -2000,6 +2000,40 @@ gantt
         QCOMPARE(ApplicationLanguage::resolve("unknown", QLocale("zh_CN")), QString("zh_CN"));
     }
 
+    void settingsDialogCorners() {
+        MainWindow window;
+        window.resize(1280, 900);
+        window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        QTimer::singleShot(30, &window, [] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            const auto rejectOnExit = qScopeGuard([dialog] { dialog->reject(); });
+            QVERIFY(dialog->mask().isEmpty());
+            const auto image = dialog->grab().toImage();
+            const int radius = qRound(6 * image.devicePixelRatio());
+            for (int corner = 0; corner < 4; ++corner) {
+                const auto alphaAt = [&](int x, int y) {
+                    return image.pixelColor(corner & 1 ? image.width() - 1 - x : x,
+                                            corner & 2 ? image.height() - 1 - y : y)
+                            .alpha();
+                };
+                QCOMPARE(alphaAt(0, 0), 0);
+                QCOMPARE(alphaAt(radius, 0), 255);
+                QCOMPARE(alphaAt(0, radius), 255);
+                bool hasSmoothEdge = false;
+                for (int y = 0; y < radius; ++y) {
+                    for (int x = 0; x < radius; ++x) {
+                        const int alpha = alphaAt(x, y);
+                        hasSmoothEdge |= alpha > 0 && alpha < 255;
+                    }
+                }
+                QVERIFY(hasSmoothEdge);
+            }
+        });
+        window.findChild<QPushButton *>("settings")->click();
+    }
+
     void settingsDialogAndPersistence_data() { // NOLINT(readability-identifier-naming)
         QTest::addColumn<QString>("languageCode");
         QTest::newRow("Chinese") << QString("zh_CN");

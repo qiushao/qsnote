@@ -477,6 +477,10 @@ public:
     OverlayDialog(QWidget *parent, const QString &name, bool wide = false) : QDialog(parent), scrim_(new QWidget(parent)) {
         setObjectName(name);
         setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
+        if (name == "settingsDialog") {
+            setAttribute(Qt::WA_TranslucentBackground);
+            setAttribute(Qt::WA_StyledBackground);
+        }
         setModal(true);
         scrim_->setStyleSheet("background: rgba(0,0,0,77);");
         scrim_->setGeometry(parent->rect());
@@ -491,6 +495,7 @@ public:
 protected:
     void resizeEvent(QResizeEvent *event) override {
         QDialog::resizeEvent(event);
+        if (testAttribute(Qt::WA_TranslucentBackground)) return;
         QPainterPath shape;
         shape.addRoundedRect(QRectF(rect()), 10, 10);
         setMask(QRegion(shape.toFillPolygon().toPolygon()));

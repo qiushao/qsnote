@@ -94,6 +94,9 @@ QMenu::item:disabled { color: #a0a9b7; }
 QMenu::separator { background: #e7ebf0; height: 1px; margin: 5px 8px; }
 QToolTip { background: #35445a; color: #ffffff; border: none; padding: 6px 9px; }
 QScrollArea { border: none; background: #ffffff; }
+QDialog#settingsDialog { border-radius: 6px; }
+QDialog#settingsDialog QWidget#dialogBar { border-top-left-radius: 6px; border-top-right-radius: 6px; }
+QDialog#settingsDialog QWidget#dialogFooter { border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }
 QLabel[heading="true"] { font-weight: 600; border-bottom: 1px solid #e7ebf0; padding-bottom: 8px; margin-top: 14px; }
 QWidget#configBody { background: #f5f7fa; }
 QWidget#settingsNavigation { background: #f5f7fa; }
