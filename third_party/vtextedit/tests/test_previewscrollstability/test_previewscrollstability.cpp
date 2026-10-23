@@ -194,6 +194,59 @@ void TestPreviewScrollStability::testOffScreenCaretIsNotChasedTo() {
   QVERIFY(qAbs((blockDocY(editor, anchorBlock) - vbar->value()) - anchorViewportY) <= 1.0);
 }
 
+void TestPreviewScrollStability::testHighlightAfterShowKeepsScrollPosition_data() {
+  QTest::addColumn<bool>("atBottom");
+  QTest::newRow("middle") << false;
+  QTest::newRow("bottom") << true;
+}
+
+void TestPreviewScrollStability::testHighlightAfterShowKeepsScrollPosition() {
+  QFETCH(bool, atBottom);
+  VMarkdownEditor editor(makeConfig(), QSharedPointer<TextEditorParameters>::create());
+  setUpEditor(editor);
+  auto textEdit = editor.getTextEdit();
+  auto vbar = textEdit->verticalScrollBar();
+
+  QTextCursor cursor = textEdit->textCursor();
+  cursor.setPosition(0);
+  cursor.setPosition(5, QTextCursor::KeepAnchor);
+  textEdit->setTextCursor(cursor);
+  vbar->setValue(atBottom ? vbar->maximum() : vbar->maximum() / 2);
+  QCoreApplication::processEvents();
+  const int position = vbar->value();
+  QVERIFY(position > 0);
+
+  // Returning from preview shows the editor and restores its viewport before
+  // the asynchronous highlighter refresh completes. The caret stays at the top.
+  for (int i = 0; i < 3; ++i) {
+    editor.hide();
+    editor.show();
+    QCoreApplication::processEvents();
+    vbar->setValue(position);
+    settle(editor);
+    QCOMPARE(vbar->value(), position);
+    QCOMPARE(textEdit->textCursor().position(), cursor.position());
+    QCOMPARE(textEdit->textCursor().anchor(), cursor.anchor());
+  }
+}
+
+void TestPreviewScrollStability::testTypingAfterHighlightKeepsCaretVisible() {
+  VMarkdownEditor editor(makeConfig(), QSharedPointer<TextEditorParameters>::create());
+  setUpEditor(editor);
+  auto textEdit = editor.getTextEdit();
+  textEdit->moveCursor(QTextCursor::End);
+  textEdit->setFocus();
+  settle(editor);
+
+  for (int i = 0; i < 5; ++i) {
+    QTest::keyClick(textEdit, Qt::Key_Return);
+    QTest::keyClicks(textEdit, "More text");
+  }
+  settle(editor);
+  QVERIFY(textEdit->viewport()->rect().intersects(textEdit->cursorRect()));
+  QVERIFY(textEdit->verticalScrollBar()->value() > 0);
+}
+
 void TestPreviewScrollStability::testVisibleCaretStillKeptVisible() {
   VMarkdownEditor editor(makeConfig(), QSharedPointer<TextEditorParameters>::create());
   setUpEditor(editor);

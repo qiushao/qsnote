@@ -40,6 +40,10 @@ private slots:
   // stay where it is instead of being yanked back to the caret.
   void testOffScreenCaretIsNotChasedTo();
 
+  void testHighlightAfterShowKeepsScrollPosition_data();
+  void testHighlightAfterShowKeepsScrollPosition();
+  void testTypingAfterHighlightKeepsCaretVisible();
+
   // The caret IS visible: the old ensureCursorVisible() behaviour must survive.
   void testVisibleCaretStillKeptVisible();
 

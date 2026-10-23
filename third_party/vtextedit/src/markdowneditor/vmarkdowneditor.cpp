@@ -2029,6 +2029,12 @@ void VMarkdownEditor::setupSyntaxHighlighter() {
       return;
     }
 
+    // A mode switch can restore the viewport before this asynchronous refresh
+    // completes. Do not pull it back to a caret the user has scrolled away from.
+    if (!m_textEdit->viewport()->rect().intersects(m_textEdit->cursorRect())) {
+      return;
+    }
+
     m_textEdit->ensureCursorVisible();
     m_textEdit->checkCenterCursor();
   });
