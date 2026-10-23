@@ -146,6 +146,12 @@ QString NotebookStore::relativePath(const Notebook &book, const Note &note) {
         const auto category = sanitized(note.metadata["category"].toString());
         return (note.metadata["draft"].toBool() ? "source/_drafts/" : "source/_posts/") + (category.isEmpty() ? name : category + "/" + name);
     }
+    if (book.type == "todo") {
+        // 待办事项按分类目录保存；未分类事项归入内置的「默认」目录。
+        auto category = sanitized(note.metadata["category"].toString(QStringLiteral("默认")));
+        if (category.isEmpty()) category = QStringLiteral("默认");
+        return category + "/" + name;
+    }
     // 沿父链向上收集目录段：普通笔记本父级为文件夹；电子书父级章节的目录与章节文件同名（去掉 .md）。
     QStringList segments{name};
     QString parentId = note.parentId;
