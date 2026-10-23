@@ -38,16 +38,12 @@ jobs:
           fi
           ./scripts/macos-build.sh "$version"
 
-      - name: Install and test diagram dependencies
+      - name: Verify Homebrew Cask
         run: |
-          brew install plantuml graphviz
           brew tap-new qsnote/ci
           mkdir -p "$(brew --repository qsnote/ci)/Casks"
           cp Casks/qsnote.rb "$(brew --repository qsnote/ci)/Casks/"
           brew readall qsnote/ci
-          cmake -S . -B build-macos -DQSNOTE_BUILD_TESTS=ON
-          cmake --build build-macos --parallel --target qsnote_diagram_tests
-          ctest --test-dir build-macos -R '^qsnote_diagram$' --output-on-failure
 
       - uses: actions/upload-artifact@v4
         with:

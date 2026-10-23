@@ -35,7 +35,7 @@ jobs:
         with:
           arch: x64
 
-      - name: Setup system Java for build and tests
+      - name: Setup system Java for build
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -49,18 +49,6 @@ jobs:
             $version = $env:GITHUB_REF_NAME -replace '^[Vv]', ''
           }
           ./scripts/windows-build.ps1 -Version $version
-
-      - name: Test diagram runtime
-        shell: pwsh
-        run: |
-          cmake -S . -B build-windows -DQSNOTE_BUILD_TESTS=ON
-          if ($LASTEXITCODE -ne 0) { throw 'Test configure failed' }
-          cmake --build build-windows --config Release --parallel --target qsnote_diagram_tests
-          if ($LASTEXITCODE -ne 0) { throw 'Test build failed' }
-          windeployqt --release --compiler-runtime build-windows/diagram-tests/Release/qsnote_diagram_tests.exe
-          if ($LASTEXITCODE -ne 0) { throw 'Test runtime deployment failed' }
-          ctest --test-dir build-windows -C Release -R '^qsnote_diagram$' --output-on-failure
-          if ($LASTEXITCODE -ne 0) { throw 'Diagram tests failed' }
 
       - uses: actions/upload-artifact@v4
         with:

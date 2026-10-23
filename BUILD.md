@@ -101,7 +101,7 @@ brew install --cask qiushao/qsnote/qsnote
 - 推送 `V*` / `v*` 标签（例如 `V1.2.3`）：去掉标签前缀作为应用版本，并将安装包上传到对应 GitHub Release。
 - Linux 产物为 `.deb`，CPack 自动检测 Qt 共享库依赖，并显式声明图表引擎依赖；macOS 为包含 Qt 运行时的 Intel `.dmg`，通过 Cask 安装图表引擎；Windows 为包含 Qt、PlantUML 和 Graphviz 的 x64 `.zip`，Java 使用系统安装。
 - 构建任务使用只读权限，只有版本标签触发的发布任务具有 `contents: write` 权限。
-- 三个平台均验证打包后的应用能启动并输出正确版本，运行真实的 PlantUML / Graphviz 集成测试；任一步骤失败都会阻止该平台发布。
+- CI 保留安装包文件、依赖声明及 Homebrew Cask 检查，不再配置、编译或运行已删除的测试用例；构建、打包或检查失败都会阻止该平台发布。
 
 Linux 本地生成同样的 DEB 包：
 
