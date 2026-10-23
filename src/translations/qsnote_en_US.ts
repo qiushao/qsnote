@@ -549,11 +549,6 @@
             <translation>Split</translation>
         </message>
         <message>
-            <location line="-625" />
-            <source>＋ 新建事项</source>
-            <translation>＋ New Task</translation>
-        </message>
-        <message>
             <location line="+2" />
             <location line="+149" />
             <source>暂无进行中的事项</source>

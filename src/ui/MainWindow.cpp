@@ -112,7 +112,7 @@ QIcon icon(const QString &kind) {
     QPainter painter(&pixmap);
     painter.scale(2, 2);
     painter.setRenderHint(QPainter::Antialiasing);
-    const QColor ink("#5f6b7a");
+    const QColor ink("#66758a");
     const QPen pen(ink, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
     const auto fillInk = [&] { painter.setPen(Qt::NoPen); painter.setBrush(ink); };
     const auto outline = [&] { painter.setPen(pen); painter.setBrush(Qt::NoBrush); };
@@ -303,8 +303,10 @@ protected:
     void tabInserted(int index) override {
         QTabBar::tabInserted(index);
         const auto side = static_cast<QTabBar::ButtonPosition>(style()->styleHint(QStyle::SH_TabBar_CloseButtonPosition, nullptr, this));
-        auto *close = button("×", "noteTabClose", this);
+        auto *close = button(QString(), "noteTabClose", this);
         close->setProperty("iconButton", true);
+        close->setIcon(QIcon(":/icons/close.svg"));
+        close->setIconSize(QSize(12, 12));
         close->setFixedSize(20, 20);
         close->setFocusPolicy(Qt::NoFocus);
         close->setToolTip(QCoreApplication::translate("MainWindow", "关闭标签"));
@@ -331,7 +333,7 @@ public:
         adjusted.text = option.fontMetrics.elidedText(adjusted.text, Qt::ElideRight, qMax(0, option.rect.width() - typeWidth - 20));
         option.widget->style()->drawControl(QStyle::CE_ItemViewItem, &adjusted, painter, option.widget);
         painter->save();
-        painter->setPen(option.state & QStyle::State_Selected ? QColor("#3b6fd4") : QColor("#8a8f98"));
+        painter->setPen(option.state & QStyle::State_Selected ? QColor("#3b6fd4") : QColor("#758195"));
         auto font = option.font;
         font.setPixelSize(11);
         painter->setFont(font);
@@ -408,8 +410,8 @@ public:
                 offset = hit + query.size();
             }
         };
-        drawLine(index.data().toString(), rect.top(), option.state & QStyle::State_Selected ? QColor("#3b6fd4") : QColor("#24292f"), 13);
-        drawLine(index.data(Qt::UserRole + 3).toString(), rect.top() + 22, QColor("#8a8f98"), 12);
+        drawLine(index.data().toString(), rect.top(), option.state & QStyle::State_Selected ? QColor("#3b6fd4") : QColor("#303b4a"), 13);
+        drawLine(index.data(Qt::UserRole + 3).toString(), rect.top() + 22, QColor("#758195"), 12);
         painter->restore();
     }
     [[nodiscard]] QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override {
@@ -679,8 +681,10 @@ void MainWindow::buildUi() {
     notebooks_->setMinimumWidth(240);
     notebooks_->setMaximumWidth(320);
     pickerLayout->addWidget(notebooks_, 1);
-    auto *add = button("＋", "newNotebook", picker);
+    auto *add = button(QString(), "newNotebook", picker);
     add->setProperty("iconButton", true);
+    add->setIcon(QIcon(":/icons/plus.svg"));
+    add->setIconSize(QSize(14, 14));
     add->setToolTip(tr("新建笔记本"));
     add->setAccessibleName(add->toolTip());
     pickerLayout->addWidget(add);
@@ -894,7 +898,7 @@ void MainWindow::buildUi() {
     rightHeaderLayout->addWidget(outlineTitle);
     rightLayout->addWidget(rightHeader);
     outlineHint_ = label(tr("打开一篇笔记后自动生成大纲"), right_, true);
-    outlineHint_->setContentsMargins(16, 20, 16, 0);
+    outlineHint_->setContentsMargins(18, 20, 18, 0);
     rightLayout->addWidget(outlineHint_);
     outline_ = new QTreeWidget(right_);
     outline_->setObjectName("outline");
@@ -1158,7 +1162,9 @@ void MainWindow::buildTodoUi() {
     auto *addCategory = button(tr("新建分类"), "newTodoCategory", todoListPage_);
     actionsLayout->addWidget(addCategory);
     connect(addCategory, &QPushButton::clicked, this, &MainWindow::createTodoCategory);
-    todoAdd_ = button(tr("＋ 新建事项"), "newTodo", todoListPage_);
+    todoAdd_ = button(tr("新建事项"), "newTodo", todoListPage_);
+    todoAdd_->setIcon(QIcon(":/icons/plus-white.svg"));
+    todoAdd_->setIconSize(QSize(13, 13));
     setPrimaryButton(todoAdd_);
     actionsLayout->addWidget(todoAdd_);
     todoClearCompleted_ = button(tr("清空已完成事项"), "clearCompletedTodos", todoListPage_);
@@ -1430,8 +1436,10 @@ void MainWindow::refreshTodoList(const QString &selectedId) {
         item->setData(0, Qt::UserRole + 1, note.metadata["due"].toString());
         item->setToolTip(0, note.title);
         item->setCheckState(0, note.metadata["completed"].toBool() ? Qt::Checked : Qt::Unchecked);
-        auto *remove = button("×", "todoDelete", todoList_);
+        auto *remove = button(QString(), "todoDelete", todoList_);
         remove->setProperty("iconButton", true);
+        remove->setIcon(QIcon(":/icons/close.svg"));
+        remove->setIconSize(QSize(12, 12));
         remove->setFocusPolicy(Qt::NoFocus);
         remove->setToolTip(tr("删除"));
         remove->setAccessibleName(tr("删除"));
@@ -2595,7 +2603,7 @@ void MainWindow::showSettings() {
 
 void MainWindow::createNotebook() {
     OverlayDialog dialog(this, "newNotebookDialog");
-    auto *layout = column(&dialog, 22, 12);
+    auto *layout = column(&dialog, 20, 12);
     auto *title = label(tr("新建笔记本"), &dialog);
     title->setProperty("dialogTitle", true);
     layout->addWidget(title);
@@ -3033,7 +3041,7 @@ void MainWindow::showSiteConfig() {
     scroll->setWidgetResizable(true);
     auto *body = new QWidget(scroll);
     body->setObjectName("siteConfigBody");
-    auto *cards = column(body, 12, 16);
+    auto *cards = column(body, 20, 16);
     QWidget *card = nullptr;
     QVBoxLayout *form = nullptr;
     auto section = [&](const QString &name, const QString &text) {
@@ -3041,7 +3049,7 @@ void MainWindow::showSiteConfig() {
         card->setObjectName(name);
         card->setProperty("configCard", true);
         card->setAttribute(Qt::WA_StyledBackground, true);
-        form = column(card, 12, 12);
+        form = column(card, 18, 12);
         auto *title = label(text, card);
         title->setProperty("heading", true);
         form->addWidget(title);
@@ -3370,7 +3378,7 @@ void MainWindow::showSitePreview() {
     auto *layout = column(&dialog);
     auto *bar = new QWidget(&dialog);
     bar->setObjectName("dialogBar");
-    auto *barLayout = row(bar, 14, 8, 10);
+    auto *barLayout = row(bar, 16, 11);
     auto *title = label(tr("站点预览"), bar);
     title->setProperty("dialogTitle", true);
     barLayout->addWidget(title);
