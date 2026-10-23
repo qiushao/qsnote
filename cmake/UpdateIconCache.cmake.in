@@ -1,0 +1,20 @@
+# Package managers refresh the target system's cache after a staged install.
+if (NOT "$ENV{DESTDIR}" STREQUAL "")
+    return()
+endif ()
+
+set(icon_dir "@CMAKE_INSTALL_DATADIR@/icons/hicolor")
+if (NOT IS_ABSOLUTE "${icon_dir}")
+    set(icon_dir "${CMAKE_INSTALL_PREFIX}/${icon_dir}")
+endif ()
+
+# Desktop processes watch the theme directory, not individual icon subdirectories.
+file(TOUCH "${icon_dir}")
+find_program(GTK_UPDATE_ICON_CACHE NAMES gtk-update-icon-cache)
+if (GTK_UPDATE_ICON_CACHE)
+    execute_process(COMMAND "${GTK_UPDATE_ICON_CACHE}" -q -t -f "${icon_dir}"
+            RESULT_VARIABLE icon_cache_result)
+    if (NOT icon_cache_result EQUAL 0)
+        message(WARNING "Failed to update the icon cache in ${icon_dir}")
+    endif ()
+endif ()

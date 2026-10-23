@@ -20,6 +20,14 @@ cmake --build build --parallel
 
 Release 构建和 DEB 打包执行 `./scripts/linux-build.sh [版本号]`。优先使用传入的版本号；未传入时通过 `git describe --tags --abbrev=0` 获取最近的标签并去掉 `v` / `V` 前缀，没有标签则使用 `1.0.0`。产物位于 `build/qsnote_<版本号>_<架构>.deb`。
 
+安装到系统（默认 `/usr/local`）：
+
+```bash
+sudo cmake --install build
+```
+
+安装会刷新图标主题目录，并在系统提供 `gtk-update-icon-cache` 时更新图标缓存。升级后请退出并重新启动 QSNote；如果桌面仍显示旧图标，可注销并重新登录桌面会话。
+
 安装到自定义目录：
 
 ```bash

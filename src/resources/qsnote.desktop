@@ -3,5 +3,6 @@ Type=Application
 Name=QSNote
 Exec=qsnote
 Icon=qsnote
+StartupWMClass=qsnote
 Terminal=false
 Categories=Office;

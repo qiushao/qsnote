@@ -10,6 +10,7 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setApplicationName("qsnote");
     QCoreApplication::setApplicationVersion(APP_VERSION);
     QCoreApplication::setOrganizationName("qiushao");
+    QGuiApplication::setDesktopFileName("qsnote");
     QApplication::setWindowIcon(QIcon(":/icons/qsnote.png"));
 
     QCommandLineParser parser;

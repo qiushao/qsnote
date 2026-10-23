@@ -95,4 +95,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
             DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
     install(FILES resources/icons/qsnote.png
             DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/128x128/apps)
+    configure_file("${PROJECT_SOURCE_DIR}/cmake/UpdateIconCache.cmake.in"
+            "${CMAKE_CURRENT_BINARY_DIR}/UpdateIconCache.cmake" @ONLY)
+    install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/UpdateIconCache.cmake")
 endif ()
