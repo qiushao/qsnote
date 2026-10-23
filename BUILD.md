@@ -128,25 +128,3 @@ git push origin V1.2.3
 - 应用版本可用 `-DAPP_VERSION=1.2.3` 覆盖，运行 `qsnote --version` 查看。
 
 应用以中文源码文案为基础，英文翻译位于 `src/translations/qsnote_en_US.ts`。修改界面文案后，可运行 `lupdate src/ui src/core -no-obsolete -locations relative -ts src/translations/qsnote_en_US.ts` 更新条目，并补齐英文翻译。CMake 使用 Qt LinguistTools 编译翻译，随可执行文件内嵌英文、Qt 标准控件中文及 VTextEdit 中文资源，发布时无需另行复制应用翻译文件。
-
-## UI 验证
-
-可选测试依赖 Qt 6 Test（Linux 的 `qt6-base-dev` 已包含）：
-
-```bash
-cmake -S . -B build -DQSNOTE_BUILD_TESTS=ON
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-```
-
-站点生成和集成测试不需要 Node.js、npm 或网络连接。
-
-测试使用独立的应用名与测试数据目录，不读取正式笔记；覆盖空白启动、360～1440 像素窗口布局、新建三种笔记本、右键操作、章节层级、多标签编辑、保存重载、搜索、大纲、站点元数据、配置预览和导出内容。测试运行目录生成界面 PNG，便于与原型进行视觉对照。
-
-Markdown 编辑使用 third_party 中的 VTextEdit 源码，阅读 / 分屏预览使用 Qt WebEngine 与本地 VNote 渲染资源，电子书导出使用 cmark 解析器（EPUB、PDF、CHM、HTML，详见 [电子书导出](docs/ebook-export.md)）；完整迁移仍在进行（见 docs/vtextedit-migration.md）。构建不下载依赖、不初始化子模块。静态站点使用内置 C++ 生成器，详见 [静态站点](docs/static-sites.md)；支持通过 GitHub Pages（需要 git）或 SSH SCP（需要 ssh、scp）发布 public 中的文件。
-
-KaTeX（含字体）、Mermaid、Flowchart/Raphaël、Viz.js 和 WaveDrom 已编入 Qt 资源，无需 Node.js、TeX 或在线服务。PlantUML 预览与导出使用本地 Java 和 Graphviz：Windows 使用随包的 JAR、Graphviz 及系统 Java，Linux/macOS 使用包管理器安装的命令。
-
-编辑区 Graphviz 的 `sfdp` 就地预览使用同一套 Graphviz；其他 Graphviz 布局使用内置 Viz.js。`qsnote_diagram` 测试真实生成 PlantUML 时序图、类图及 `sfdp` PNG；Windows 测试清空 PATH 后通过 JAVA_HOME 使用系统 Java，并验证 PATH 查找和缺少 Java 的提示；macOS 测试移除 Homebrew 的 shell 路径，验证 Finder 启动时的渲染器查找。
-
-VTextEdit 的语法高亮、Vim、拼写检查和 cmark 依赖均已放入 `third_party/vtextedit/libs`，版本记录见 `third_party/README.md`。系统 Qt 仍由包管理器或 Qt 安装器提供；不要混用不同 Qt 版本的私有头文件。
