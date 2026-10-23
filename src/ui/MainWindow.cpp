@@ -768,11 +768,6 @@ void MainWindow::buildUi() {
         refreshTodoList();
     });
     connect(tree_, &QTreeWidget::customContextMenuRequested, this, &MainWindow::showTreeMenu);
-    connect(tree_, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *item) {
-        const auto id = item->data(0, Qt::UserRole).toString();
-        auto *note = store_.note(id);
-        if (!note || note->folder) item->setExpanded(!item->isExpanded());
-    });
     connect(tree_, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item) {
         const auto id = item->data(0, Qt::UserRole).toString();
         auto *note = store_.note(id);
