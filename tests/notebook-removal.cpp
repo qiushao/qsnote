@@ -2,6 +2,7 @@
 #include <QtWidgets>
 #define private public
 #include "ui/MainWindow.h"
+#include "ui/TodoWorkspace.h"
 #undef private
 
 namespace {
@@ -115,8 +116,8 @@ int main(int argc, char **argv) {
     window.currentNotebookId_ = todos.id;
     window.refreshNotebooks();
     require(window.save(), "save UI todos");
-    window.todoCategoryFilter_ = "A";
-    window.todoStatus_->setCurrentIndex(1);
+    window.todoWorkspace_->todoCategoryFilter_ = "A";
+    window.todoWorkspace_->todoStatus_->setCurrentIndex(1);
     window.search_->setText("no visible matches");
     QTimer dialogs;
     bool blockedWarning = false;
@@ -130,14 +131,15 @@ int main(int argc, char **argv) {
         }
     });
     dialogs.start(10);
-    window.clearCompletedTodos();
+    window.todoWorkspace_->clearCompletedTodos();
     require(window.store_.notebook(todos.id)->notes.size() == 23, "UI batch ignores filter/search/page");
-    window.deleteTodo("todo-1");
+    window.todoWorkspace_->deleteTodo("todo-1");
     require(!window.store_.note("todo-1"), "UI individual todo deletion");
     window.storageReady_ = false;
+    window.refreshNotebooks();
     const auto guardedPath = todos.path + '/' + window.store_.note("todo-3")->path;
     const auto guardedBody = read(guardedPath);
-    window.deleteTodo("todo-3");
+    window.todoWorkspace_->deleteTodo("todo-3");
     require(blockedWarning && window.store_.note("todo-3") && read(guardedPath) == guardedBody, "failed-load guard prevents destructive operation");
     qInfo() << "PASS: folder/ebook/site/todo deletion, descendants/assets, batch, save/cleanup failures, UI sessions";
 }

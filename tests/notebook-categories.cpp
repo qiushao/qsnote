@@ -2,6 +2,7 @@
 #include <QtWidgets>
 #define private public
 #include "ui/MainWindow.h"
+#include "ui/TodoWorkspace.h"
 #undef private
 
 namespace {
@@ -93,16 +94,16 @@ int main(int argc, char **argv) {
     MainWindow window;
     window.show();
     answer("New");
-    window.createTodoCategory();
-    require(window.todoCategoryFilter_ == "New" && window.todoCategory_->findData("New") >= 0, "new todo category selected");
-    window.todoCategoryFilter_ = "Old";
-    window.refreshTodoCategories();
+    window.todoWorkspace_->createTodoCategory();
+    require(window.todoWorkspace_->todoCategoryFilter_ == "New" && window.todoWorkspace_->todoCategory_->findData("New") >= 0, "new todo category selected");
+    window.todoWorkspace_->todoCategoryFilter_ = "Old";
+    window.todoWorkspace_->refreshTodoCategories();
     answer("Renamed");
-    window.renameTodoCategory("Old");
-    require(window.todoCategoryFilter_ == "Renamed" && window.store_.note("task")->metadata["category"] == "Renamed", "todo rename preserves filter");
+    window.todoWorkspace_->renameTodoCategory("Old");
+    require(window.todoWorkspace_->todoCategoryFilter_ == "Renamed" && window.store_.note("task")->metadata["category"] == "Renamed", "todo rename preserves filter");
     confirm();
-    window.deleteTodoCategory("Renamed");
-    require(window.todoCategoryFilter_.isEmpty() && window.store_.note("task")->metadata["category"] == "默认", "todo delete resets filter");
+    window.todoWorkspace_->deleteTodoCategory("Renamed");
+    require(window.todoWorkspace_->todoCategoryFilter_.isEmpty() && window.store_.note("task")->metadata["category"] == "默认", "todo delete resets filter");
 
     window.currentNotebookId_ = "site";
     window.refreshNotebooks();

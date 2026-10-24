@@ -5,6 +5,7 @@
 #define private public
 #include "ui/MainWindow.h"
 #include "ui/MarkdownPreview.h"
+#include "ui/TodoWorkspace.h"
 #undef private
 void require(bool ok, const char *message) {
     if (!ok) qFatal("%s", message);
@@ -76,9 +77,9 @@ int main(int argc, char **argv) {
         dialog->findChild<QLineEdit *>("newTodoTitle")->setText("New todo");
         dialog->accept();
     });
-    window.createTodo();
-    require(window.todoPage_ == 2 && window.todoList_->currentItem()->text(0) == "New todo", "new todo selected on its page");
-    require(window.search_->text().isEmpty() && window.todoTitle_->text() == "New todo", "new todo details and search");
+    window.todoWorkspace_->createTodo();
+    require(window.todoWorkspace_->todoPage_ == 2 && window.todoWorkspace_->todoList_->currentItem()->text(0) == "New todo", "new todo selected on its page");
+    require(window.search_->text().isEmpty() && window.todoWorkspace_->todoTitle_->text() == "New todo", "new todo details and search");
     require(window.tabs_->count() == 1, "todo preserves Markdown tabs");
     QTimer::singleShot(20, &window, [] {
         auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());

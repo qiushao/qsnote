@@ -25,6 +25,8 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         ui/SettingsDialog.h
         ui/SiteConfigDialog.cpp
         ui/SiteConfigDialog.h
+        ui/TodoWorkspace.cpp
+        ui/TodoWorkspace.h
         ui/MarkdownEditor.cpp
         ui/MarkdownEditor.h
         ui/InplacePreview.cpp

@@ -7,18 +7,17 @@
 #include <QSet>
 #include <QStringList>
 
+class TodoWorkspace;
 class MarkdownEditor;
 class MarkdownPreview;
 class QCheckBox;
 class QComboBox;
-class QDateEdit;
 class QLabel;
 class QLineEdit;
 namespace vte {
 class VTextEdit;
 }
 class QPushButton;
-class QPlainTextEdit;
 class QSplitter;
 class QStackedWidget;
 class QTabBar;
@@ -50,16 +49,6 @@ private:
     void refreshTree();
     void refreshEditor();
     void refreshOutline();
-    void buildTodoUi();
-    void refreshTodoCategories(const QString &selectedId = {});
-    void refreshTodoList(const QString &selectedId = {});
-    void refreshTodoDetails();
-    void createTodo();
-    void deleteTodo(const QString &noteId);
-    void clearCompletedTodos();
-    void createTodoCategory();
-    void renameTodoCategory(const QString &name);
-    void deleteTodoCategory(const QString &name);
     void updateStatus();
     void updatePanels();
     void updateResizeHandles();
@@ -124,29 +113,7 @@ private:
     QPushButton *redo_ = nullptr;
     QComboBox *notebooks_ = nullptr;
     QComboBox *groupBy_ = nullptr;
-    QComboBox *todoSort_ = nullptr;
-    QComboBox *todoPriority_ = nullptr;
-    QComboBox *todoStatus_ = nullptr;
-    QWidget *todoListPage_ = nullptr;
-    QPushButton *todoAdd_ = nullptr;
-    QPushButton *todoClearCompleted_ = nullptr;
-    QTreeWidget *todoList_ = nullptr;
-    QLabel *todoHint_ = nullptr;
-    QWidget *todoPagination_ = nullptr;
-    QPushButton *todoPreviousPage_ = nullptr;
-    QPushButton *todoNextPage_ = nullptr;
-    QLabel *todoPageInfo_ = nullptr;
-    int todoPage_ = 0;
-    QWidget *todoDetails_ = nullptr;
-    QLineEdit *todoTitle_ = nullptr;
-    QLabel *todoCreated_ = nullptr;
-    QComboBox *todoCategory_ = nullptr;
-    QCheckBox *todoCompleted_ = nullptr;
-    QCheckBox *todoDueEnabled_ = nullptr;
-    QDateEdit *todoDue_ = nullptr;
-    QPlainTextEdit *todoContent_ = nullptr;
-    QString todoNotebookId_;
-    QString todoCategoryFilter_;
+    TodoWorkspace *todoWorkspace_ = nullptr;
     QLineEdit *search_ = nullptr;
     QTreeWidget *tree_ = nullptr;
     QLabel *treeHint_ = nullptr;
