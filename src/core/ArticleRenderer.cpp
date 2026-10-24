@@ -1,7 +1,8 @@
 #include "ArticleRenderer.h"
-#include <QCoreApplication>
+#include "MathStylesheet.h"
 #include "PlantUmlRenderer.h"
 #include "WebTranslations.h"
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QDirIterator>
@@ -65,20 +66,6 @@ QVariant evaluate(QWebEnginePage &page, const QString &script) {
     timeout.start(60000);
     loop.exec(QEventLoop::ExcludeUserInputEvents);
     return *result;
-}
-QString mathStylesheet() {
-    QFile file(":/web/vendor/katex/katex.min.css");
-    if (!file.open(QIODevice::ReadOnly)) return {};
-    auto css = QString::fromUtf8(file.readAll());
-    const QRegularExpression sources(R"(src:url\(([^)]+\.woff2)\)[^}]+)");
-    auto matches = sources.globalMatch(css);
-    while (matches.hasNext()) {
-        const auto match = matches.next();
-        QFile font(":/web/vendor/katex/" + match.captured(1));
-        if (!font.open(QIODevice::ReadOnly)) return {};
-        css.replace(match.captured(0), "src:url(data:font/woff2;base64," + QString::fromLatin1(font.readAll().toBase64()) + ") format(\"woff2\")");
-    }
-    return css;
 }
 }
 
@@ -196,8 +183,8 @@ bool ArticleRenderer::renderUncached(const QString &markdown, QDomDocument &docu
         if (!message.isEmpty()) { *error = "PlantUML：" + message; return false; }
         plantUml[source] = QString::fromLatin1(png.toBase64());
     }
-    static const auto mathCss = mathStylesheet();
-    if (mathCss.isEmpty()) { *error = QCoreApplication::translate("ArticleRenderer", "无法读取公式字体和样式。"); return false; }
+    const auto mathCss = embeddedMathStylesheet(error);
+    if (mathCss.isEmpty()) { *error = QCoreApplication::translate("ArticleRenderer", "无法读取公式字体和样式。") + "\n" + *error; return false; }
     QEventLoop loop;
     QTimer timeout;
     timeout.setSingleShot(true);

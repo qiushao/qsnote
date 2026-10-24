@@ -64,6 +64,7 @@ private:
     int next_ = 0;
     int graphWidth_ = 0;
     bool ready_ = false;
+    QString mathError_;
     bool busy_ = false;
 };
 

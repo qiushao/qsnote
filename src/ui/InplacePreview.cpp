@@ -1,17 +1,18 @@
 #include "InplacePreview.h"
-#include <QCoreApplication>
 #include "MarkdownEditor.h"
-#include "core/PlantUmlRenderer.h"
 #include "core/DiagramRuntime.h"
+#include "core/MathStylesheet.h"
+#include "core/PlantUmlRenderer.h"
 #include "core/WebTranslations.h"
+#include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QEvent>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
-#include <QSettings>
-#include <QEvent>
 #include <QScrollBar>
+#include <QSettings>
 #include <QWebChannel>
 #include <QWebEnginePage>
 #include <QWebEngineSettings>
@@ -20,25 +21,6 @@
 #include <vtextedit/vtextedit.h>
 
 namespace {
-QString mathStylesheet() {
-    QFile file(":/web/vendor/katex/katex.min.css");
-    if (!file.open(QIODevice::ReadOnly)) return {};
-    auto css = QString::fromUtf8(file.readAll());
-    // SVG images cannot load external fonts. Keep one embedded WOFF2 face per src.
-    const QRegularExpression sources(R"(src:url\(([^)]+\.woff2)\)[^}]+)");
-    auto matches = sources.globalMatch(css);
-    QString embedded;
-    qsizetype offset = 0;
-    while (matches.hasNext()) {
-        const auto match = matches.next();
-        QFile font(":/web/vendor/katex/" + match.captured(1));
-        font.open(QIODevice::ReadOnly);
-        embedded += css.mid(offset, match.capturedStart() - offset);
-        embedded += "src:url(data:font/woff2;base64," + QString::fromLatin1(font.readAll().toBase64()) + ") format(\"woff2\")";
-        offset = match.capturedEnd();
-    }
-    return embedded + css.mid(offset);
-}
 
 QString graphLanguage(const QString &info) {
     const auto language = info.section(QRegularExpression("\\s+"), 0, 0).toLower();
@@ -186,7 +168,9 @@ void InplacePreview::ready(const QVariantMap &styles) {
     }
     MarkdownEditor::setExternalCodeBlockHighlihgtStyles(formats);
     ready_ = true;
-    emit stylesheetReady(mathStylesheet());
+    mathError_.clear();
+    const auto css = embeddedMathStylesheet(&mathError_);
+    if (!css.isEmpty()) emit stylesheetReady(css);
     editor_->getHighlighter()->updateHighlight();
     renderNext();
 }
@@ -249,6 +233,10 @@ void InplacePreview::renderNext() {
     }
     ensurePage();
     if (!ready_) return;
+    if ((request.language == "math" || request.language == "mathjax") && !mathError_.isEmpty()) {
+        rendered(generation_, next_, {}, 0, 0, mathError_);
+        return;
+    }
     busy_ = true;
     const QJsonObject data{{"generation", generation_}, {"index", next_}, {"language", request.language}, {"text", request.text}, {"display", request.display}, {"fontSize", editor_->editorFontPointSize() * editor_->logicalDpiY() / 72.0}, {"zoom", static_cast<double>(editor_->editorFontPointSize()) / editor_->baseEditorFontPointSize()}, {"color", QColor(editor_->theme()->editorStyle(vte::Theme::Text).m_textColor).name()}, {"scale", editor_->devicePixelRatioF()}, {"graphWidth", graphWidth()}};
     emit renderRequested(QString::fromUtf8(QJsonDocument(data).toJson(QJsonDocument::Compact)));

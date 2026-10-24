@@ -68,12 +68,12 @@
 
 ### T06 [P2] 合并 KaTeX 字体内嵌处理
 
-- [ ] 完成
+- [x] 完成
 - 依赖：无。
 - 位置：`src/ui/InplacePreview.cpp`、`src/core/ArticleRenderer.cpp` 中的 `mathStylesheet()`。
 - 工作：提取共享 CSS 与 WOFF2 字体内嵌函数，统一资源读取失败处理；让两种调用方根据各自流程反馈错误。
 - 验收：行内公式、块公式在就地预览与导出中显示正常；生成结果无需外部字体；资源读取失败不被静默处理为有效字体数据。
-- 验证记录：待填写。
+- 验证记录：共享 embeddedMathStylesheet 只缓存完整结果；读取错误包含资源路径，导出返回失败，就地预览沿既有 rendered 错误通道反馈。`cmake --build build --parallel 4` 和 `python3 tests/run-regression.py tests/math-stylesheet.cpp` 通过；用临时 Qt 资源复现 CSS/字体缺失，验证无部分 CSS 返回，所有 WOFF2 均内嵌且无外部字体引用，行内/块/围栏公式在导出与就地预览中均生成图片。
 
 ## 第二阶段：收拢核心业务操作
 

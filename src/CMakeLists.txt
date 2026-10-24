@@ -31,6 +31,8 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         core/AtomicFile.cpp
         core/AtomicFile.h
         core/ArticleRenderer.cpp
+        core/MathStylesheet.cpp
+        core/MathStylesheet.h
         core/EbookExporter.cpp
         core/EbookExporter.h
         core/PlantUmlRenderer.cpp
