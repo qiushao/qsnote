@@ -1,5 +1,7 @@
 #include "MainWindow.h"
 #include "PostPropertiesDialog.h"
+#include "SettingsDialog.h"
+#include "OverlayDialog.h"
 #include "core/NotebookCategories.h"
 #include "core/ChapterOperations.h"
 #include "UiStyle.h"
@@ -12,8 +14,6 @@
 #include "core/EbookExporter.h"
 #include "core/UpdateChecker.h"
 #include <QDesktopServices>
-#include <QFontComboBox>
-#include <QSpinBox>
 #include <QSystemTrayIcon>
 #include <QSettings>
 #include <QStandardPaths>
@@ -54,7 +54,6 @@
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPainter>
-#include <QPainterPath>
 #include <vtextedit/vtextedit.h>
 #include <vtextedit/vmarkdowneditor.h>
 #include <vtextedit/previewmgr.h>
@@ -80,30 +79,6 @@
 #include <functional>
 
 namespace {
-QVBoxLayout *column(QWidget *widget, int margin = 0, int spacing = 0) {
-    auto *layout = new QVBoxLayout(widget);
-    layout->setContentsMargins(margin, margin, margin, margin);
-    layout->setSpacing(spacing);
-    return layout;
-}
-QHBoxLayout *row(QWidget *widget, int horizontal = 10, int vertical = 8, int spacing = 6) {
-    auto *layout = new QHBoxLayout(widget);
-    layout->setContentsMargins(horizontal, vertical, horizontal, vertical);
-    layout->setSpacing(spacing);
-    return layout;
-}
-QLabel *label(const QString &text, QWidget *parent, bool dim = false) {
-    auto *result = new QLabel(text, parent);
-    result->setProperty("dim", dim);
-    result->setWordWrap(true);
-    return result;
-}
-QPushButton *button(const QString &text, const QString &name, QWidget *parent) {
-    auto *result = new QPushButton(text, parent);
-    result->setObjectName(name);
-    result->setCursor(Qt::PointingHandCursor);
-    return result;
-}
 QString defaultExportDirectory() {
     auto documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     if (documents.isEmpty()) documents = QDir::homePath();
@@ -300,43 +275,6 @@ protected:
     }
 };
 
-// Parent-owned scrim keeps the dialogs visually inside the application.
-class OverlayDialog : public QDialog {
-public:
-    OverlayDialog(QWidget *parent, const QString &name, bool wide = false) : QDialog(parent), scrim_(new QWidget(parent)) {
-        setObjectName(name);
-        setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
-        if (name == "settingsDialog") {
-            setAttribute(Qt::WA_TranslucentBackground);
-            setAttribute(Qt::WA_StyledBackground);
-        }
-        setModal(true);
-        scrim_->setStyleSheet("background: rgba(0,0,0,77);");
-        scrim_->setGeometry(parent->rect());
-        scrim_->show();
-        scrim_->raise();
-        const int preferred = wide ? 660 : 380;
-        resize(qMin(preferred, parent->width() * 92 / 100), wide ? parent->height() * 80 / 100 : qMin(280, parent->height() * 80 / 100));
-        setMaximumSize(parent->size() * 0.92);
-    }
-    ~OverlayDialog() override { delete scrim_; }
-
-protected:
-    void resizeEvent(QResizeEvent *event) override {
-        QDialog::resizeEvent(event);
-        if (testAttribute(Qt::WA_TranslucentBackground)) return;
-        QPainterPath shape;
-        shape.addRoundedRect(QRectF(rect()), 4, 4);
-        setMask(QRegion(shape.toFillPolygon().toPolygon()));
-    }
-    void showEvent(QShowEvent *event) override {
-        QDialog::showEvent(event);
-        move(parentWidget()->mapToGlobal(parentWidget()->rect().center()) - rect().center());
-    }
-
-private:
-    QWidget *scrim_;
-};
 
 }// namespace
 
@@ -2286,142 +2224,14 @@ void MainWindow::checkForUpdates(QLabel *status) {
 }
 
 void MainWindow::showSettings() {
-    OverlayDialog dialog(this, "settingsDialog", true);
-    auto *layout = column(&dialog);
-    auto *bar = new QWidget(&dialog);
-    bar->setObjectName("dialogBar");
-    auto *barLayout = row(bar, 16, 11);
-    auto *title = label(tr("设置"), bar);
-    title->setProperty("dialogTitle", true);
-    barLayout->addWidget(title);
-    barLayout->addStretch();
-    auto *close = button(tr("关闭"), "closeSettings", bar);
-    barLayout->addWidget(close);
-    layout->addWidget(bar);
-    auto *navigation = new QWidget(&dialog);
-    navigation->setObjectName("settingsNavigation");
-    auto *navigationLayout = row(navigation, 16, 10);
-    auto *sections = new QTabBar(navigation);
-    sections->setObjectName("settingsTabs");
-    sections->setExpanding(false);
-    sections->setDrawBase(false);
-    sections->setUsesScrollButtons(true);
-    sections->setElideMode(Qt::ElideNone);
-    navigationLayout->addWidget(sections);
-    layout->addWidget(navigation);
-    auto *scroll = new QScrollArea(&dialog);
-    scroll->setWidgetResizable(true);
-    auto *body = new QWidget(scroll);
-    body->setObjectName("configBody");
-    auto *cards = column(body, 20, 16);
-    auto section = [&](const QString &name, const QString &caption) {
-        auto *card = new QWidget(body);
-        card->setObjectName(name);
-        card->setProperty("configCard", true);
-        card->setAttribute(Qt::WA_StyledBackground, true);
-        auto *content = column(card, 18, 12);
-        auto *title = label(caption, card);
-        title->setProperty("heading", true);
-        content->addWidget(title);
-        cards->addWidget(card);
-        card->setVisible(sections->addTab(caption) == 0);
-        return content;
-    };
-    QSettings settings;
-    auto *general = section("generalSettingsCard", tr("常用设置"));
-    auto *fields = new QFormLayout;
-    fields->setSpacing(12);
-    fields->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    fields->setRowWrapPolicy(QFormLayout::WrapLongRows);
-    fields->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-    auto *language = new QComboBox(body);
-    language->setObjectName("uiLanguage");
-    language->addItem(tr("跟随系统"), "system");
-    language->addItem("简体中文", "zh_CN");
-    language->addItem("English", "en_US");
-    language->setCurrentIndex(qMax(0, language->findData(settings.value("General/language", "system"))));
-    fields->addRow(tr("语言"), language);
-    auto *font = new QFontComboBox(body);
-    font->setObjectName("uiFontFamily");
-    font->setCurrentFont(QFont(settings.value("General/uiFontFamily", this->font().family()).toString()));
-    font->setMinimumWidth(0);
-    font->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
-    auto *fontSize = new QSpinBox(body);
-    fontSize->setObjectName("uiFontSize");
-    fontSize->setRange(10, 24);
-    fontSize->setValue(settings.value("General/uiFontSize", 14).toInt());
-    fields->addRow(tr("UI 字体"), font);
-    fields->addRow(tr("UI 字号（px）"), fontSize);
-    general->addLayout(fields);
-    auto *tray = new QCheckBox(tr("关闭时最小化到系统托盘"), body);
-    tray->setObjectName("minimizeToTray");
-    tray->setChecked(settings.value("General/minimizeToTray", false).toBool());
-    general->addWidget(tray);
-    general->addWidget(label(tr("托盘菜单可恢复窗口或退出；系统没有可用托盘时正常退出。"), body, true));
-    auto *updates = new QCheckBox(tr("启动时检查更新"), body);
-    updates->setObjectName("checkUpdatesOnStartup");
-    updates->setChecked(settings.value("General/checkUpdatesOnStartup", true).toBool());
-    general->addWidget(updates);
-    general->addWidget(label(tr("通过 GitHub 检查新版本，有更新时提示下载。"), body, true));
-    general->addWidget(label(tr("设置保存后生效。语言设置在重启后生效。"), body, true));
-
-    auto *editorCard = section("editorSettingsCard", tr("编辑器设置"));
-    // An empty workspace still allows editing the same settings as an open note.
-    auto *settingsEditor = markdownEditor_;
-    if (!settingsEditor) {
-        settingsEditor = new MarkdownEditor(&dialog);
-        settingsEditor->hide();
-        connect(settingsEditor, &MarkdownEditor::settingsChanged, this, [this] {
-            for (const auto &session: editorSessions_) session.editor->reloadSettings();
-        });
-    }
-    std::function<void()> applyEditor;
-    editorCard->addWidget(label(tr("应用于所有笔记。"), body, true));
-    editorCard->addWidget(settingsEditor->createSettingsPage(body, applyEditor));
-
-    auto *about = section("aboutSettingsCard", tr("关于"));
-    about->addWidget(label("qsnote", body));
-    about->addWidget(label(tr("版本 %1").arg(QCoreApplication::applicationVersion()), body, true));
-    about->addWidget(label(tr("本地 Markdown 笔记、静态站点、电子书与待办管理。"), body, true));
-    auto *check = button(tr("检查更新"), "checkUpdates", body);
-    about->addWidget(check, 0, Qt::AlignLeft);
-    auto *updateStatus = label("", body, true);
-    updateStatus->setObjectName("updateStatus");
-    updateStatus->setTextFormat(Qt::PlainText);
-    about->addWidget(updateStatus);
-    connect(check, &QPushButton::clicked, &dialog, [this, updateStatus] { checkForUpdates(updateStatus); });
-    auto *project = label(tr("<a href=\"https://github.com/qiushao/qsnote\">项目主页</a> · <a href=\"https://github.com/qiushao/qsnote/releases/latest\">版本下载</a>"), body);
-    project->setOpenExternalLinks(true);
-    about->addWidget(project);
-    cards->addStretch();
-    scroll->setWidget(body);
-    layout->addWidget(scroll, 1);
-    connect(sections, &QTabBar::currentChanged, &dialog, [cards, scroll](int index) {
-        for (int i = 0; i < cards->count() - 1; ++i) cards->itemAt(i)->widget()->setVisible(i == index);
-        scroll->verticalScrollBar()->setValue(0);
-    });
-    auto *footer = new QWidget(&dialog);
-    footer->setObjectName("dialogFooter");
-    auto *footerLayout = row(footer, 16, 12);
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, footer);
-    buttons->button(QDialogButtonBox::Save)->setText(tr("保存"));
-    setPrimaryButton(buttons->button(QDialogButtonBox::Save));
-    buttons->button(QDialogButtonBox::Cancel)->setText(tr("取消"));
-    footerLayout->addWidget(buttons);
-    layout->addWidget(footer);
-    connect(close, &QPushButton::clicked, &dialog, &QDialog::reject);
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    SettingsDialog dialog(markdownEditor_, this);
+    connect(&dialog, &SettingsDialog::updateCheckRequested, this, &MainWindow::checkForUpdates);
     if (dialog.exec() != QDialog::Accepted) return;
-    settings.setValue("General/language", language->currentData());
-    settings.setValue("General/uiFontFamily", font->currentFont().family());
-    settings.setValue("General/uiFontSize", fontSize->value());
-    settings.setValue("General/minimizeToTray", tray->isChecked());
-    settings.setValue("General/checkUpdatesOnStartup", updates->isChecked());
-    settings.sync();
     applyUiSettings();
-    applyEditor();
-    tray_->setVisible(tray->isChecked() && QSystemTrayIcon::isSystemTrayAvailable());
+    if (!markdownEditor_) {
+        for (const auto &session: editorSessions_) session.editor->reloadSettings();
+    }
+    tray_->setVisible(QSettings().value("General/minimizeToTray", false).toBool() && QSystemTrayIcon::isSystemTrayAvailable());
 }
 
 void MainWindow::createNotebook() {

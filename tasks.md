@@ -120,13 +120,13 @@
 
 ### T11 [P2] 提取应用设置对话框
 
-- [ ] 完成
+- [x] 完成
 - 依赖：无。
 - 位置：`MainWindow::showSettings()`、匿名命名空间中的 `OverlayDialog`，以及 `MarkdownEditor::createSettingsPage()`。
 - 工作：提取 `SettingsDialog`；按实际复用需要移出 `OverlayDialog`；主窗口保留设置生效后的窗口协调，更新检查通过明确接口连接。
 - 边界：复用已有编辑器设置页面；保留无打开笔记时可设置编辑器的能力；保留语言重启生效、保存/取消等行为。
 - 验收：UI 字体、字号、语言、托盘、启动更新选项及编辑器设置正常；取消不应用表单修改；英文界面和翻译上下文正确。
-- 验证记录：待填写。
+- 验证记录：SettingsDialog 拥有表单及保存/取消逻辑，复用 MarkdownEditor 设置页，空工作区创建对话框自有隐藏编辑器；更新请求通过信号连接。OverlayDialog 独立复用，共享布局辅助函数迁入 UiStyle；主窗口协调样式与托盘。保留 MainWindow 翻译上下文。`cmake --build build --parallel 4`、`tests/settings-dialog.cpp`、`tests/notebook-categories.cpp` 通过；覆盖空/多标签编辑器、保存前及取消不改配置、UI 字体样式、字号/语言/托盘/更新设置、编辑器同步、语言重启生效、更新信号与英文界面。
 
 ### T12 [P2] 提取站点配置对话框
 
