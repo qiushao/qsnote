@@ -355,10 +355,17 @@ bool NotebookStore::loadNotebook(Notebook &book, QString *error) {
         note.metadata = item["metadata"].toObject();
         if (!note.folder) {
             QFile content(root.absoluteFilePath(note.path));
-            if (content.open(QIODevice::ReadOnly)) {
-                note.content = QString::fromUtf8(content.readAll());
-                if (book.type == "site") note.content = StaticSite::postBody(note.content);
+            if (!content.open(QIODevice::ReadOnly)) {
+                *error = content.fileName() + ": " + content.errorString();
+                return false;
             }
+            const auto bytes = content.readAll();
+            if (content.error() != QFileDevice::NoError) {
+                *error = content.fileName() + ": " + content.errorString();
+                return false;
+            }
+            note.content = QString::fromUtf8(bytes);
+            if (book.type == "site") note.content = StaticSite::postBody(note.content);
         }
         loaded.append(note);
     }
