@@ -51,7 +51,7 @@ private:
     void refreshEditor();
     void refreshOutline();
     void buildTodoUi();
-    void refreshTodoCategories();
+    void refreshTodoCategories(const QString &selectedId = {});
     void refreshTodoList(const QString &selectedId = {});
     void refreshTodoDetails();
     void createTodo();

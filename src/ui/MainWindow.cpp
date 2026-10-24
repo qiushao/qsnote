@@ -396,7 +396,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         currentNotebookId_ = store_.notebooks.first().id;
     }
     refreshNotebooks();
-    refreshEditor();
     // 标签页延迟到窗口显示后恢复：构造期间加入的标签不会触发父布局重算，标签栏会保持 0 高度不可见。
     QTimer::singleShot(0, this, [this, savedOpenNotes, savedNoteId] {
         for (const auto &id: savedOpenNotes) {
@@ -1164,7 +1163,7 @@ void MainWindow::buildTodoUi() {
     });
 }
 
-void MainWindow::refreshTodoCategories() {
+void MainWindow::refreshTodoCategories(const QString &selectedId) {
     const auto *book = store_.notebook(currentNotebookId_);
     if (!book || book->type != "todo") return;
     if (todoNotebookId_ != book->id) {
@@ -1198,7 +1197,7 @@ void MainWindow::refreshTodoCategories() {
         item->setData(0, Qt::UserRole, filter);
         if (filter == todoCategoryFilter_) tree_->setCurrentItem(item);
     }
-    refreshTodoList();
+    refreshTodoList(selectedId);
 }
 
 void MainWindow::refreshTodoList(const QString &selectedId) {
@@ -1341,11 +1340,14 @@ void MainWindow::createTodo() {
                      {"created", QDateTime::currentDateTime().toString(Qt::ISODate)}};
     book->notes.append(note);
     save();
-    search_->clear();
-    todoStatus_->setCurrentIndex(0);
+    {
+        const QSignalBlocker searchBlocker(search_);
+        const QSignalBlocker statusBlocker(todoStatus_);
+        search_->clear();
+        todoStatus_->setCurrentIndex(0);
+    }
     if (!todoCategoryFilter_.isEmpty()) todoCategoryFilter_ = category->currentData().toString();
-    refreshTodoCategories();
-    refreshTodoList(note.id);
+    refreshTodoCategories(note.id);
     todoTitle_->setFocus();
 }
 
@@ -2552,7 +2554,6 @@ void MainWindow::closeNotebook() {
     save();
     search_->clear();
     refreshNotebooks();
-    refreshEditor();
 }
 
 QStringList MainWindow::siteCategories(const Notebook &book) {

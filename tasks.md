@@ -39,12 +39,12 @@
 
 ### T03 [P3] 消除重复刷新调用
 
-- [ ] 完成
+- [x] 完成
 - 依赖：无。
 - 位置：`src/ui/MainWindow.cpp` 的构造函数、`closeNotebook()`、`refreshNotebooks()`、`createTodo()`、`refreshTodoCategories()`、`refreshTodoList()`。
 - 工作：清理 `refreshNotebooks()` 后重复调用 `refreshEditor()` 的路径；让创建待办后的分类和列表刷新传递选中 ID，避免重复重建列表。
 - 验收：启动恢复、关闭笔记本和创建待办后的界面正确；新待办仍被选中且定位到正确分页；大纲、树节点选择和折叠状态不回退。
-- 验证记录：待填写。
+- 验证记录：`cmake --build build --parallel 4` 通过；工作区回归（保存为 `tests/workspace-state.cpp`，通过 `tests/run-regression.py` 运行）验证启动标签与大纲恢复、树选中与非活动文件夹折叠状态、45 项待办中新建事项跨页定位及选中、清空搜索后详情同步、关闭待办笔记本恢复 Markdown 标签。创建时阻断重置搜索/状态触发的中间刷新，由分类刷新统一传入选中 ID。
 
 ### T04 [P3] 清理派生状态与闲置接口
 
