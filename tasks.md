@@ -160,13 +160,13 @@
 
 ### T15 [P2] 提取电子书导出对话框
 
-- [ ] 完成
+- [x] 完成
 - 依赖：无。
 - 位置：`MainWindow::exportNotebook()` 的电子书分支、`defaultExportDirectory()`。
 - 工作：提取 `EbookExportDialog`，迁移范围、格式、目录选择、校验和进度展示；继续调用已有 `EbookExporter`。让站点发布与电子书导出拥有独立入口，主窗口负责分派。
 - 边界：保留导出包含未保存编辑内容的快照语义、目录记忆及同名文件追加序号行为。
 - 验收：普通笔记本和电子书的整本/当前文档导出正确；HTML、EPUB、PDF 可验证，CHM 在编译器可用时验证；缺少 CHM 编译器时提示正确；站点发布入口不受影响。
-- 验证记录：待填写。
+- 验证记录：EbookExportDialog 接管范围/格式/目录、校验与进度，主窗口分派到电子书导出或独立 publishSite 入口；接受表单后复制当前内存快照，不强制保存。`cmake --build build --parallel 4` 与 `python3 tests/run-regression.py tests/ebook-export-dialog.cpp` 通过；普通/电子书的整本和当前文档均实际生成 HTML、EPUB、PDF、CHM，检查未保存正文、范围、同名追加序号、目录记忆/取消、缺少 CHM 编译器提示及主窗口导出/站点发布校验分派。
 
 ### T16 [P2] 提取编辑器工作区与会话状态
 

@@ -89,6 +89,7 @@ private:
     void showSiteConfig();
     void showSitePreview();
     void exportNotebook();
+    void publishSite(const Notebook &book);
     bool save();
     bool saveEditors();
     void applyRemoval(const NotebookStore::RemovalResult &result);

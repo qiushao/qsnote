@@ -3,6 +3,7 @@
 #include "SettingsDialog.h"
 #include "SiteConfigDialog.h"
 #include "SitePreviewDialog.h"
+#include "EbookExportDialog.h"
 #include "TodoWorkspace.h"
 #include "OverlayDialog.h"
 #include "core/NotebookCategories.h"
@@ -14,12 +15,10 @@
 #include "core/StaticSite.h"
 #include "core/ArticleRenderer.h"
 #include "core/SitePublisher.h"
-#include "core/EbookExporter.h"
 #include "core/UpdateChecker.h"
 #include <QDesktopServices>
 #include <QSystemTrayIcon>
 #include <QSettings>
-#include <QStandardPaths>
 #include <QProgressDialog>
 #include <QMimeDatabase>
 #include <QMimeData>
@@ -73,11 +72,6 @@
 #include <functional>
 
 namespace {
-QString defaultExportDirectory() {
-    auto documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    if (documents.isEmpty()) documents = QDir::homePath();
-    return documents + "/qsnote_exports";
-}
 QIcon icon(const QString &kind) {
     static const QHash<QString, QString> files = {
         {"left", "panel-left"}, {"leftCollapsed", "panel-left-collapsed"},
@@ -2004,112 +1998,40 @@ void MainWindow::showSitePreview() {
 
 void MainWindow::exportNotebook() {
     const auto *book = store_.notebook(currentNotebookId_);
-    if (!book || (book->type != "normal" && book->type != "site" && book->type != "ebook")) return;
+    if (!book) return;
     if (book->type == "site") {
-        QString error;
-        if (!SitePublisher::validate(*book, &error)) {
-            QMessageBox::warning(this, tr("发布设置不完整"), error);
-            showSiteConfig();
-            return;
-        }
-        if (!generateSite(*book)) return;
-        const auto snapshot = *book;
-        QProgressDialog progress(tr("正在发布站点…"), QString(), 0, 0, this);
-        progress.setObjectName("sitePublishDialog");
-        progress.setWindowTitle(tr("发布站点"));
-        progress.setWindowModality(Qt::ApplicationModal);
-        progress.setCancelButton(nullptr);
-        progress.setMinimumDuration(0);
-        progress.show();
-        const bool ok = SitePublisher::publish(snapshot, &error);
-        progress.close();
-        if (!ok) {
-            status_->setText(tr("站点发布失败"));
-            QMessageBox::warning(this, tr("站点发布失败"), error);
-            return;
-        }
-        status_->setText(snapshot.config["publishMethod"].toString() == "github"
-            ? tr("已推送至 GitHub Pages 发布分支，等待 GitHub 部署完成")
-            : tr("站点已通过 SSH SCP 上传"));
+        publishSite(*book);
+    } else if (book->type == "normal" || book->type == "ebook") {
+        EbookExportDialog dialog(*book, currentNoteId(), this);
+        const auto path = dialog.run();
+        if (!path.isEmpty()) status_->setText(tr("已导出至 ") + path);
+    }
+}
+
+void MainWindow::publishSite(const Notebook &book) {
+    QString error;
+    if (!SitePublisher::validate(book, &error)) {
+        QMessageBox::warning(this, tr("发布设置不完整"), error);
+        showSiteConfig();
         return;
     }
-    QDialog dialog(this);
-    dialog.setObjectName("ebookExportDialog");
-    dialog.setWindowTitle(tr("导出电子书"));
-    dialog.resize(560, 300);
-    auto *layout = column(&dialog, 20, 16);
-    auto *form = new QFormLayout;
-    form->setSpacing(12);
-    form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    form->setRowWrapPolicy(QFormLayout::WrapLongRows);
-    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-    auto *scope = new QComboBox(&dialog);
-    scope->setObjectName("exportScope");
-    scope->addItem((book->type == "normal" ? tr("整本笔记本 · ") : tr("整本电子书 · ")) + book->name, QString());
-    const auto *note = store_.note(currentNoteId());
-    if (note && !note->folder && store_.owner(note->id) == book) scope->addItem(tr("当前文档 · ") + note->title, note->id);
-    auto *format = new QComboBox(&dialog);
-    format->setObjectName("exportFormat");
-    format->addItem(tr("EPUB · 电子书"), int(EbookExporter::Format::Epub));
-    format->addItem(tr("PDF · 打印文档"), int(EbookExporter::Format::Pdf));
-    format->addItem(tr("CHM · 帮助文档"), int(EbookExporter::Format::Chm));
-    format->addItem(tr("HTML · 网页"), int(EbookExporter::Format::Html));
-    auto *directoryRow = new QWidget(&dialog);
-    auto *directoryLayout = row(directoryRow, 0, 0);
-    const auto defaultDirectory = defaultExportDirectory();
-    QDir().mkpath(defaultDirectory);
-    auto *directory = new QLineEdit(QSettings().value("ebookExport/directory", defaultDirectory).toString(), directoryRow);
-    directory->setObjectName("exportDirectory");
-    auto *browse = button(tr("浏览…"), "browseExportDirectory", directoryRow);
-    directoryLayout->addWidget(directory, 1);
-    directoryLayout->addWidget(browse);
-    connect(browse, &QPushButton::clicked, &dialog, [&] {
-        const auto selected = QFileDialog::getExistingDirectory(&dialog, tr("选择保存目录"), directory->text());
-        if (!selected.isEmpty()) directory->setText(selected);
-    });
-    form->addRow(tr("导出范围"), scope);
-    form->addRow(tr("导出格式"), format);
-    form->addRow(tr("保存目录"), directoryRow);
-    layout->addLayout(form);
-    layout->addWidget(label(tr("整本导出保留章节层级和顺序；当前文档仅导出该文档。已有同名文件时自动添加序号。"), &dialog, true));
-    auto *hint = label({}, &dialog, true);
-    hint->setObjectName("exportHint");
-    layout->addWidget(hint);
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
-    auto *confirm = buttons->button(QDialogButtonBox::Save);
-    confirm->setObjectName("confirmExport");
-    setPrimaryButton(confirm);
-    confirm->setText(tr("导出"));
-    buttons->button(QDialogButtonBox::Cancel)->setText(tr("取消"));
-    const auto validate = [&] {
-        const bool missingCompiler = format->currentData().toInt() == int(EbookExporter::Format::Chm) && EbookExporter::chmCompiler().isEmpty();
-        const bool validDirectory = QFileInfo(directory->text().trimmed()).isDir();
-        hint->setText(missingCompiler ? tr("CHM 需要安装 Free Pascal 的 chmcmd（Linux：fp-utils）；Windows 也可将 HTML Help Workshop 的 hhc 加入 PATH。")
-                                    : !validDirectory ? tr("请选择已有的保存目录。") : book->notes.isEmpty() ? (book->type == "normal" ? tr("笔记本中还没有笔记。") : tr("电子书中还没有章节。")) : QString());
-        confirm->setEnabled(!missingCompiler && validDirectory && !book->notes.isEmpty());
-    };
-    connect(format, &QComboBox::currentIndexChanged, &dialog, validate);
-    connect(directory, &QLineEdit::textChanged, &dialog, validate);
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    layout->addStretch();
-    layout->addWidget(buttons);
-    validate();
-    if (dialog.exec() != QDialog::Accepted) return;
-    const auto destination = directory->text().trimmed();
-    QSettings().setValue("ebookExport/directory", destination);
-    // Editor changes already update store_ synchronously; export that snapshot, including unsaved edits.
-    const auto snapshot = *book;
-    QProgressDialog progress(tr("正在导出电子书…"), QString(), 0, 0, this);
-    progress.setWindowTitle(tr("导出电子书"));
+    if (!generateSite(book)) return;
+    const auto snapshot = book; // NOLINT(performance-unnecessary-copy-initialization): Publishing processes events; retain the snapshot.
+    QProgressDialog progress(tr("正在发布站点…"), QString(), 0, 0, this);
+    progress.setObjectName("sitePublishDialog");
+    progress.setWindowTitle(tr("发布站点"));
     progress.setWindowModality(Qt::ApplicationModal);
     progress.setCancelButton(nullptr);
     progress.setMinimumDuration(0);
     progress.show();
-    QString error;
-    const auto path = EbookExporter::exportBook(snapshot, scope->currentData().toString(),
-        static_cast<EbookExporter::Format>(format->currentData().toInt()), destination, &error);
+    const bool ok = SitePublisher::publish(snapshot, &error);
     progress.close();
-    if (path.isEmpty()) QMessageBox::warning(this, tr("导出失败"), error);
-    else status_->setText(tr("已导出至 ") + path);
+    if (!ok) {
+        status_->setText(tr("站点发布失败"));
+        QMessageBox::warning(this, tr("站点发布失败"), error);
+        return;
+    }
+    status_->setText(snapshot.config["publishMethod"].toString() == "github"
+        ? tr("已推送至 GitHub Pages 发布分支，等待 GitHub 部署完成")
+        : tr("站点已通过 SSH SCP 上传"));
 }
