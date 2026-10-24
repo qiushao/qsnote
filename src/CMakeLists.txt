@@ -30,6 +30,8 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         core/NotebookStore.cpp
         core/NotebookCategories.cpp
         core/NotebookCategories.h
+        core/ChapterOperations.cpp
+        core/ChapterOperations.h
         core/AtomicFile.cpp
         core/AtomicFile.h
         core/ArticleRenderer.cpp

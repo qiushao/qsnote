@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "core/NotebookCategories.h"
+#include "core/ChapterOperations.h"
 #include "UiStyle.h"
 #include "FlowLayout.h"
 #include "MarkdownEditor.h"
@@ -2673,49 +2674,19 @@ void MainWindow::showTreeMenu(const QPoint &position) {
     if (book && note && book->type == "ebook") {
         menu.addAction(tr("添加子章节"), this, [this, id] { createNote(id, false); });
         menu.addSeparator();
-        QList<int> siblings;
-        int current = -1;
-        for (int index = 0; index < book->notes.size(); ++index) {
-            if (book->notes[index].parentId != note->parentId) continue;
-            if (book->notes[index].id == id) current = static_cast<int>(siblings.size());
-            siblings.append(index);
-        }
-        for (int direction: {-1, 1}) {
-            auto *action = menu.addAction(direction < 0 ? tr("上移") : tr("下移"));
-            const int target = current + direction;
-            action->setEnabled(target >= 0 && target < siblings.size());
-            connect(action, &QAction::triggered, this, [this, book, siblings, current, target] {
-                book->notes.swapItemsAt(siblings[current], siblings[target]);
+        const auto addMove = [this, book, id, &menu](const QString &title, ChapterOperations::Move movement) {
+            auto *action = menu.addAction(title);
+            action->setEnabled(ChapterOperations::canMove(*book, id, movement));
+            connect(action, &QAction::triggered, this, [this, book, id, movement] {
+                if (!ChapterOperations::move(*book, id, movement)) return;
                 save();
                 refreshTree();
             });
-        }
-        auto *indent = menu.addAction(tr("缩进为子章节"));
-        indent->setEnabled(current > 0);
-        connect(indent, &QAction::triggered, this, [this, book, id, siblings, current] {
-            store_.note(id)->parentId = book->notes[siblings[current - 1]].id;
-            save();
-            refreshTree();
-        });
-        auto *outdent = menu.addAction(tr("提升层级"));
-        outdent->setEnabled(!note->parentId.isEmpty());
-        connect(outdent, &QAction::triggered, this, [this, id] {
-            auto *target = store_.note(id);
-            const auto *parent = store_.note(target->parentId);
-            if (parent) {
-                auto *owner = store_.owner(id);
-                int sourceIndex = 0;
-                int parentIndex = 0;
-                for (int index = 0; index < owner->notes.size(); ++index) {
-                    if (owner->notes[index].id == id) sourceIndex = index;
-                    if (owner->notes[index].id == parent->id) parentIndex = index;
-                }
-                target->parentId = parent->parentId;
-                owner->notes.move(sourceIndex, sourceIndex < parentIndex ? parentIndex : parentIndex + 1);
-            }
-            save();
-            refreshTree();
-        });
+        };
+        addMove(tr("上移"), ChapterOperations::Move::Up);
+        addMove(tr("下移"), ChapterOperations::Move::Down);
+        addMove(tr("缩进为子章节"), ChapterOperations::Move::Indent);
+        addMove(tr("提升层级"), ChapterOperations::Move::Outdent);
     }
     if (book && note) {
         if (!menu.actions().isEmpty()) menu.addSeparator();
