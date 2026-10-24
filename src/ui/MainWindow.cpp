@@ -446,7 +446,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         markdownEditor_->showFindReplace();
     });
     auto *mode = new QShortcut(QKeySequence("Ctrl+E"), this);
-    connect(mode, &QShortcut::activated, this, [this] { setPreview(!previewModeEnabled_); });
+    connect(mode, &QShortcut::activated, this, [this] { setPreview(viewMode_ != ViewMode::Preview); });
     auto *saveShortcut = new QShortcut(QKeySequence::Save, this);
     connect(saveShortcut, &QShortcut::activated, this, [this] { save(); });
     auto *escape = new QShortcut(QKeySequence(Qt::Key_Escape), search_);
@@ -802,7 +802,7 @@ void MainWindow::buildUi() {
     });
     connect(outline_, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *item) {
         const int line = item->data(0, Qt::UserRole).toInt();
-        if (previewModeEnabled_) {
+        if (viewMode_ == ViewMode::Preview) {
             preview_->scrollToLine(line);
         } else {
             editor_->setTextCursor(QTextCursor(editor_->document()->findBlockByNumber(line)));
@@ -1915,7 +1915,6 @@ void MainWindow::setViewMode(ViewMode mode) {
     const QScopedValueRollback<bool> guard(syncingPreviewScroll_, true);
     viewMode_ = mode;
     markdownEditor_->setSplitMode(mode == ViewMode::Split);
-    previewModeEnabled_ = mode == ViewMode::Preview;
     editMode_->setChecked(mode == ViewMode::Edit);
     previewMode_->setChecked(mode == ViewMode::Preview);
     splitMode_->setChecked(mode == ViewMode::Split);
@@ -1969,7 +1968,8 @@ void MainWindow::refreshOutline() {
 void MainWindow::updateStatus() {
     const auto *note = documentNote(currentNoteId());
     if (!note) return;
-    status_->setText(tr("%1 字 · %2 行 · %3").arg(note->content.size()).arg(note->content.count('\n') + 1).arg(viewMode_ == ViewMode::Split ? tr("分屏") : previewModeEnabled_ ? tr("预览") : tr("编辑中")));
+    status_->setText(tr("%1 字 · %2 行 · %3").arg(note->content.size()).arg(note->content.count('\n') + 1).arg(viewMode_ == ViewMode::Split ? tr("分屏") : viewMode_ == ViewMode::Preview ? tr("预览")
+                                                                                                                                                                                          : tr("编辑中")));
 }
 
 void MainWindow::updatePanels() {

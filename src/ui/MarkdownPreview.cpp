@@ -91,7 +91,6 @@ MarkdownPreview::MarkdownPreview(QWidget *parent) : QWebEngineView(parent), brid
         renderedRevision_ = revision;
         if (!pendingAnchor_.isEmpty()) scrollToAnchor(pendingAnchor_);
         if (findDialog_ && findDialog_->isVisible()) findInPreview(false, true);
-        emit renderFinished();
     });
     connect(bridge_, &PreviewBridge::sourceLineReceived, this, [this](int revision, int line) {
         if (revision == revision_ && line >= 0) emit sourceLineChanged(line);

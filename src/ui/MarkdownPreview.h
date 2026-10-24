@@ -47,9 +47,7 @@ public:
         return markdown_ == markdown && documentId_ == documentId;
     }
     int revision() const { return revision_; }
-    int renderedRevision() const { return renderedRevision_; }
 signals:
-    void renderFinished();
     void sourceLineChanged(int line);
     void taskToggled(int line, bool checked);
     void localLinkActivated(const QUrl &url);

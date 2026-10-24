@@ -48,13 +48,13 @@
 
 ### T04 [P3] 清理派生状态与闲置接口
 
-- [ ] 完成
+- [x] 完成
 - 依赖：无。
 - 位置：`src/ui/MainWindow.h/.cpp`、`src/ui/MarkdownPreview.h/.cpp`。
 - 工作：用 `viewMode_ == ViewMode::Preview` 替代 `previewModeEnabled_`；重新核对仓库引用后，移除未使用的 `renderedRevision()` 访问器及无连接者的 `renderFinished` 信号与发射代码。
 - 边界：保留内部 `renderedRevision_`，它仍用于渲染同步校验；不删除其他未经确认的代码。
 - 验收：编辑、预览、分屏切换及 Ctrl+E、大纲跳转、状态栏显示正常；异步渲染版本校验保持有效；构建通过。
-- 验证记录：待填写。
+- 验证记录：仓库搜索确认被删访问器与信号没有调用者/连接者；保留内部 renderedRevision_ 及异步校验。`cmake --build build --parallel 4` 与 `python3 tests/run-regression.py tests/workspace-state.cpp` 通过，覆盖三种模式显示、Ctrl+E 切换、大纲跳转、状态栏及过期/当前渲染版本回调。
 
 ### T05 [P2] 合并重复的原子写文件实现
 

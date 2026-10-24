@@ -175,7 +175,6 @@ private:
     QPushButton *splitMode_ = nullptr;
     QPushButton *maximize_ = nullptr;
     QTimer *saveTimer_ = nullptr;
-    bool previewModeEnabled_ = false;
     bool leftRequested_ = true;
     bool rightRequested_ = true;
     bool storageReady_ = true;
