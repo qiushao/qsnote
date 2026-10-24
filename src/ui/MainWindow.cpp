@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "core/NotebookCategories.h"
 #include "UiStyle.h"
 #include "FlowLayout.h"
 #include "MarkdownEditor.h"
@@ -1173,12 +1174,7 @@ void MainWindow::refreshTodoCategories(const QString &selectedId) {
         const QSignalBlocker blocker(todoStatus_);
         todoStatus_->setCurrentIndex(0);
     }
-    QStringList categories{QStringLiteral("默认")};
-    for (const auto &value: book->config["categories"].toArray()) categories << value.toString();
-    for (const auto &note: book->notes) categories << note.metadata["category"].toString();
-    categories.removeAll({});
-    categories.removeAll(QStringLiteral("全部"));
-    categories.removeDuplicates();
+    auto categories = NotebookCategories::todo(*book);
     const QSignalBlocker treeBlocker(tree_);
     const QSignalBlocker categoryBlocker(todoCategory_);
     tree_->clear();
@@ -1391,13 +1387,11 @@ void MainWindow::createTodoCategory() {
     bool accepted = false;
     const auto name = QInputDialog::getText(this, tr("新建分类"), tr("分类名称："), QLineEdit::Normal, {}, &accepted).trimmed();
     if (!accepted || name.isEmpty()) return;
-    if (name == "全部" || name == tr("全部") || todoCategory_->findText(name) >= 0 || todoCategory_->findData(name) >= 0) {
-        QMessageBox::information(this, tr("无法新建分类"), tr("该分类已存在，请使用其他名称。"));
+    QString error;
+    if (!NotebookCategories::create(*book, name, &error)) {
+        QMessageBox::information(this, tr("无法新建分类"), error);
         return;
     }
-    auto categories = book->config["categories"].toArray();
-    categories.append(name);
-    book->config["categories"] = categories;
     todoCategoryFilter_ = name;
     todoPage_ = 0;
     save();
@@ -1410,17 +1404,10 @@ void MainWindow::renameTodoCategory(const QString &name) {
     bool accepted = false;
     const auto newName = QInputDialog::getText(this, tr("重命名分类"), tr("新的分类名称："), QLineEdit::Normal, name, &accepted).trimmed();
     if (!accepted || newName.isEmpty() || newName == name) return;
-    if (newName == QStringLiteral("全部") || newName == tr("全部") || todoCategory_->findText(newName) >= 0 || todoCategory_->findData(newName) >= 0) {
-        QMessageBox::information(this, tr("无法重命名分类"), tr("目标分类名称已存在，请使用其他名称。"));
+    QString error;
+    if (!NotebookCategories::rename(*book, name, newName, &error)) {
+        QMessageBox::information(this, tr("无法重命名分类"), error);
         return;
-    }
-    auto categories = book->config["categories"].toArray();
-    for (int index = 0; index < categories.size(); ++index) {
-        if (categories.at(index).toString() == name) categories.replace(index, newName);
-    }
-    book->config["categories"] = categories;
-    for (auto &note: book->notes) {
-        if (note.metadata["category"].toString() == name) note.metadata["category"] = newName;
     }
     if (todoCategoryFilter_ == name) todoCategoryFilter_ = newName;
     save();
@@ -1437,13 +1424,10 @@ void MainWindow::deleteTodoCategory(const QString &name) {
     const auto hint = count > 0 ? tr("确认删除分类「%1」？其中 %2 个事项将移至「默认」分类。").arg(name).arg(count)
                                 : tr("确认删除分类「%1」？").arg(name);
     if (QMessageBox::question(this, tr("删除分类"), hint, QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
-    QJsonArray categories;
-    for (const auto &value: book->config["categories"].toArray()) {
-        if (value.toString() != name) categories.append(value);
-    }
-    book->config["categories"] = categories;
-    for (auto &note: book->notes) {
-        if (note.metadata["category"].toString() == name) note.metadata["category"] = QStringLiteral("默认");
+    QString error;
+    if (!NotebookCategories::remove(*book, name, &error)) {
+        QMessageBox::warning(this, tr("删除分类"), error);
+        return;
     }
     if (todoCategoryFilter_ == name) {
         todoCategoryFilter_.clear();
@@ -1549,7 +1533,7 @@ void MainWindow::refreshTree() {
         ++matches;
     }
     if (book->type == "site" && query.isEmpty() && groupBy_->currentIndex() == 0) {
-        for (const auto &category: siteCategories(*book)) {
+        for (const auto &category: NotebookCategories::site(*book)) {
             if (nodes.contains(category)) continue;
             auto *item = new QTreeWidgetItem(tree_, {category + QStringLiteral("（0）")});
             item->setIcon(0, icon("folder"));
@@ -2572,17 +2556,6 @@ void MainWindow::closeNotebook() {
     refreshNotebooks();
 }
 
-QStringList MainWindow::siteCategories(const Notebook &book) {
-    // 分类来源：站点配置中显式新建的分类 + 文章元数据中已使用的分类；default 始终存在且排最前。
-    QStringList categories{QStringLiteral("default")};
-    for (const auto &value: book.config["categories"].toArray()) categories << value.toString();
-    for (const auto &note: book.notes) categories << note.metadata["category"].toString();
-    categories.removeAll({});
-    categories.removeDuplicates();
-    return categories;
-}
-
-
 void MainWindow::createNote(const QString &parentId, bool folder, const QString &category) {
     auto *book = store_.notebook(currentNotebookId_);
     if (!book) return;
@@ -2598,7 +2571,7 @@ void MainWindow::createNote(const QString &parentId, bool folder, const QString 
         auto *titleInput = new QLineEdit(&dialog);
         layout->addRow(tr("名称："), titleInput);
         auto *categoryInput = new QComboBox(&dialog);
-        categoryInput->addItems(siteCategories(*book));
+        categoryInput->addItems(NotebookCategories::site(*book));
         if (!category.isEmpty()) categoryInput->setCurrentText(category);
         layout->addRow(tr("分类："), categoryInput);
         auto *tagsInput = new QLineEdit(&dialog);
@@ -2686,12 +2659,11 @@ void MainWindow::showTreeMenu(const QPoint &position) {
                 bool accepted = false;
                 const auto name = QInputDialog::getText(this, tr("新建分类"), tr("分类名称："), QLineEdit::Normal, {}, &accepted).trimmed();
                 if (!accepted || name.isEmpty()) return;
-                auto categories = book->config["categories"].toArray();
-                for (const auto &value: categories) {
-                    if (value.toString() == name) return;
+                QString error;
+                if (!NotebookCategories::create(*book, name, &error)) {
+                    QMessageBox::warning(this, tr("分类已存在"), error);
+                    return;
                 }
-                categories.append(name);
-                book->config["categories"] = categories;
                 save();
                 refreshTree();
             });
@@ -2760,7 +2732,7 @@ void MainWindow::showTreeMenu(const QPoint &position) {
                 auto *titleInput = new QLineEdit(target->title, &dialog);
                 layout->addRow(tr("名称："), titleInput);
                 auto *categoryInput = new QComboBox(&dialog);
-                categoryInput->addItems(siteCategories(*book));
+                categoryInput->addItems(NotebookCategories::site(*book));
                 const auto currentCategory = target->metadata["category"].toString();
                 categoryInput->setCurrentIndex(qMax(0, categoryInput->findText(currentCategory)));
                 layout->addRow(tr("分类："), categoryInput);
@@ -2992,7 +2964,7 @@ void MainWindow::showSiteConfig() {
     categories->setObjectName("siteCategories");
     categories->setMinimumHeight(120);
     categories->setMaximumHeight(180);
-    categories->addItems(siteCategories(*book));
+    categories->addItems(NotebookCategories::site(*book));
     form->addWidget(categories);
     auto *categoryActions = new QWidget(card);
     auto *categoryLayout = row(categoryActions, 0, 0, 8);
@@ -3011,11 +2983,10 @@ void MainWindow::showSiteConfig() {
         deleteCategory->setEnabled(editable);
     });
     categories->setCurrentRow(0);
-    const auto updateCategories = [this, book, categories](const QStringList &names, const QString &selected) {
-        book->config["categories"] = QJsonArray::fromStringList(names);
+    const auto updateCategories = [this, book, categories](const QString &selected) {
         categories->clear();
-        categories->addItems(siteCategories(*book));
-        categories->setCurrentRow(static_cast<int>(siteCategories(*book).indexOf(selected)));
+        categories->addItems(NotebookCategories::site(*book));
+        categories->setCurrentRow(static_cast<int>(NotebookCategories::site(*book).indexOf(selected)));
         save();
         refreshTree();
     };
@@ -3025,20 +2996,14 @@ void MainWindow::showSiteConfig() {
         const auto name = QInputDialog::getText(&dialog, rename ? tr("重命名分类") : tr("新建分类"), tr("分类名称："),
                                               QLineEdit::Normal, previous, &accepted).trimmed();
         if (!accepted || name.isEmpty() || name == previous) return;
-        auto names = siteCategories(*book);
-        if (names.contains(name)) {
-            QMessageBox::warning(&dialog, tr("分类已存在"), tr("请使用其他分类名称。"));
+        QString error;
+        const bool changed = rename ? NotebookCategories::rename(*book, previous, name, &error)
+                                    : NotebookCategories::create(*book, name, &error);
+        if (!changed) {
+            QMessageBox::warning(&dialog, tr("分类已存在"), error);
             return;
         }
-        if (rename) {
-            names.replace(names.indexOf(previous), name);
-            for (auto &note: book->notes) {
-                if (note.metadata["category"].toString() == previous) note.metadata["category"] = name;
-            }
-        } else {
-            names.append(name);
-        }
-        updateCategories(names, name);
+        updateCategories(name);
     };
     connect(addCategory, &QPushButton::clicked, &dialog, [editCategory] { editCategory(false); });
     connect(renameCategory, &QPushButton::clicked, &dialog, [editCategory] { editCategory(true); });
@@ -3046,12 +3011,12 @@ void MainWindow::showSiteConfig() {
         const auto name = categories->currentItem()->text();
         if (QMessageBox::question(&dialog, tr("删除分类"), tr("删除分类「%1」？其中的文章将移入 default，不会删除文章。").arg(name),
                                   QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
-        auto names = siteCategories(*book);
-        names.removeAll(name);
-        for (auto &note: book->notes) {
-            if (note.metadata["category"].toString() == name) note.metadata["category"] = "default";
+        QString error;
+        if (!NotebookCategories::remove(*book, name, &error)) {
+            QMessageBox::warning(&dialog, tr("删除分类"), error);
+            return;
         }
-        updateCategories(names, "default");
+        updateCategories("default");
     });
     section("siteLinksCard", tr("友链"));
     auto *links = new QWidget(card);

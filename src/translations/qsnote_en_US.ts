@@ -151,6 +151,18 @@
     <context>
         <name>MainWindow</name>
         <message>
+            <source>默认分类不可重命名或删除。</source>
+            <translation>The default category cannot be renamed or deleted.</translation>
+        </message>
+        <message>
+            <source>分类不存在。</source>
+            <translation>The category does not exist.</translation>
+        </message>
+        <message>
+            <source>分类名称不能为空。</source>
+            <translation>The category name cannot be empty.</translation>
+        </message>
+        <message>
             <source>自定义</source>
             <translation>Custom</translation>
         </message>
