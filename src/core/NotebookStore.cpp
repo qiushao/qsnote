@@ -157,8 +157,8 @@ QString NotebookStore::relativePath(const Notebook &book, const Note &note) {
     return segments.join('/');
 }
 
-void NotebookStore::removeNoteFiles(const Notebook &book, const Note &note) {
-    if (book.path.isEmpty()) return;
+bool NotebookStore::removeNoteFiles(const Notebook &book, const Note &note, QString *error) {
+    if (book.path.isEmpty()) return true;
     ArticleRenderer renderer(book.path, book.type == "site" ? "sites" : "notebooks");
     QList<const Note *> pending{&note};
     QSet<QString> removed;
@@ -171,18 +171,70 @@ void NotebookStore::removeNoteFiles(const Notebook &book, const Note &note) {
             if (child.parentId == entry->id) pending.append(&child);
         }
     }
-    if (note.path.isEmpty()) return;
+    if (note.path.isEmpty()) return true;
     const QDir root(book.path);
     const QString absolute = root.absoluteFilePath(note.path);
-    if (note.folder) {
-        QDir(absolute).removeRecursively();
-        return;
-    }
-    QFile::remove(absolute);
-    if (book.type == "ebook") QDir(root.absoluteFilePath(chapterBase(note.path))).removeRecursively();
+    const auto remove = [error](const QString &path, bool directory) {
+        if (!QFileInfo::exists(path)) return true;
+        if (directory ? QDir(path).removeRecursively() : QFile::remove(path)) return true;
+        *error = QCoreApplication::translate("NotebookStore", "无法删除：%1").arg(path);
+        return false;
+    };
+    if (!remove(absolute, note.folder)) return false;
+    if (book.type == "ebook" && !remove(root.absoluteFilePath(chapterBase(note.path)), true)) return false;
     // 清理变空的分类/章节目录
     auto parent = QFileInfo(absolute).absolutePath();
     while (parent.startsWith(book.path) && parent != book.path && QDir().rmdir(parent)) parent = QFileInfo(parent).absolutePath();
+    return true;
+}
+
+NotebookStore::RemovalResult NotebookStore::removeNotes(const QString &notebookId, const QSet<QString> &ids) {
+    RemovalResult result;
+    auto *book = notebook(notebookId);
+    if (!book) return result;
+    for (const auto &entry: book->notes) {
+        if (ids.contains(entry.id)) result.removedIds.insert(entry.id);
+    }
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (const auto &entry: book->notes) {
+            if (result.removedIds.contains(entry.parentId) && !result.removedIds.contains(entry.id)) {
+                result.removedIds.insert(entry.id);
+                changed = true;
+            }
+        }
+    }
+    if (result.removedIds.isEmpty()) return result;
+    const auto original = *book;
+    for (int index = static_cast<int>(book->notes.size()) - 1; index >= 0; --index) {
+        if (result.removedIds.contains(book->notes[index].id)) book->notes.removeAt(index);
+    }
+    // Persist the intent before touching the original files. A partial save cannot
+    // leave an index pointing at a body that this operation has already destroyed.
+    if (!save(&result.error)) {
+        result.error = QCoreApplication::translate("NotebookStore", "已从当前会话移除所选内容，但保存失败，原文件尚未删除：\n") + result.error;
+        return result;
+    }
+    result.saved = true;
+    for (const auto &entry: original.notes) {
+        if (!result.removedIds.contains(entry.id) || result.removedIds.contains(entry.parentId)) continue;
+        if (!removeNoteFiles(original, entry, &result.error)) {
+            result.error = QCoreApplication::translate("NotebookStore", "索引已更新，但部分文件未能删除：\n") + result.error;
+            return result;
+        }
+    }
+    return result;
+}
+
+NotebookStore::RemovalResult NotebookStore::removeCompletedTodos(const QString &notebookId) {
+    const auto *book = notebook(notebookId);
+    if (!book || book->type != "todo") return {};
+    QSet<QString> ids;
+    for (const auto &entry: book->notes) {
+        if (!entry.folder && entry.metadata["completed"].toBool()) ids.insert(entry.id);
+    }
+    return removeNotes(notebookId, ids);
 }
 
 bool NotebookStore::syncNotebook(Notebook &book, QString *error) {

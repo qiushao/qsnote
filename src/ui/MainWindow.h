@@ -102,6 +102,8 @@ private:
     void showSitePreview();
     void exportNotebook();
     bool save();
+    bool saveEditors();
+    void applyRemoval(const NotebookStore::RemovalResult &result);
     QString currentNoteId() const;
     QString noteDirectory(const QString &id);
     void openLocalLink(const QUrl &url);

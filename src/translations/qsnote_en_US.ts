@@ -2186,6 +2186,22 @@ It will be removed from the list. Files on disk will be kept, and you can add it
     <context>
         <name>NotebookStore</name>
         <message>
+            <source>无法删除：%1</source>
+            <translation>Unable to delete: %1</translation>
+        </message>
+        <message>
+            <source>已从当前会话移除所选内容，但保存失败，原文件尚未删除：
+</source>
+            <translation>The selected items were removed from this session, but saving failed. The original files have not been deleted:
+</translation>
+        </message>
+        <message>
+            <source>索引已更新，但部分文件未能删除：
+</source>
+            <translation>The index was updated, but some files could not be deleted:
+</translation>
+        </message>
+        <message>
             <location filename="../core/NotebookStore.cpp" line="+22" />
             <location line="+209" />
             <source>无法创建目录：</source>

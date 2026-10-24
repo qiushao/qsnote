@@ -4,6 +4,7 @@
 #include <QHash>
 #include <QJsonObject>
 #include <QList>
+#include <QSet>
 #include <QString>
 
 struct Note {
@@ -31,6 +32,11 @@ struct Notebook {
 // 文章内容按类型落盘：普通/电子书按目录层级保存 md，静态站点在 source/_posts 下按分类保存带 JSON front matter 的 md。
 class NotebookStore {
 public:
+    struct RemovalResult {
+        QSet<QString> removedIds; // Removed from memory even if saving fails; UI must close these documents.
+        bool saved = false;       // Files are only deleted after the updated indexes have been saved.
+        QString error;            // On failure, explains whether saving or file cleanup failed.
+    };
     QList<Notebook> notebooks;
     bool load(QString *error);
     bool save(QString *error);
@@ -45,10 +51,12 @@ public:
     static QString sanitized(const QString &name);
     static QString defaultRoot();
     static QString uniqueDirectory(const QString &root, const QString &name);
-    static void removeNoteFiles(const Notebook &book, const Note &note);
+    RemovalResult removeNotes(const QString &notebookId, const QSet<QString> &ids);
+    RemovalResult removeCompletedTodos(const QString &notebookId);
     static bool readNotebook(const QString &path, Notebook &book, QString *error);
 
 private:
+    static bool removeNoteFiles(const Notebook &book, const Note &note, QString *error);
     static bool loadNotebook(Notebook &book, QString *error);
     static bool syncNotebook(Notebook &book, QString *error);
     static QString chapterBase(const QString &path);

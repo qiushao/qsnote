@@ -1358,11 +1358,11 @@ void MainWindow::deleteTodo(const QString &noteId) {
     if (!note) return;
     const auto hint = tr("确认删除事项「%1」？该操作不可恢复。").arg(note->title);
     if (QMessageBox::question(this, tr("删除事项"), hint, QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
-    NotebookStore::removeNoteFiles(*book, *note);
-    for (int index = static_cast<int>(book->notes.size()) - 1; index >= 0; --index) {
-        if (book->notes[index].id == noteId) book->notes.removeAt(index);
+    if (!storageReady_) {
+        save();
+        return;
     }
-    save();
+    applyRemoval(store_.removeNotes(book->id, {noteId}));
     refreshTodoList();
 }
 
@@ -1376,13 +1376,11 @@ void MainWindow::clearCompletedTodos() {
     if (count == 0) return;
     const auto hint = tr("确认清空当前笔记本中全部 %1 个已完成事项？包含所有分类和分页中的事项，不受搜索条件限制。该操作不可恢复。").arg(count);
     if (QMessageBox::question(this, tr("清空已完成事项"), hint, QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
-    for (int index = static_cast<int>(book->notes.size()) - 1; index >= 0; --index) {
-        const auto &note = book->notes.at(index);
-        if (note.folder || !note.metadata["completed"].toBool()) continue;
-        NotebookStore::removeNoteFiles(*book, note);
-        book->notes.removeAt(index);
+    if (!storageReady_) {
+        save();
+        return;
     }
-    save();
+    applyRemoval(store_.removeCompletedTodos(book->id));
     todoPage_ = 0;
     refreshTodoCategories();
 }
@@ -2139,6 +2137,24 @@ bool MainWindow::save() {
         QMessageBox::warning(this, tr("无法保存笔记"), error);
         return false;
     }
+    return saveEditors();
+}
+
+void MainWindow::applyRemoval(const NotebookStore::RemovalResult &result) {
+    {
+        const QSignalBlocker blocker(tabs_);
+        for (int index = tabs_->count() - 1; index >= 0; --index) {
+            const auto id = tabs_->tabData(index).toString();
+            if (!result.removedIds.contains(id)) continue;
+            tabs_->removeTab(index);
+            removeEditor(id);
+        }
+    }
+    if (result.saved) saveEditors();
+    if (!result.error.isEmpty()) QMessageBox::warning(this, tr("删除"), result.error);
+}
+
+bool MainWindow::saveEditors() {
     for (auto &note: externalFiles_) {
         if (!note.contentDirty) continue;
         auto content = note.content;
@@ -2793,35 +2809,13 @@ void MainWindow::showTreeMenu(const QPoint &position) {
         }
         menu.addAction(tr("删除"), this, [this, id] {
             if (QMessageBox::question(this, tr("删除"), tr("确认删除此内容及其子项？该操作不可恢复。"), QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
-            auto *owner = store_.owner(id);
-            QSet<QString> removed{id};
-            bool changed = true;
-            while (changed) {
-                changed = false;
-                for (const auto &entry: owner->notes) {
-                    if (removed.contains(entry.parentId) && !removed.contains(entry.id)) {
-                        removed.insert(entry.id);
-                        changed = true;
-                    }
-                }
+            if (!storageReady_) {
+                save();
+                return;
             }
-            for (const auto &entry: owner->notes) {
-                // 子孙随父目录递归删除，只需处理顶层被删项。
-                if (removed.contains(entry.id) && !removed.contains(entry.parentId)) NotebookStore::removeNoteFiles(*owner, entry);
-            }
-            for (int index = static_cast<int>(owner->notes.size()) - 1; index >= 0; --index) {
-                if (removed.contains(owner->notes[index].id)) owner->notes.removeAt(index);
-            }
-            {
-                const QSignalBlocker blocker(tabs_);
-                for (int index = tabs_->count() - 1; index >= 0; --index) {
-                    const auto noteId = tabs_->tabData(index).toString();
-                    if (!removed.contains(noteId)) continue;
-                    tabs_->removeTab(index);
-                    removeEditor(noteId);
-                }
-            }
-            save();
+            const auto *owner = store_.owner(id);
+            if (!owner) return;
+            applyRemoval(store_.removeNotes(owner->id, {id}));
             refreshEditor();
         });
     }
