@@ -130,13 +130,13 @@
 
 ### T12 [P2] 提取站点配置对话框
 
-- [ ] 完成
+- [x] 完成
 - 依赖：T08、T11。
 - 位置：`MainWindow::showSiteConfig()`。
 - 工作：提取 `SiteConfigDialog`，迁移配置控件、分类与友链界面；通过明确的数据接口及保存请求连接主窗口。
 - 边界：保持当前即时修改、延迟保存以及关闭后保存的语义，不擅自改成“确认后统一提交”。
 - 验收：基本信息、头像、评论、主题、分类、友链、发布设置和自定义代码均能保存与恢复；字段联动正确；分类操作使用 T08 的核心规则。
-- 验证记录：待填写。
+- 验证记录：SiteConfigDialog 接收 Notebook 数据，拥有配置/分类/友链界面，以 saveRequested(delayed) 和 categoriesChanged 连接主窗口；保留即时内存修改、定时保存和任意关闭后保存。迁移前后 `tests/site-config.cpp` 均通过，覆盖全部字段恢复、头像导入、评论/主题/发布联动、友链增删、自定义代码、三种保存时机；迁移后 `tests/notebook-categories.cpp` 再次通过，分类使用 T08 核心规则。`cmake --build build --parallel 4` 通过，原翻译上下文保留。
 
 ### T13 [P2] 提取待办工作区
 
