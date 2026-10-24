@@ -17,6 +17,8 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         main.cpp
         ui/MainWindow.cpp
         ui/MainWindow.h
+        ui/PostPropertiesDialog.cpp
+        ui/PostPropertiesDialog.h
         ui/MarkdownEditor.cpp
         ui/MarkdownEditor.h
         ui/InplacePreview.cpp

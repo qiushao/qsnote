@@ -110,13 +110,13 @@
 
 ### T10 [P2] 提取文章属性对话框并复用新建表单
 
-- [ ] 完成
+- [x] 完成
 - 依赖：T08。
 - 位置：`MainWindow::createNote()` 的站点分支和 `showTreeMenu()` 中的文章属性回调。
 - 工作：提取 `PostPropertiesDialog`，接收初始数据，接受后返回表单结果；新建与编辑入口分别负责创建和更新。
 - 边界：保留标题、分类、标签、日期、Slug、草稿等默认值。SEO 关键词当前仅在属性编辑中出现，先保留该差异，不顺带改变功能。
 - 验收：两个入口共用字段构建与取值逻辑；取消不修改数据；创建、编辑、保存及重新打开后的元数据正确。
-- 验证记录：待填写。
+- 验证记录：PostPropertiesDialog 共用控件和取值，输入初始标题/元数据/分类，接受后由各入口创建或更新；原 MainWindow 翻译上下文保留，未知元数据键保留。`cmake --build build --parallel 4`、`python3 tests/run-regression.py tests/post-properties.cpp` 通过；实际新建/属性菜单验证默认值、取消无修改、表单字段保存重开、SEO 仅编辑可见、英文翻译。
 
 ### T11 [P2] 提取应用设置对话框
 

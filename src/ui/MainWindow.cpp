@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "PostPropertiesDialog.h"
 #include "core/NotebookCategories.h"
 #include "core/ChapterOperations.h"
 #include "UiStyle.h"
@@ -2562,46 +2563,15 @@ void MainWindow::createNote(const QString &parentId, bool folder, const QString 
     if (!book) return;
     if (book->type == "site") {
         const auto noteId = NotebookStore::newId();
-        QDialog dialog(this);
-        dialog.setWindowTitle(tr("新建文章"));
-        auto *layout = new QFormLayout(&dialog);
-        layout->setContentsMargins(20, 20, 20, 20);
-        layout->setSpacing(12);
-        layout->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-        layout->setRowWrapPolicy(QFormLayout::WrapLongRows);
-        auto *titleInput = new QLineEdit(&dialog);
-        layout->addRow(tr("名称："), titleInput);
-        auto *categoryInput = new QComboBox(&dialog);
-        categoryInput->addItems(NotebookCategories::site(*book));
-        if (!category.isEmpty()) categoryInput->setCurrentText(category);
-        layout->addRow(tr("分类："), categoryInput);
-        auto *tagsInput = new QLineEdit(&dialog);
-        tagsInput->setPlaceholderText(tr("逗号分隔"));
-        layout->addRow(tr("标签："), tagsInput);
-        auto *dateInput = new QDateEdit(QDate::currentDate(), &dialog);
-        dateInput->setDisplayFormat("yyyy-MM-dd");
-        dateInput->setCalendarPopup(true);
-        layout->addRow(tr("日期："), dateInput);
-        auto *slugInput = new QLineEdit("post-" + noteId.left(8), &dialog);
-        layout->addRow("Slug：", slugInput);
-        auto *draftInput = new QCheckBox(tr("保存为草稿"), &dialog);
-        layout->addRow(draftInput);
-        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-        setPrimaryButton(buttons->button(QDialogButtonBox::Ok));
-        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-        layout->addRow(buttons);
-        dialog.resize(qMin(560, screen()->availableGeometry().width() * 92 / 100), dialog.sizeHint().height());
-        if (dialog.exec() != QDialog::Accepted || titleInput->text().trimmed().isEmpty()) return;
+        const QJsonObject metadata{{"date", QDate::currentDate().toString(Qt::ISODate)},
+                                   {"slug", "post-" + noteId.left(8)}, {"category", category}};
+        PostPropertiesDialog dialog({}, metadata, NotebookCategories::site(*book), false, this);
+        if (dialog.exec() != QDialog::Accepted || dialog.title().isEmpty()) return;
         Note note;
         note.id = noteId;
         note.parentId = parentId;
-        note.title = titleInput->text().trimmed();
-        note.metadata = {{"date", dateInput->date().toString(Qt::ISODate)},
-                         {"slug", slugInput->text().trimmed()},
-                         {"category", categoryInput->currentText()},
-                         {"tags", tagsInput->text().trimmed()},
-                         {"draft", draftInput->isChecked()}};
+        note.title = dialog.title();
+        note.metadata = dialog.metadata();
         book->notes.append(note);
         save();
         refreshTree();
@@ -2693,49 +2663,10 @@ void MainWindow::showTreeMenu(const QPoint &position) {
         if (book->type == "site") {
             menu.addAction(tr("属性更改"), this, [this, book, id] {
                 auto *target = store_.note(id);
-                QDialog dialog(this);
-                dialog.setWindowTitle(tr("文章属性"));
-                auto *layout = new QFormLayout(&dialog);
-                layout->setContentsMargins(20, 20, 20, 20);
-                layout->setSpacing(12);
-                layout->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-                layout->setRowWrapPolicy(QFormLayout::WrapLongRows);
-                auto *titleInput = new QLineEdit(target->title, &dialog);
-                layout->addRow(tr("名称："), titleInput);
-                auto *categoryInput = new QComboBox(&dialog);
-                categoryInput->addItems(NotebookCategories::site(*book));
-                const auto currentCategory = target->metadata["category"].toString();
-                categoryInput->setCurrentIndex(qMax(0, categoryInput->findText(currentCategory)));
-                layout->addRow(tr("分类："), categoryInput);
-                auto *tagsInput = new QLineEdit(target->metadata["tags"].toString(), &dialog);
-                tagsInput->setPlaceholderText(tr("逗号分隔"));
-                layout->addRow(tr("标签："), tagsInput);
-                auto *keywordsInput = new QLineEdit(target->metadata["keywords"].toString(), &dialog);
-                keywordsInput->setObjectName("postKeywords");
-                keywordsInput->setPlaceholderText(tr("逗号分隔；留空使用站点关键词"));
-                layout->addRow(tr("SEO 关键词："), keywordsInput);
-                auto *dateInput = new QDateEdit(QDate::fromString(target->metadata["date"].toString(), Qt::ISODate), &dialog);
-                dateInput->setDisplayFormat("yyyy-MM-dd");
-                dateInput->setCalendarPopup(true);
-                layout->addRow(tr("日期："), dateInput);
-                auto *slugInput = new QLineEdit(target->metadata["slug"].toString(), &dialog);
-                layout->addRow("Slug：", slugInput);
-                auto *draftInput = new QCheckBox(tr("保存为草稿"), &dialog);
-                draftInput->setChecked(target->metadata["draft"].toBool());
-                layout->addRow(draftInput);
-                auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-                setPrimaryButton(buttons->button(QDialogButtonBox::Ok));
-                connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-                connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-                layout->addRow(buttons);
-                if (dialog.exec() != QDialog::Accepted || titleInput->text().trimmed().isEmpty()) return;
-                target->title = titleInput->text().trimmed();
-                target->metadata["category"] = categoryInput->currentText();
-                target->metadata["tags"] = tagsInput->text().trimmed();
-                target->metadata["keywords"] = keywordsInput->text().trimmed();
-                target->metadata["date"] = dateInput->date().toString(Qt::ISODate);
-                target->metadata["slug"] = slugInput->text().trimmed();
-                target->metadata["draft"] = draftInput->isChecked();
+                PostPropertiesDialog dialog(target->title, target->metadata, NotebookCategories::site(*book), true, this);
+                if (dialog.exec() != QDialog::Accepted || dialog.title().isEmpty()) return;
+                target->title = dialog.title();
+                target->metadata = dialog.metadata();
                 save();
                 refreshTree();
             });
