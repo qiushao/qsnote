@@ -28,6 +28,8 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         core/UpdateChecker.cpp
         core/UpdateChecker.h
         core/NotebookStore.cpp
+        core/AtomicFile.cpp
+        core/AtomicFile.h
         core/ArticleRenderer.cpp
         core/EbookExporter.cpp
         core/EbookExporter.h

@@ -58,13 +58,13 @@
 
 ### T05 [P2] 合并重复的原子写文件实现
 
-- [ ] 完成
+- [x] 完成
 - 依赖：T01。
 - 位置：`src/core/NotebookStore.cpp`、`src/core/StaticSite.cpp` 中的 `writeFile()`。
 - 工作：提取共享函数，统一创建父目录、跳过内容相同文件、完整写入长度检查、原子提交和错误返回。
 - 边界：不强行合并电子书临时文件写入或站点输出路径冲突检查，它们具有不同语义。
 - 验收：相同内容不改变文件时间戳；内容变更正确落盘；写入失败返回错误；笔记索引、站点文章和默认页面保存正常。
-- 验证记录：待填写。
+- 验证记录：提取 AtomicFile::write，统一父目录、读取无错误才比较内容、完整长度检查、QSaveFile 原子提交及路径错误。`cmake --build build --parallel 4`、`tests/atomic-file.cpp`、`tests/notebook-loading.cpp` 均通过（用 `python3 tests/run-regression.py` 运行）；覆盖固定时间戳不变、修改落盘、父路径失败、目录不能被误认为空文件、目录不可写时原文件保留、站点索引/文章/四个默认页面及四类笔记本读写。
 
 ### T06 [P2] 合并 KaTeX 字体内嵌处理
 

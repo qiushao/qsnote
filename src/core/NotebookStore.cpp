@@ -1,41 +1,24 @@
 #include "NotebookStore.h"
 #include "ArticleRenderer.h"
-#include <QCoreApplication>
+#include "AtomicFile.h"
 #include "StaticSite.h"
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QRegularExpression>
-#include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
-#include <QUuid>
 #include <QUrl>
+#include <QUuid>
 #include <algorithm>
 #include <functional>
 #include <vtextedit/markdownutils.h>
 
 namespace {
 QString storageDir() { return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation); }
-
-bool writeFile(const QString &path, const QByteArray &data, QString *error) {
-    if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
-        *error = QCoreApplication::translate("NotebookStore", "无法创建目录：") + QFileInfo(path).absolutePath();
-        return false;
-    }
-    // Metadata-only site saves still check every post; keep unchanged file timestamps.
-    QFile current(path);
-    if (current.open(QIODevice::ReadOnly) && current.readAll() == data) return true;
-    current.close();
-    QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly) || file.write(data) == -1 || !file.commit()) {
-        *error = file.errorString();
-        return false;
-    }
-    return true;
-}
 
 bool copyInsertedImages(QString &content, const QString &oldDirectory, const QString &newDirectory, QString *error) {
     if (oldDirectory == newDirectory) return true;
@@ -64,7 +47,7 @@ bool copyInsertedImages(QString &content, const QString &oldDirectory, const QSt
             name = sourceInfo.completeBaseName() + '-' + QString::number(index) + '.' + sourceInfo.suffix();
         }
         // Keep the source: other notes in the old directory may still use it.
-        if (!QFileInfo::exists(destination.filePath(name)) && !writeFile(destination.filePath(name), bytes, error)) return false;
+        if (!QFileInfo::exists(destination.filePath(name)) && !AtomicFile::write(destination.filePath(name), bytes, error)) return false;
         if (name != sourceInfo.fileName()) {
             const auto url = "resources/images/" + QString::fromLatin1(QUrl::toPercentEncoding(name));
             content.replace(image.m_urlStart, image.m_urlEnd - image.m_urlStart, url);
@@ -297,7 +280,7 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
                 return false;
             }
         } else if (book.type == "site" || note->contentDirty || !QFileInfo::exists(root.absoluteFilePath(expected))) {
-            if (!writeFile(root.absoluteFilePath(expected), book.type == "site" ? StaticSite::postSource(*note) : note->content.toUtf8(), error)) return false;
+            if (!AtomicFile::write(root.absoluteFilePath(expected), book.type == "site" ? StaticSite::postSource(*note) : note->content.toUtf8(), error)) return false;
             note->contentDirty = false;
         }
     }
@@ -307,7 +290,7 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
     }
     // 索引同时记录笔记本元信息，关闭笔记本后仍可凭目录完整恢复。
     const QJsonObject index{{"id", book.id}, {"name", book.name}, {"type", book.type}, {"config", book.config}, {"notes", entries}};
-    return writeFile(root.absoluteFilePath(indexFileName()), QJsonDocument(index).toJson(), error);
+    return AtomicFile::write(root.absoluteFilePath(indexFileName()), QJsonDocument(index).toJson(), error);
 }
 
 bool NotebookStore::save(QString *error) {
@@ -318,7 +301,7 @@ bool NotebookStore::save(QString *error) {
     for (const auto &book: notebooks) {
         books.append(QJsonObject{{"id", book.id}, {"name", book.name}, {"type", book.type}, {"path", book.path}, {"config", book.config}});
     }
-    return writeFile(storagePath(), QJsonDocument(books).toJson(), error);
+    return AtomicFile::write(storagePath(), QJsonDocument(books).toJson(), error);
 }
 
 bool NotebookStore::loadNotebook(Notebook &book, QString *error) {

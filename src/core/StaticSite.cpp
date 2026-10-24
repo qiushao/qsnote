@@ -1,4 +1,5 @@
 #include "StaticSite.h"
+#include "AtomicFile.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QDirIterator>
@@ -7,27 +8,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QRegularExpression>
-#include <QSaveFile>
 #include <QUrl>
-
-namespace {
-bool writeFile(const QString &path, const QByteArray &data, QString *error) {
-    if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
-        *error = QCoreApplication::translate("StaticSite", "无法创建目录：") + QFileInfo(path).absolutePath();
-        return false;
-    }
-    QFile current(path);
-    if (current.open(QIODevice::ReadOnly) && current.readAll() == data) return true;
-    current.close();
-    QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.commit()) {
-        *error = path + ": " + file.errorString();
-        return false;
-    }
-    return true;
-}
-
-}
 
 bool StaticSite::copyDirectory(const QString &source, const QString &destination, QString *error) {
     if (!QDir().mkpath(destination)) {
@@ -44,7 +25,7 @@ bool StaticSite::copyDirectory(const QString &source, const QString &destination
             *error = path + ": " + file.errorString();
             return false;
         }
-        if (!writeFile(target, file.readAll(), error)) return false;
+        if (!AtomicFile::write(target, file.readAll(), error)) return false;
     }
     return true;
 }
@@ -71,7 +52,7 @@ bool StaticSite::prepare(Notebook &book, QString *error) {
         const auto path = book.path + "/source/" + it.key() + "/index.md";
         if (QFileInfo::exists(path)) continue;
         const auto source = "---\n" + QJsonDocument(QJsonObject{{"title", it.value()}, {"layout", it.key()}, {"comments", false}}).toJson() + "---\n";
-        if (!writeFile(path, source, error)) return false;
+        if (!AtomicFile::write(path, source, error)) return false;
     }
     return true;
 }
