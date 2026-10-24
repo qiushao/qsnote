@@ -3,6 +3,7 @@
 #include <QtWidgets>
 #include <vtextedit/vtextedit.h>
 #define private public
+#include "ui/EditorWorkspace.h"
 #include "ui/MainWindow.h"
 #include "ui/MarkdownPreview.h"
 #include "ui/TodoWorkspace.h"
@@ -37,30 +38,30 @@ int main(int argc, char **argv) {
     window.resize(1200, 800);
     window.show();
     events(1000);
-    require(window.currentNoteId() == "note" && window.tabs_->count() == 1, "restore current note and tabs");
-    require(window.outline_->topLevelItemCount() == 1, "restore outline");
+    require(window.editorWorkspace_->currentNoteId() == "note" && window.editorWorkspace_->tabs_->count() == 1, "restore current note and tabs");
+    require(window.editorWorkspace_->outline_->topLevelItemCount() == 1, "restore outline");
     window.tree_->topLevelItem(0)->setExpanded(false);
     window.refreshNotebooks();
     require(!window.tree_->topLevelItem(0)->isExpanded(), "preserve collapsed folder");
     require(window.tree_->currentItem()->data(0, Qt::UserRole) == "note", "preserve tree selection");
-    for (auto mode: {MainWindow::ViewMode::Edit, MainWindow::ViewMode::Preview, MainWindow::ViewMode::Split}) {
-        window.setViewMode(mode);
+    for (auto mode: {EditorWorkspace::ViewMode::Edit, EditorWorkspace::ViewMode::Preview, EditorWorkspace::ViewMode::Split}) {
+        window.editorWorkspace_->setViewMode(mode);
         events(300);
-        require(window.editors_->isVisible() == (mode != MainWindow::ViewMode::Preview), "editor visibility");
-        require(window.preview_->isVisible() == (mode != MainWindow::ViewMode::Edit), "preview visibility");
-        auto *heading = window.outline_->topLevelItem(0);
-        emit window.outline_->itemClicked(heading, 0);
-        require(!window.status_->text().isEmpty(), "status text");
+        require(window.editorWorkspace_->editors_->isVisible() == (mode != EditorWorkspace::ViewMode::Preview), "editor visibility");
+        require(window.editorWorkspace_->preview_->isVisible() == (mode != EditorWorkspace::ViewMode::Edit), "preview visibility");
+        auto *heading = window.editorWorkspace_->outline_->topLevelItem(0);
+        emit window.editorWorkspace_->outline_->itemClicked(heading, 0);
+        require(!window.editorWorkspace_->status_->text().isEmpty(), "status text");
     }
     QShortcut *toggle = nullptr;
     for (auto *shortcut: window.findChildren<QShortcut *>())
         if (shortcut->key() == QKeySequence("Ctrl+E")) toggle = shortcut;
     require(toggle, "Ctrl+E shortcut");
     emit toggle->activated();
-    require(window.viewMode_ == MainWindow::ViewMode::Preview, "split to preview shortcut");
+    require(window.editorWorkspace_->viewMode_ == EditorWorkspace::ViewMode::Preview, "split to preview shortcut");
     emit toggle->activated();
-    require(window.viewMode_ == MainWindow::ViewMode::Edit, "preview to edit shortcut");
-    auto *preview = window.preview_;
+    require(window.editorWorkspace_->viewMode_ == EditorWorkspace::ViewMode::Edit, "preview to edit shortcut");
+    auto *preview = window.editorWorkspace_->preview_;
     preview->setMarkdown("new", "new");
     const int revision = preview->revision();
     const int before = preview->renderedRevision_;
@@ -80,7 +81,7 @@ int main(int argc, char **argv) {
     window.todoWorkspace_->createTodo();
     require(window.todoWorkspace_->todoPage_ == 2 && window.todoWorkspace_->todoList_->currentItem()->text(0) == "New todo", "new todo selected on its page");
     require(window.search_->text().isEmpty() && window.todoWorkspace_->todoTitle_->text() == "New todo", "new todo details and search");
-    require(window.tabs_->count() == 1, "todo preserves Markdown tabs");
+    require(window.editorWorkspace_->tabs_->count() == 1, "todo preserves Markdown tabs");
     QTimer::singleShot(20, &window, [] {
         auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
         require(box, "close notebook confirmation");
@@ -88,6 +89,6 @@ int main(int argc, char **argv) {
     });
     window.closeNotebook();
     events();
-    require(window.currentNoteId() == "note" && window.tabs_->count() == 1, "close todo restores Markdown workspace");
+    require(window.editorWorkspace_->currentNoteId() == "note" && window.editorWorkspace_->tabs_->count() == 1, "close todo restores Markdown workspace");
     qInfo() << "PASS: startup restore, tree state, modes/shortcut/outline, stale revisions, paginated todo creation, close notebook";
 }

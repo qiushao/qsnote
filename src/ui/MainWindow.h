@@ -8,26 +8,20 @@
 #include <QStringList>
 
 class TodoWorkspace;
-class MarkdownEditor;
-class MarkdownPreview;
+class EditorWorkspace;
 class QCheckBox;
 class QComboBox;
 class QLabel;
 class QLineEdit;
-namespace vte {
-class VTextEdit;
-}
 class QPushButton;
 class QSplitter;
 class QStackedWidget;
-class QTabBar;
 class QTextBrowser;
 class QTimer;
 class QSystemTrayIcon;
 class UpdateChecker;
 class QTreeWidget;
 class QTreeWidgetItem;
-class QUrl;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -44,12 +38,9 @@ protected:
 
 private:
     void buildUi();
-    void buildToolbar();
     void refreshNotebooks();
     void refreshTree();
     void refreshEditor();
-    void refreshOutline();
-    void updateStatus();
     void updatePanels();
     void updateResizeHandles();
     void updateMaximizeButton();
@@ -58,29 +49,6 @@ private:
     void closeNotebook();
     void createNote(const QString &parentId, bool folder, const QString &category = {});
     void showTreeMenu(const QPoint &position);
-    void openNote(const QString &id);
-    void openExternalFile(const QString &path);
-    Note *documentNote(const QString &id);
-    void showTabMenu(const QPoint &position);
-    void closeTab(int index);
-    enum class ViewMode { Edit, Preview, Split };
-    struct Heading {
-        QString title;
-        int level = 0;
-        int line = 0;
-    };
-    struct EditorSession {
-        MarkdownEditor *editor = nullptr;
-        QVector<Heading> headings;
-        ViewMode mode = ViewMode::Preview;
-        int verticalScroll = 0;
-        int horizontalScroll = 0;
-        int previewLine = 0;
-    };
-    void activateEditor(const QString &id);
-    void removeEditor(const QString &id);
-    void setPreview(bool enabled);
-    void setViewMode(ViewMode mode);
     void toggleMaximized();
     void showSettings();
     void applyUiSettings();
@@ -91,57 +59,33 @@ private:
     void exportNotebook();
     void publishSite(const Notebook &book);
     bool save();
-    bool saveEditors();
     void applyRemoval(const NotebookStore::RemovalResult &result);
-    QString currentNoteId() const;
-    QString noteDirectory(const QString &id);
-    void openLocalLink(const QUrl &url);
     bool generateSite(const Notebook &book);
 
     QSystemTrayIcon *tray_ = nullptr;
     UpdateChecker *updateChecker_ = nullptr;
     bool quitting_ = false;
     NotebookStore store_;
-    QHash<QString, Note> externalFiles_;
     QString currentNotebookId_;
     QSplitter *splitter_ = nullptr;
     QWidget *header_ = nullptr;
     QHash<QWidget *, Qt::Edges> resizeHandles_;
     QWidget *left_ = nullptr;
     QWidget *right_ = nullptr;
-    QWidget *toolbar_ = nullptr;
-    QPushButton *undo_ = nullptr;
-    QPushButton *redo_ = nullptr;
     QComboBox *notebooks_ = nullptr;
     QComboBox *groupBy_ = nullptr;
     TodoWorkspace *todoWorkspace_ = nullptr;
     QLineEdit *search_ = nullptr;
     QTreeWidget *tree_ = nullptr;
     QLabel *treeHint_ = nullptr;
-    QTabBar *tabs_ = nullptr;
     QStackedWidget *pages_ = nullptr;
-    QStackedWidget *editors_ = nullptr;
-    QHash<QString, EditorSession> editorSessions_;
-    QString activeEditorId_;
-    MarkdownEditor *markdownEditor_ = nullptr;
-    vte::VTextEdit *editor_ = nullptr;
-    MarkdownPreview *preview_ = nullptr;
-    QSplitter *editorSplitter_ = nullptr;
-    QTimer *previewTimer_ = nullptr;
-    ViewMode viewMode_ = ViewMode::Preview;
-    bool syncingPreviewScroll_ = false;
-    QTreeWidget *outline_ = nullptr;
-    QLabel *outlineHint_ = nullptr;
-    QLabel *status_ = nullptr;
+    EditorWorkspace *editorWorkspace_ = nullptr;
     QPushButton *toggleLeft_ = nullptr;
     QPushButton *toggleRight_ = nullptr;
     QPushButton *siteConfig_ = nullptr;
     QPushButton *sitePreview_ = nullptr;
     QPushButton *export_ = nullptr;
     QCheckBox *autoNumberChapters_ = nullptr;
-    QPushButton *editMode_ = nullptr;
-    QPushButton *previewMode_ = nullptr;
-    QPushButton *splitMode_ = nullptr;
     QPushButton *maximize_ = nullptr;
     QTimer *saveTimer_ = nullptr;
     bool leftRequested_ = true;

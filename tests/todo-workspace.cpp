@@ -2,6 +2,7 @@
 #include "ui/TodoWorkspace.h"
 #include <QtWidgets>
 #define private public
+#include "ui/EditorWorkspace.h"
 #include "ui/MainWindow.h"
 #undef private
 
@@ -50,7 +51,7 @@ int main(int argc, char **argv) {
     auto *categories = workspace->categoryPanel()->findChild<QTreeWidget *>();
     auto *details = workspace->detailsPanel();
     require(workspace->isVisible() && workspace->categoryPanel()->isVisible() && details->isVisible(), "all todo panels visible");
-    require(window.tabs_->count() == 1 && list->topLevelItemCount() == 20, "Markdown session retained and todos paginated");
+    require(window.editorWorkspace_->tabs_->count() == 1 && list->topLevelItemCount() == 20, "Markdown session retained and todos paginated");
     require(list->topLevelItem(0)->data(0, Qt::UserRole) == "2", "priority sort");
     sort->setCurrentIndex(1);
     require(list->topLevelItem(0)->data(0, Qt::UserRole) == "44", "created sort newest first");
@@ -92,7 +93,7 @@ int main(int argc, char **argv) {
     require(list->topLevelItemCount() == 1 && list->currentItem()->data(0, Qt::UserRole) == "only" && status->currentIndex() == 0, "switch notebook resets category/status/page");
     window.notebooks_->setCurrentIndex(window.notebooks_->findData("normal"));
     events();
-    require(window.currentNoteId() == "markdown" && window.tabs_->count() == 1 && !workspace->categoryPanel()->isVisible() && !details->isVisible(), "return to Markdown session");
+    require(window.editorWorkspace_->currentNoteId() == "markdown" && window.editorWorkspace_->tabs_->count() == 1 && !workspace->categoryPanel()->isVisible() && !details->isVisible(), "return to Markdown session");
     Notebook reloaded;
     require(NotebookStore::readNotebook(temp.filePath("todo"), reloaded, &error), error);
     for (const auto &note: reloaded.notes)

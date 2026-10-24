@@ -1,42 +1,30 @@
 #include "MainWindow.h"
+#include "EbookExportDialog.h"
+#include "EditorWorkspace.h"
+#include "FlowLayout.h"
+#include "OverlayDialog.h"
 #include "PostPropertiesDialog.h"
 #include "SettingsDialog.h"
 #include "SiteConfigDialog.h"
 #include "SitePreviewDialog.h"
-#include "EbookExportDialog.h"
 #include "TodoWorkspace.h"
-#include "OverlayDialog.h"
-#include "core/NotebookCategories.h"
-#include "core/ChapterOperations.h"
 #include "UiStyle.h"
-#include "FlowLayout.h"
-#include "MarkdownEditor.h"
-#include "MarkdownPreview.h"
-#include "core/StaticSite.h"
 #include "core/ArticleRenderer.h"
+#include "core/ChapterOperations.h"
+#include "core/NotebookCategories.h"
 #include "core/SitePublisher.h"
+#include "core/StaticSite.h"
 #include "core/UpdateChecker.h"
-#include <QDesktopServices>
-#include <QSystemTrayIcon>
-#include <QSettings>
-#include <QProgressDialog>
-#include <QMimeDatabase>
-#include <QMimeData>
-#include <QStringDecoder>
-#include <QScopedValueRollback>
-#include <QScrollBar>
 #include <QApplication>
-#include <QButtonGroup>
 #include <QCheckBox>
-#include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDate>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
-#include <QDropEvent>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QGridLayout>
@@ -49,25 +37,21 @@
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPainter>
-#include <vtextedit/vtextedit.h>
-#include <vtextedit/vmarkdowneditor.h>
-#include <vtextedit/previewmgr.h>
-#include <vtextedit/texteditutils.h>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScreen>
-#include <QSaveFile>
+#include <QSettings>
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStyledItemDelegate>
-#include <QTabBar>
-#include <QTextBlock>
-#include <QWindow>
+#include <QSystemTrayIcon>
 #include <QTimer>
 #include <QTreeWidget>
 #include <QVBoxLayout>
+#include <QWindow>
 #include <algorithm>
 #include <functional>
 
@@ -81,36 +65,6 @@ QIcon icon(const QString &kind) {
     const auto name = files.value(kind, kind);
     return QIcon(":/icons/" + (QFile::exists(":/icons/" + name + ".svg") ? name : QStringLiteral("book")) + ".svg");
 }
-
-class NoteTabBar : public QTabBar {
-public:
-    using QTabBar::QTabBar;
-    [[nodiscard]] QSize tabSizeHint(int index) const override {
-        return {qBound(76, fontMetrics().horizontalAdvance(tabText(index)) + 64 + (tabIcon(index).isNull() ? 0 : 20), 200), 32};
-    }
-
-protected:
-    void tabInserted(int index) override {
-        QTabBar::tabInserted(index);
-        const auto side = static_cast<QTabBar::ButtonPosition>(style()->styleHint(QStyle::SH_TabBar_CloseButtonPosition, nullptr, this));
-        auto *close = button(QString(), "noteTabClose", this);
-        close->setProperty("iconButton", true);
-        close->setIcon(QIcon(":/icons/close.svg"));
-        close->setIconSize(QSize(12, 12));
-        close->setFixedSize(20, 20);
-        close->setFocusPolicy(Qt::NoFocus);
-        close->setToolTip(QCoreApplication::translate("MainWindow", "关闭标签"));
-        close->setAccessibleName(close->toolTip());
-        setTabButton(index, side, close);
-        connect(close, &QPushButton::clicked, this, [this, close, side] {
-            for (int tab = 0; tab < count(); ++tab) {
-                if (tabButton(tab, side) != close) continue;
-                emit tabCloseRequested(tab);
-                return;
-            }
-        });
-    }
-};
 
 class NotebookDelegate : public QStyledItemDelegate {
 public:
@@ -264,39 +218,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     refreshNotebooks();
     // 标签页延迟到窗口显示后恢复：构造期间加入的标签不会触发父布局重算，标签栏会保持 0 高度不可见。
     QTimer::singleShot(0, this, [this, savedOpenNotes, savedNoteId] {
-        for (const auto &id: savedOpenNotes) {
-            const QUrl url(id);
-            if (url.isLocalFile() && QFileInfo::exists(url.toLocalFile())) openExternalFile(url.toLocalFile());
-            else openNote(id);
-        }
-        for (int index = 0; index < tabs_->count(); ++index) {
-            if (tabs_->tabData(index).toString() == savedNoteId) {
-                tabs_->setCurrentIndex(index);
-                break;
-            }
-        }
+        editorWorkspace_->restoreSession(savedOpenNotes, savedNoteId);
     });
     saveTimer_ = new QTimer(this);
     saveTimer_->setSingleShot(true);
     saveTimer_->setInterval(5000);
     connect(saveTimer_, &QTimer::timeout, this, [this] { save(); });
-    auto *find = new QShortcut(QKeySequence::Find, this);
-    connect(find, &QShortcut::activated, this, [this] {
-        if (documentNote(currentNoteId())) {
-            auto *focus = QApplication::focusWidget();
-            if (viewMode_ == ViewMode::Preview || (viewMode_ == ViewMode::Split && focus && (focus == preview_ || preview_->isAncestorOf(focus)))) {
-                preview_->showFind();
-                return;
-            }
-            markdownEditor_->showFindReplace();
-            return;
-        }
-        leftRequested_ = true;
-        updatePanels();
-        left_->show();
-        search_->setFocus();
-        search_->selectAll();
-    });
     auto *findAll = new QShortcut(QKeySequence("Ctrl+Shift+F"), this);
     connect(findAll, &QShortcut::activated, this, [this] {
         leftRequested_ = true;
@@ -305,14 +232,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         search_->setFocus();
         search_->selectAll();
     });
-    auto *replace = new QShortcut(QKeySequence::Replace, this);
-    connect(replace, &QShortcut::activated, this, [this] {
-        if (!documentNote(currentNoteId())) return;
-        if (viewMode_ == ViewMode::Preview) setPreview(false);
-        markdownEditor_->showFindReplace();
-    });
-    auto *mode = new QShortcut(QKeySequence("Ctrl+E"), this);
-    connect(mode, &QShortcut::activated, this, [this] { setPreview(viewMode_ != ViewMode::Preview); });
     auto *saveShortcut = new QShortcut(QKeySequence::Save, this);
     connect(saveShortcut, &QShortcut::activated, this, [this] { save(); });
     auto *escape = new QShortcut(QKeySequence(Qt::Key_Escape), search_);
@@ -481,118 +400,44 @@ void MainWindow::buildUi() {
     bodyLayout->addWidget(tree_, 1);
     leftLayout->addWidget(leftBody, 1);
 
-    auto *center = new QWidget(splitter_);
-    center->setObjectName("center");
-    center->setMinimumWidth(0);
-    auto *centerLayout = column(center);
-    auto *strip = new QWidget(center);
-    strip->setObjectName("tabStrip");
-    auto *stripLayout = row(strip, 8, 7, 0);
-    tabs_ = new NoteTabBar(strip);
-    tabs_->setObjectName("noteTabs");
-    tabs_->setTabsClosable(true);
-    tabs_->setMovable(true);
-    tabs_->setExpanding(false);
-    tabs_->setElideMode(Qt::ElideRight);
-    tabs_->setUsesScrollButtons(true);
-    tabs_->setDrawBase(false);
-    tabs_->setContextMenuPolicy(Qt::CustomContextMenu);
-    strip->setMinimumHeight(46);
-    stripLayout->addWidget(tabs_);
-    centerLayout->addWidget(strip);
-    toolbar_ = new QWidget(center);
-    toolbar_->setObjectName("toolbar");
-    buildToolbar();
-    centerLayout->addWidget(toolbar_);
-    pages_ = new QStackedWidget(center);
-    pages_->setObjectName("editorPages");
-    pages_->setAcceptDrops(true);
-    pages_->installEventFilter(this);
+    pages_ = new QStackedWidget(splitter_);
+    pages_->setObjectName("workspaces");
     pages_->setMinimumSize(0, 0);
-    auto *empty = new QWidget(pages_);
-    empty->setObjectName("emptyState");
-    auto *emptyLayout = column(empty, 12, 6);
-    emptyLayout->addStretch();
-    auto *emptyIcon = label({}, empty);
-    emptyIcon->setPixmap(icon("ebook").pixmap(QSize(48, 48)));
-    emptyIcon->setAlignment(Qt::AlignCenter);
-    emptyLayout->addWidget(emptyIcon);
-    const QList<QPair<QString, QString>> emptyLabels = {
-        {"emptyTitle", tr("开始记录")},
-        {"emptyDescription", tr("从左侧选择一篇笔记开始，或新建一个笔记本")},
-        {"emptyShortcut", tr("普通笔记 · 静态站点 · 电子书 · 待办事项")}};
-    for (const auto &entry: emptyLabels) {
-        auto *hint = label(entry.second, empty, true);
-        hint->setObjectName(entry.first);
-        hint->setAlignment(Qt::AlignCenter);
-        emptyLayout->addWidget(hint);
-    }
-    emptyLayout->addStretch();
-    pages_->addWidget(empty);
-    editorSplitter_ = new QSplitter(Qt::Horizontal, pages_);
-    editorSplitter_->setObjectName("editorSplitter");
-    editorSplitter_->setChildrenCollapsible(false);
-    pages_->addWidget(editorSplitter_);
-    editors_ = new QStackedWidget(editorSplitter_);
-    editors_->setObjectName("noteEditors");
-    editors_->setMinimumSize(0, 0);
-    editorSplitter_->addWidget(editors_);
-    preview_ = new MarkdownPreview(editorSplitter_);
-    connect(preview_, &MarkdownPreview::localLinkActivated, this, &MainWindow::openLocalLink);
-    editorSplitter_->addWidget(preview_);
-    preview_->hide();
-    previewTimer_ = new QTimer(this);
-    previewTimer_->setSingleShot(true);
-    previewTimer_->setInterval(180);
-    connect(previewTimer_, &QTimer::timeout, this, [this] {
-        if (const auto *note = documentNote(currentNoteId())) preview_->setMarkdown(note->content, note->id, noteDirectory(note->id));
+    editorWorkspace_ = new EditorWorkspace(store_, [this] { return save(); }, pages_);
+    pages_->addWidget(editorWorkspace_);
+    connect(editorWorkspace_, &EditorWorkspace::currentDocumentChanged, this, &MainWindow::refreshEditor);
+    connect(editorWorkspace_, &EditorWorkspace::saveRequested, this, [this] { saveTimer_->start(); });
+    connect(editorWorkspace_, &EditorWorkspace::searchRequested, this, [this] {
+        leftRequested_ = true;
+        updatePanels();
+        left_->show();
+        search_->setFocus();
+        search_->selectAll();
     });
-    connect(preview_, &MarkdownPreview::sourceLineChanged, this, [this](int line) {
-        if (!editor_ || !preview_->matchesDocument(editor_->toPlainText(), currentNoteId())) return;
-        editorSessions_[activeEditorId_].previewLine = line;
-        if (viewMode_ != ViewMode::Split) return;
-        const QScopedValueRollback<bool> guard(syncingPreviewScroll_, true);
-        markdownEditor_->scrollToLine(line, false);
+    connect(editorWorkspace_, &EditorWorkspace::notebookRequested, this, [this](const QString &id) {
+        search_->clear();
+        notebooks_->setCurrentIndex(notebooks_->findData(id));
     });
-    connect(preview_, &MarkdownPreview::taskToggled, this, [this](int line, bool checked) {
-        if (!editor_ || !preview_->matchesDocument(editor_->toPlainText(), currentNoteId())) return;
-        const auto block = editor_->document()->findBlockByNumber(line);
-        const QRegularExpression task(R"(^(?:\s*>)*\s*(?:[-*+]|\d+[.)])\s+\[([ xX])\])");
-        const auto match = task.match(block.text());
-        if (!match.hasMatch()) return;
-        QTextCursor cursor(block);
-        cursor.setPosition(block.position() + static_cast<int>(match.capturedStart(1)));
-        cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
-        cursor.insertText(checked ? "x" : " ");
+    connect(editorWorkspace_, &EditorWorkspace::locateRequested, this, [this](const QString &id) {
+        leftRequested_ = true;
+        left_->show();
+        if (width() < 720) right_->hide();
+        QTreeWidgetItemIterator item(tree_);
+        while (*item) {
+            if ((*item)->data(0, Qt::UserRole).toString() == id) {
+                for (auto *parent = (*item)->parent(); parent; parent = parent->parent()) parent->setExpanded(true);
+                tree_->setCurrentItem(*item);
+                tree_->scrollToItem(*item);
+                break;
+            }
+            ++item;
+        }
     });
-    centerLayout->addWidget(pages_, 1);
-    status_ = label({}, center, true);
-    status_->setObjectName("status");
-    centerLayout->addWidget(status_);
-
     right_ = new QWidget(splitter_);
     right_->setObjectName("rightPanel");
     right_->installEventFilter(this);
     auto *rightLayout = column(right_);
-    auto *rightHeader = new QWidget(right_);
-    rightHeader->setObjectName("panelHeader");
-    auto *rightHeaderLayout = row(rightHeader, 18, 16, 6);
-    auto *outlineTitle = label(tr("大纲"), rightHeader, true);
-    outlineTitle->setObjectName("sectionTitle");
-    rightHeaderLayout->addWidget(outlineTitle);
-    rightLayout->addWidget(rightHeader);
-    outlineHint_ = label(tr("打开一篇笔记后自动生成大纲"), right_, true);
-    outlineHint_->setContentsMargins(18, 20, 18, 0);
-    rightLayout->addWidget(outlineHint_);
-    outline_ = new QTreeWidget(right_);
-    outline_->setObjectName("outline");
-    outline_->setHeaderHidden(true);
-    outline_->setRootIsDecorated(false);
-    outline_->setIndentation(14);
-    outline_->setContentsMargins(10, 4, 10, 20);
-    outline_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    outline_->setMinimumSize(0, 0);
-    rightLayout->addWidget(outline_, 1);
+    rightLayout->addWidget(editorWorkspace_->outlinePanel());
     todoWorkspace_ = new TodoWorkspace(store_, pages_);
     pages_->addWidget(todoWorkspace_);
     bodyLayout->addWidget(todoWorkspace_->categoryPanel(), 1);
@@ -632,16 +477,13 @@ void MainWindow::buildUi() {
     connect(tree_, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item) {
         const auto id = item->data(0, Qt::UserRole).toString();
         auto *note = store_.note(id);
-        if (note && !note->folder) openNote(id);
+        if (note && !note->folder) editorWorkspace_->openNote(id);
     });
     connect(tree_, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem *item) {
         const auto id = item->data(0, Qt::UserRole).toString();
         auto *note = store_.note(id);
-        if (note && !note->folder) openNote(id);
+        if (note && !note->folder) editorWorkspace_->openNote(id);
     });
-    connect(tabs_, &QTabBar::currentChanged, this, &MainWindow::refreshEditor);
-    connect(tabs_, &QTabBar::tabCloseRequested, this, &MainWindow::closeTab);
-    connect(tabs_, &QTabBar::customContextMenuRequested, this, &MainWindow::showTabMenu);
     connect(toggleLeft_, &QPushButton::clicked, this, [this] {
         leftRequested_ = !left_->isVisible();
         left_->setVisible(leftRequested_);
@@ -662,173 +504,6 @@ void MainWindow::buildUi() {
         save();
         refreshTree();
     });
-    connect(outline_, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *item) {
-        const int line = item->data(0, Qt::UserRole).toInt();
-        if (viewMode_ == ViewMode::Preview) {
-            preview_->scrollToLine(line);
-        } else {
-            editor_->setTextCursor(QTextCursor(editor_->document()->findBlockByNumber(line)));
-            editor_->ensureCursorVisible();
-            if (viewMode_ == ViewMode::Split) preview_->scrollToLine(line);
-            editor_->setFocus();
-        }
-    });
-}
-
-void MainWindow::buildToolbar() {
-    auto *layout = new FlowLayout(toolbar_, 8, 3);
-    layout->setContentsMargins(8, 1, 8, 1);
-    using Type = vte::TypeAction;
-    struct Tool {
-        QString icon;
-        QString tip;
-        Type action = Type::TypeBold;
-        QVariant data;
-    };
-
-    const auto addSeparator = [&] {
-        auto *separator = new QFrame(toolbar_);
-        separator->setFrameShape(QFrame::VLine);
-        separator->setStyleSheet("color: #e7ebf0; margin: 6px 4px;");
-        separator->setFixedSize(11, 24);
-        layout->addWidget(separator);
-    };
-
-    undo_ = button({}, "toolundo", toolbar_);
-    redo_ = button({}, "toolredo", toolbar_);
-    for (auto *action: {undo_, redo_}) {
-        const bool undo = action == undo_;
-        action->setProperty("tool", true);
-        action->setIcon(icon(undo ? "undo" : "redo"));
-        action->setIconSize(QSize(24, 24));
-        action->setToolTip(undo ? tr("撤销") : tr("重做"));
-        action->setFocusPolicy(Qt::NoFocus);
-        action->setEnabled(false);
-        layout->addWidget(action);
-        connect(action, &QPushButton::clicked, this, [this, undo] {
-            if (!documentNote(currentNoteId())) return;
-            if (viewMode_ == ViewMode::Preview) setPreview(false);
-            if (undo) editor_->undo();
-            else editor_->redo();
-            editor_->setFocus();
-        });
-    }
-    addSeparator();
-
-    auto *heading = button({}, "heading", toolbar_);
-    heading->setProperty("tool", true);
-    heading->setIcon(icon("heading"));
-    heading->setIconSize(QSize(24, 24));
-    heading->setToolTip(tr("标题"));
-    heading->setFocusPolicy(Qt::NoFocus);
-    auto *headingMenu = new QMenu(heading);
-    for (int level = 1; level <= 5; ++level) {
-        headingMenu->addAction(QString("H%1").arg(level), this, [this, level] {
-            if (!documentNote(currentNoteId())) return;
-            setPreview(false);
-            markdownEditor_->type(Type::TypeHeading, level);
-        });
-    }
-    heading->setMenu(headingMenu);
-    layout->addWidget(heading);
-    addSeparator();
-
-    const QList<Tool> tools = {
-        {"bold", tr("加粗"), Type::TypeBold},
-        {"mark", tr("高亮"), Type::TypeMark}, {},
-        {"link", tr("链接"), Type::TypeLink}, {"image", tr("图片"), Type::TypeImage}, {},
-        {"list", tr("无序列表"), Type::TypeUnorderedList}, {"ordered", tr("有序列表"), Type::TypeOrderedList},
-        {"task", tr("任务列表"), Type::TypeTodoList, false}, {"quote", tr("引用"), Type::TypeQuote}, {},
-        {"code", tr("行内代码"), Type::TypeCode}, {"codeblock", tr("代码块"), Type::TypeCodeBlock},
-        {"math", tr("行内公式"), Type::TypeMath}, {"mathblock", tr("公式块"), Type::TypeMathBlock},
-        {"table", tr("表格"), Type::TypeTable}};
-    for (const auto &tool: tools) {
-        if (tool.icon.isEmpty()) {
-            addSeparator();
-            continue;
-        }
-        auto *action = button({}, "tool" + tool.icon, toolbar_);
-        action->setProperty("tool", true);
-        action->setIcon(icon(tool.icon));
-        action->setIconSize(QSize(24, 24));
-        action->setToolTip(tool.tip);
-        action->setFocusPolicy(Qt::NoFocus);
-        layout->addWidget(action);
-        connect(action, &QPushButton::clicked, this, [this, tool] {
-            if (!documentNote(currentNoteId())) return;
-            setPreview(false);
-            markdownEditor_->type(tool.action, tool.data);
-        });
-    }
-    auto *more = button({}, "editorOptions", toolbar_);
-    more->setProperty("tool", true);
-    more->setIcon(icon("more"));
-    more->setIconSize(QSize(24, 24));
-    more->setToolTip(tr("更多 Markdown 语法"));
-    more->setFocusPolicy(Qt::NoFocus);
-    auto *diagramMenu = new QMenu(more);
-    struct Diagram {
-        QString title;
-        QString source;
-        QString language = "mermaid";
-    };
-    const QList<Diagram> diagrams = {
-        {tr("流程图"), "flowchart TD\n    A[开始] --> B{是否完成？}\n    B -->|是| C[结束]\n    B -->|否| D[继续处理]\n    D --> B"},
-        {tr("时序图"), "sequenceDiagram\n    participant U as 用户\n    participant S as 系统\n    U->>S: 发送请求\n    S-->>U: 返回结果"},
-        {tr("类图"), "classDiagram\n    Animal <|-- Cat\n    class Animal {\n        +String name\n        +eat()\n    }\n    class Cat {\n        +meow()\n    }"},
-        {tr("甘特图"), "gantt\n    title 项目计划\n    dateFormat YYYY-MM-DD\n    section 开发\n    需求分析 :a, 2026-01-01, 2d\n    功能实现 :b, after a, 3d\n    测试验收 :after b, 2d"},
-        {tr("饼图"), "pie title 时间分配\n    \"工作\" : 8\n    \"休息\" : 8\n    \"其他\" : 8"},
-        {tr("脑图"), "mindmap\n    root((项目计划))\n        需求\n            用户调研\n            功能列表\n        开发\n            编码\n            测试"},
-        {tr("坐标轴图"), "xychart\n    title \"月度销售额\"\n    x-axis [\"一月\", \"二月\", \"三月\", \"四月\"]\n    y-axis \"销售额\" 0 --> 100\n    bar [30, 50, 70, 90]\n    line [20, 40, 60, 80]"},
-        {tr("数字时序图"), R"({
-  "signal": [
-    { "name": "clk",  "wave": "p........" },
-    { "name": "addr", "wave": "x.====x.", "data": ["A0", "A1"] },
-    { "name": "wr",   "wave": "0.1..0.." },
-    { "name": "data", "wave": "x..===x.", "data": ["D0"] }
-  ]
-})", "wavedrom"}};
-    for (const auto &diagram: diagrams) {
-        diagramMenu->addAction(diagram.title, this, [this, diagram] {
-            if (!documentNote(currentNoteId())) return;
-            setPreview(false);
-            auto cursor = editor_->textCursor();
-            cursor.beginEditBlock();
-            cursor.insertText("\n\n```" + diagram.language + "\n" + diagram.source + "\n```\n\n");
-            cursor.endEditBlock();
-            editor_->setTextCursor(cursor);
-            editor_->setFocus();
-        });
-    }
-    more->setMenu(diagramMenu);
-    layout->addWidget(more);
-    auto *modes = new QWidget(toolbar_);
-    modes->setProperty("alignRight", true);
-    modes->setObjectName("viewModes");
-    auto *modeLayout = row(modes, 3, 3, 2);
-    editMode_ = button({}, "editMode", modes);
-    editMode_->setIcon(icon("edit"));
-    editMode_->setIconSize(QSize(20, 20));
-    editMode_->setToolTip(tr("编辑"));
-    previewMode_ = button({}, "previewMode", modes);
-    previewMode_->setIcon(icon("preview"));
-    previewMode_->setIconSize(QSize(20, 20));
-    previewMode_->setToolTip(tr("预览"));
-    splitMode_ = button({}, "splitMode", modes);
-    splitMode_->setIcon(icon("split"));
-    splitMode_->setIconSize(QSize(20, 20));
-    splitMode_->setToolTip(tr("分屏"));
-    auto *group = new QButtonGroup(modes);
-    for (auto *mode: {editMode_, previewMode_, splitMode_}) {
-        mode->setProperty("mode", true);
-        mode->setCheckable(true);
-        group->addButton(mode);
-        modeLayout->addWidget(mode);
-    }
-    layout->addWidget(modes);
-    connect(editMode_, &QPushButton::clicked, this, [this] { setPreview(false); });
-    connect(previewMode_, &QPushButton::clicked, this, [this] { setPreview(true); });
-    connect(splitMode_, &QPushButton::clicked, this, [this] { setViewMode(ViewMode::Split); });
 }
 
 void MainWindow::refreshNotebooks() {
@@ -927,7 +602,7 @@ void MainWindow::refreshTree() {
                 tree_->addTopLevelItem(item);
                 nodes.insert(note.id, item);
             }
-            if (note.id == currentNoteId()) tree_->setCurrentItem(item);
+            if (note.id == editorWorkspace_->currentNoteId()) tree_->setCurrentItem(item);
         }
         ++matches;
     }
@@ -953,7 +628,7 @@ void MainWindow::refreshTree() {
     }
     QTreeWidgetItemIterator active(tree_);
     while (*active) {
-        if ((*active)->data(0, Qt::UserRole).toString() == currentNoteId()) tree_->setCurrentItem(*active);
+        if ((*active)->data(0, Qt::UserRole).toString() == editorWorkspace_->currentNoteId()) tree_->setCurrentItem(*active);
         ++active;
     }
     if (!query.isEmpty()) treeHint_->setText(tr("找到 %1 篇笔记").arg(matches));
@@ -961,287 +636,6 @@ void MainWindow::refreshTree() {
         treeHint_->setText(book->type == "site" ? tr("暂无文章，右键新建") : book->type == "ebook" ? tr("暂无章节，右键添加")
                                                                                                : tr("暂无内容，右键新建"));
     treeHint_->setVisible(!query.isEmpty() || book->notes.isEmpty());
-}
-
-QString MainWindow::currentNoteId() const {
-    for (const auto &book: store_.notebooks) {
-        if (book.id == currentNotebookId_ && book.type == "todo") return {};
-    }
-    return tabs_->tabData(tabs_->currentIndex()).toString();
-}
-
-Note *MainWindow::documentNote(const QString &id) {
-    auto it = externalFiles_.find(id);
-    return it == externalFiles_.end() ? store_.note(id) : &it.value();
-}
-
-void MainWindow::openExternalFile(const QString &path) {
-    const QFileInfo info(path);
-    const auto canonicalPath = info.canonicalFilePath();
-    if (!info.isFile()) return;
-    for (const auto &book: store_.notebooks) {
-        if (book.type == "todo") continue;
-        for (const auto &note: book.notes) {
-            if (!note.folder && QFileInfo(QDir(book.path).filePath(note.path)).canonicalFilePath() == canonicalPath) {
-                openNote(note.id);
-                return;
-            }
-        }
-    }
-    const auto id = QUrl::fromLocalFile(canonicalPath).toString();
-    if (!externalFiles_.contains(id)) {
-        QFile file(canonicalPath);
-        if (!file.open(QIODevice::ReadOnly)) {
-            QMessageBox::warning(this, tr("无法读取笔记"), file.errorString());
-            return;
-        }
-        const auto bytes = file.readAll();
-        QStringDecoder decoder(QStringDecoder::Utf8, QStringDecoder::Flag::Stateless);
-        const QString content = decoder(bytes);
-        if (decoder.hasError() || content.contains(QChar::Null)) {
-            QMessageBox::warning(this, tr("无法读取笔记"), tr("文件不是有效的 UTF-8 文本：%1").arg(path));
-            return;
-        }
-        Note note{id, {}, info.fileName(), content, false, {}, canonicalPath};
-        note.metadata["utf8Bom"] = bytes.startsWith("\xef\xbb\xbf");
-        note.metadata["crlf"] = bytes.contains("\r\n");
-        note.content.replace("\r\n", "\n");
-        externalFiles_.insert(id, note);
-    }
-    openNote(id);
-}
-
-QString MainWindow::noteDirectory(const QString &id) {
-    if (externalFiles_.contains(id)) return QFileInfo(externalFiles_[id].path).absolutePath();
-    const auto *note = store_.note(id);
-    const auto *book = store_.owner(id);
-    if (!note || !book) return {};
-    return note->path.isEmpty() ? book->path : QFileInfo(book->path + '/' + note->path).absolutePath();
-}
-
-void MainWindow::openLocalLink(const QUrl &url) {
-    const QFileInfo target(url.toLocalFile());
-    if (!target.exists()) {
-        QMessageBox::warning(this, tr("无法打开链接"), tr("链接目标不存在：%1").arg(target.filePath()));
-        return;
-    }
-    const auto path = target.canonicalFilePath();
-    for (const auto &book: store_.notebooks) {
-        if (book.type == "todo") continue;
-        for (const auto &note: book.notes) {
-            if (note.folder || QFileInfo(book.path + '/' + note.path).canonicalFilePath() != path) continue;
-            const auto bookId = book.id;
-            const auto noteId = note.id;
-            const auto mode = viewMode_;
-            search_->clear();
-            notebooks_->setCurrentIndex(notebooks_->findData(bookId));
-            openNote(noteId);
-            setViewMode(mode);
-            preview_->scrollToAnchor(url.fragment(QUrl::FullyDecoded));
-            return;
-        }
-    }
-    if (!QDesktopServices::openUrl(url)) {
-        QMessageBox::warning(this, tr("无法打开链接"), tr("无法打开链接目标：%1").arg(target.filePath()));
-    }
-}
-
-void MainWindow::openNote(const QString &id) {
-    const auto *owner = store_.owner(id);
-    if (owner && owner->type == "todo") return;
-    for (int index = 0; index < tabs_->count(); ++index) {
-        if (tabs_->tabData(index).toString() == id) {
-            tabs_->setCurrentIndex(index);
-            return;
-        }
-    }
-    const auto *note = documentNote(id);
-    if (!note || note->folder) return;
-    {
-        const QSignalBlocker blocker(tabs_);
-        const int index = tabs_->addTab(note->title);
-        tabs_->setTabData(index, id);
-        tabs_->setTabToolTip(index, note->title);
-        tabs_->setCurrentIndex(index);
-    }
-    refreshEditor();
-}
-
-void MainWindow::showTabMenu(const QPoint &position) {
-    const int index = tabs_->tabAt(position);
-    if (index < 0) return;
-    const auto id = tabs_->tabData(index).toString();
-    const auto *note = documentNote(id);
-    const auto *book = store_.owner(id);
-    if (!note) return;
-    const auto path = book ? (note->path.isEmpty() ? QString() : QDir(book->path).absoluteFilePath(note->path)) : note->path;
-    const auto bookId = book ? book->id : QString();
-    QMenu menu(this);
-    auto *copyRelativePath = menu.addAction(tr("复制相对路径"), this, [relativePath = note->path] {
-        QApplication::clipboard()->setText(QDir::toNativeSeparators(relativePath));
-    });
-    copyRelativePath->setEnabled(book && !path.isEmpty());
-    auto *copyPath = menu.addAction(tr("复制绝对路径"), this, [path] {
-        QApplication::clipboard()->setText(QDir::toNativeSeparators(path));
-    });
-    copyPath->setEnabled(!path.isEmpty());
-    auto *openPath = menu.addAction(tr("打开路径"), this, [path] {
-        QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(path).absolutePath()));
-    });
-    openPath->setEnabled(!path.isEmpty());
-    auto *locate = menu.addAction(tr("定位节点"), this, [this, index, id, bookId] {
-        notebooks_->setCurrentIndex(notebooks_->findData(bookId));
-        search_->clear();
-        tabs_->setCurrentIndex(index);
-        leftRequested_ = true;
-        left_->show();
-        if (width() < 720) right_->hide();
-        QTreeWidgetItemIterator item(tree_);
-        while (*item) {
-            if ((*item)->data(0, Qt::UserRole).toString() == id) {
-                for (auto *parent = (*item)->parent(); parent; parent = parent->parent()) parent->setExpanded(true);
-                tree_->setCurrentItem(*item);
-                tree_->scrollToItem(*item);
-                break;
-            }
-            ++item;
-        }
-    });
-    locate->setEnabled(book);
-    menu.addSeparator();
-    menu.addAction(tr("全部保存"), this, [this] { save(); });
-    menu.addAction(tr("关闭标签"), this, [this, index] { closeTab(index); });
-    const auto closeTabs = [this, id](bool keepTarget) {
-        if (!save()) return;
-        {
-            const QSignalBlocker blocker(tabs_);
-            for (int tab = tabs_->count() - 1; tab >= 0; --tab) {
-                const auto noteId = tabs_->tabData(tab).toString();
-                if (keepTarget && noteId == id) continue;
-                tabs_->removeTab(tab);
-                removeEditor(noteId);
-            }
-        }
-        refreshEditor();
-    };
-    auto *closeOthers = menu.addAction(tr("关闭其他标签"), this, [closeTabs] { closeTabs(true); });
-    closeOthers->setEnabled(tabs_->count() > 1);
-    menu.addAction(tr("关闭所有标签"), this, [closeTabs] { closeTabs(false); });
-    menu.exec(tabs_->mapToGlobal(position));
-}
-
-void MainWindow::closeTab(int index) {
-    if (!save()) return;
-    const auto id = tabs_->tabData(index).toString();
-    {
-        const QSignalBlocker blocker(tabs_);
-        tabs_->removeTab(index);
-    }
-    removeEditor(id);
-    refreshEditor();
-}
-
-void MainWindow::activateEditor(const QString &id) {
-    if (activeEditorId_ == id) return;
-    if (editorSessions_.contains(activeEditorId_)) {
-        auto &previous = editorSessions_[activeEditorId_];
-        previous.verticalScroll = editor_->verticalScrollBar()->value();
-        previous.horizontalScroll = editor_->horizontalScrollBar()->value();
-        markdownEditor_->setObjectName("inactiveMarkdownEditor");
-        editor_->setObjectName("inactiveEditor");
-    }
-    previewTimer_->stop();
-    if (!editorSessions_.contains(id)) {
-        EditorSession session;
-        auto *documentEditor = new MarkdownEditor(editors_);
-        auto *textEdit = documentEditor->getTextEdit();
-        textEdit->viewport()->installEventFilter(this);
-        textEdit->setPlaceholderText(tr("开始书写 Markdown..."));
-        textEdit->setProperty("noteId", id);
-        session.editor = documentEditor;
-        editors_->addWidget(documentEditor);
-        editorSessions_.insert(id, session);
-        connect(textEdit, &QTextEdit::undoAvailable, this, [this, id](bool available) {
-            if (activeEditorId_ == id) undo_->setEnabled(available);
-        });
-        connect(textEdit, &QTextEdit::redoAvailable, this, [this, id](bool available) {
-            if (activeEditorId_ == id) redo_->setEnabled(available);
-        });
-        connect(documentEditor, &MarkdownEditor::settingsChanged, this, [this, documentEditor] {
-            for (const auto &session: editorSessions_) {
-                if (session.editor != documentEditor) session.editor->reloadSettings();
-            }
-        });
-        connect(documentEditor, &vte::VMarkdownEditor::headingsUpdated, this,
-                [this, id, textEdit](const QVector<vte::md::HeadingInfo> &headings, bool) {
-            auto &cached = editorSessions_[id].headings;
-            cached.clear();
-            for (const auto &heading: headings) {
-                cached.append({heading.m_title, heading.m_level, textEdit->document()->findBlock(heading.m_startPos).blockNumber()});
-            }
-            if (activeEditorId_ == id) refreshOutline();
-        });
-        documentEditor->setBasePath(noteDirectory(id));
-        documentEditor->setText(documentNote(id)->content);
-        connect(textEdit, &QTextEdit::textChanged, this, [this, id, textEdit] {
-            auto *note = documentNote(id);
-            if (!note) return;
-            const auto text = textEdit->toPlainText();
-            if (note->content == text) return;
-            note->content = text;
-            note->contentDirty = true;
-            for (int index = 0; index < tabs_->count(); ++index) {
-                if (tabs_->tabData(index).toString() == id) tabs_->setTabIcon(index, icon("dirty"));
-            }
-            if (activeEditorId_ == id) {
-                updateStatus();
-                if (viewMode_ != ViewMode::Edit) previewTimer_->start();
-            }
-            saveTimer_->start();
-        });
-        connect(textEdit->verticalScrollBar(), &QScrollBar::valueChanged, this, [this, id, documentEditor] {
-            if (activeEditorId_ == id && viewMode_ == ViewMode::Split && !syncingPreviewScroll_) {
-                preview_->scrollToLine(documentEditor->getTopLine());
-            }
-        });
-    }
-    auto &session = editorSessions_[id];
-    activeEditorId_ = id;
-    markdownEditor_ = session.editor;
-    editor_ = markdownEditor_->getTextEdit();
-    undo_->setEnabled(editor_->document()->isUndoAvailable());
-    redo_->setEnabled(editor_->document()->isRedoAvailable());
-    markdownEditor_->setObjectName("markdownEditor");
-    editor_->setObjectName("editor");
-    editors_->setCurrentWidget(markdownEditor_);
-    setViewMode(session.mode);
-    // Layout changes on show can scroll QTextEdit to its caret. Restore the
-    // viewport after that layout without moving the retained cursor/selection.
-    QTimer::singleShot(0, markdownEditor_, [this, id, vertical = session.verticalScroll, horizontal = session.horizontalScroll] {
-        if (activeEditorId_ != id) return;
-        const QScopedValueRollback<bool> guard(syncingPreviewScroll_, true);
-        editor_->verticalScrollBar()->setValue(vertical);
-        editor_->horizontalScrollBar()->setValue(horizontal);
-        if (viewMode_ != ViewMode::Edit) {
-            preview_->scrollToLine(viewMode_ == ViewMode::Split ? markdownEditor_->getTopLine() : editorSessions_[id].previewLine);
-        }
-    });
-}
-
-void MainWindow::removeEditor(const QString &id) {
-    if (!editorSessions_.contains(id)) return;
-    auto session = editorSessions_.take(id);
-    if (activeEditorId_ == id) {
-        activeEditorId_.clear();
-        markdownEditor_ = nullptr;
-        editor_ = nullptr;
-    }
-    editors_->removeWidget(session.editor);
-    disconnect(session.editor, nullptr, this, nullptr);
-    disconnect(session.editor->getTextEdit(), nullptr, this, nullptr);
-    disconnect(session.editor->getTextEdit()->verticalScrollBar(), nullptr, this, nullptr);
-    delete session.editor;
-    externalFiles_.remove(id);
 }
 
 void MainWindow::refreshEditor() {
@@ -1253,104 +647,11 @@ void MainWindow::refreshEditor() {
         splitter_->setSizes(todo ? QList<int>{264, 640, qMax(240, width() - 904)}
                                 : QList<int>{264, qMax(240, width() - 496), 232});
     }
-    tabs_->parentWidget()->setVisible(!todo);
-    status_->setVisible(!todo);
+    pages_->setCurrentWidget(todo ? static_cast<QWidget *>(todoWorkspace_) : editorWorkspace_);
     todoWorkspace_->detailsPanel()->setVisible(todo);
-    outline_->setVisible(!todo);
-    right_->findChild<QWidget *>("panelHeader")->setVisible(!todo);
-    for (auto *mode: {editMode_, previewMode_, splitMode_}) mode->setVisible(!todo);
-    if (todo) {
-        toolbar_->hide();
-        outlineHint_->hide();
-        previewTimer_->stop();
-        pages_->setCurrentWidget(todoWorkspace_);
-        refreshTree();
-        return;
-    }
-    const auto id = currentNoteId();
-    const auto *note = documentNote(id);
-    toolbar_->setVisible(note);
-    if (note) {
-        activateEditor(id);
-        setViewMode(viewMode_);
-    } else {
-        pages_->setCurrentIndex(0);
-        previewTimer_->stop();
-        if (preview_->revision() > 0) preview_->setMarkdown({}, {});
-        status_->clear();
-    }
-    refreshOutline();
+    editorWorkspace_->outlinePanel()->setVisible(!todo);
+    editorWorkspace_->refresh(todo);
     refreshTree();
-}
-
-void MainWindow::setPreview(bool enabled) {
-    setViewMode(enabled ? ViewMode::Preview : ViewMode::Edit);
-}
-
-void MainWindow::setViewMode(ViewMode mode) {
-    const auto *note = documentNote(currentNoteId());
-    if (!note) return;
-    const auto oldMode = viewMode_;
-    const auto sessionMode = editorSessions_[activeEditorId_].mode;
-    const int line = sessionMode == ViewMode::Preview ? editorSessions_[activeEditorId_].previewLine : markdownEditor_->getTopLine();
-    const QScopedValueRollback<bool> guard(syncingPreviewScroll_, true);
-    viewMode_ = mode;
-    markdownEditor_->setSplitMode(mode == ViewMode::Split);
-    editMode_->setChecked(mode == ViewMode::Edit);
-    previewMode_->setChecked(mode == ViewMode::Preview);
-    splitMode_->setChecked(mode == ViewMode::Split);
-    editors_->setVisible(mode != ViewMode::Preview);
-    editorSessions_[activeEditorId_].mode = mode;
-    preview_->setVisible(mode != ViewMode::Edit);
-    pages_->setCurrentIndex(1);
-    if (mode != ViewMode::Edit) preview_->setMarkdown(note->content, note->id, noteDirectory(note->id));
-    else previewTimer_->stop();
-    if (mode == ViewMode::Split && oldMode != ViewMode::Split) {
-        editorSplitter_->setSizes({editorSplitter_->width() / 2, editorSplitter_->width() / 2});
-    }
-    if (mode != sessionMode) {
-        editorSessions_[activeEditorId_].previewLine = line;
-        // Showing or resizing the editor may scroll to its caret. Restore the
-        // source line after layout without changing the retained selection.
-        QTimer::singleShot(0, markdownEditor_, [this, id = activeEditorId_, mode, line] {
-            if (activeEditorId_ != id || viewMode_ != mode) return;
-            const QScopedValueRollback<bool> guard(syncingPreviewScroll_, true);
-            if (mode != ViewMode::Preview) {
-                vte::TextEditUtils::scrollBlockInPage(editor_, line, vte::TextEditUtils::PagePosition::Top);
-            }
-            if (mode != ViewMode::Edit) preview_->scrollToLine(line);
-        });
-    }
-    updateStatus();
-}
-
-void MainWindow::refreshOutline() {
-    const auto *book = store_.notebook(currentNotebookId_);
-    if (book && book->type == "todo") return;
-    outline_->clear();
-    const auto *note = documentNote(currentNoteId());
-    outlineHint_->setText(note ? tr("本文暂无标题") : tr("打开一篇笔记后自动生成大纲"));
-    if (note && editorSessions_.contains(note->id)) {
-        QList<QPair<int, QTreeWidgetItem *>> parents;
-        for (const auto &heading: editorSessions_[note->id].headings) {
-            while (!parents.isEmpty() && parents.last().first >= heading.level) parents.removeLast();
-            auto *item = new QTreeWidgetItem;
-            item->setText(0, heading.title);
-            item->setData(0, Qt::UserRole, heading.line);
-            if (parents.isEmpty()) outline_->addTopLevelItem(item);
-            else parents.last().second->addChild(item);
-            parents.append({heading.level, item});
-        }
-        outline_->expandAll();
-    }
-    outlineHint_->setVisible(outline_->topLevelItemCount() == 0);
-}
-
-void MainWindow::updateStatus() {
-    const auto *note = documentNote(currentNoteId());
-    if (!note) return;
-    status_->setText(tr("%1 字 · %2 行 · %3").arg(note->content.size()).arg(note->content.count('\n') + 1).arg(viewMode_ == ViewMode::Split ? tr("分屏") : viewMode_ == ViewMode::Preview ? tr("预览")
-                                                                                                                                                                                          : tr("编辑中")));
 }
 
 void MainWindow::updatePanels() {
@@ -1463,27 +764,6 @@ void MainWindow::changeEvent(QEvent *event) {
 }
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
-    if (((watched == pages_ && pages_->currentWidget() != todoWorkspace_) || (editor_ && watched == editor_->viewport()))
-        && (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove || event->type() == QEvent::Drop)) {
-        auto *drop = dynamic_cast<QDropEvent *>(event);
-        if (!drop) return QMainWindow::eventFilter(watched, event);
-        QStringList paths;
-        for (const auto &url: drop->mimeData()->urls()) {
-            if (!url.isLocalFile()) continue;
-            const QFileInfo info(url.toLocalFile());
-            if (!info.isFile()) continue;
-            const auto mime = QMimeDatabase().mimeTypeForFile(info);
-            if (info.size() == 0 || (mime.inherits("text/plain") && !mime.name().startsWith("image/"))) paths.append(info.filePath());
-        }
-        if (!paths.isEmpty()) {
-            drop->setDropAction(Qt::CopyAction);
-            drop->accept();
-            if (event->type() == QEvent::Drop) {
-                for (const auto &path: paths) openExternalFile(path);
-            }
-            return true;
-        }
-    }
     if (event->type() == QEvent::ShowToParent || event->type() == QEvent::HideToParent) {
         if (watched == left_) toggleLeft_->setIcon(icon(left_->isHidden() ? "leftCollapsed" : "left"));
         if (watched == right_) toggleRight_->setIcon(icon(right_->isHidden() ? "rightCollapsed" : "right"));
@@ -1520,66 +800,13 @@ bool MainWindow::save() {
         QMessageBox::warning(this, tr("无法保存笔记"), error);
         return false;
     }
-    return saveEditors();
+    return editorWorkspace_->saveExternalFilesAndSync();
 }
 
 void MainWindow::applyRemoval(const NotebookStore::RemovalResult &result) {
-    {
-        const QSignalBlocker blocker(tabs_);
-        for (int index = tabs_->count() - 1; index >= 0; --index) {
-            const auto id = tabs_->tabData(index).toString();
-            if (!result.removedIds.contains(id)) continue;
-            tabs_->removeTab(index);
-            removeEditor(id);
-        }
-    }
-    if (result.saved) saveEditors();
+    editorWorkspace_->removeDocuments(result.removedIds);
+    if (result.saved) editorWorkspace_->saveExternalFilesAndSync();
     if (!result.error.isEmpty()) QMessageBox::warning(this, tr("删除"), result.error);
-}
-
-bool MainWindow::saveEditors() {
-    for (auto &note: externalFiles_) {
-        if (!note.contentDirty) continue;
-        auto content = note.content;
-        if (note.metadata["crlf"].toBool()) content.replace("\n", "\r\n");
-        auto bytes = content.toUtf8();
-        if (note.metadata["utf8Bom"].toBool()) bytes.prepend("\xef\xbb\xbf");
-        QSaveFile file(note.path);
-        if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) {
-            QMessageBox::warning(this, tr("无法保存笔记"), file.errorString());
-            return false;
-        }
-        note.contentDirty = false;
-    }
-    for (auto it = editorSessions_.cbegin(); it != editorSessions_.cend(); ++it) {
-        const auto directory = noteDirectory(it.key());
-        const auto *note = documentNote(it.key());
-        if (note && it->editor->getText() != note->content) {
-            const auto previous = it->editor->getTextEdit()->textCursor();
-            const int anchor = previous.anchor();
-            const int position = previous.position();
-            it->editor->setText(note->content);
-            auto cursor = it->editor->getTextEdit()->textCursor();
-            const int end = it->editor->document()->characterCount() - 1;
-            cursor.setPosition(qMin(anchor, end));
-            cursor.setPosition(qMin(position, end), QTextCursor::KeepAnchor);
-            it->editor->getTextEdit()->setTextCursor(cursor);
-        }
-        if (it->editor->getBasePath() == directory) continue;
-        it->editor->setBasePath(directory);
-        it->editor->getPreviewMgr()->refreshPreview();
-    }
-    if (viewMode_ != ViewMode::Edit) {
-        if (const auto *note = documentNote(currentNoteId())) preview_->setMarkdown(note->content, note->id, noteDirectory(note->id));
-    }
-    for (int index = 0; index < tabs_->count(); ++index) {
-        if (const auto *note = documentNote(tabs_->tabData(index).toString())) {
-            tabs_->setTabText(index, note->title);
-            tabs_->setTabToolTip(index, note->title);
-            tabs_->setTabIcon(index, {});
-        }
-    }
-    return true;
 }
 
 void MainWindow::closeEvent(QCloseEvent *event) {
@@ -1587,10 +814,8 @@ void MainWindow::closeEvent(QCloseEvent *event) {
         // 记住当前笔记本与全部标签页，供下次启动时恢复。
         QSettings session;
         session.setValue("session/notebookId", currentNotebookId_);
-        session.setValue("session/noteId", currentNoteId());
-        QStringList openNotes;
-        for (int index = 0; index < tabs_->count(); ++index) openNotes << tabs_->tabData(index).toString();
-        session.setValue("session/openNotes", openNotes);
+        session.setValue("session/noteId", editorWorkspace_->currentNoteId());
+        session.setValue("session/openNotes", editorWorkspace_->openDocuments());
         session.setValue("session/leftPanelExpanded", leftRequested_);
         session.setValue("session/rightPanelExpanded", rightRequested_);
         session.setValue("session/mainSplitter", splitter_->saveState());
@@ -1683,13 +908,11 @@ void MainWindow::checkForUpdates(QLabel *status) {
 }
 
 void MainWindow::showSettings() {
-    SettingsDialog dialog(markdownEditor_, this);
+    SettingsDialog dialog(editorWorkspace_->activeEditor(), this);
     connect(&dialog, &SettingsDialog::updateCheckRequested, this, &MainWindow::checkForUpdates);
     if (dialog.exec() != QDialog::Accepted) return;
     applyUiSettings();
-    if (!markdownEditor_) {
-        for (const auto &session: editorSessions_) session.editor->reloadSettings();
-    }
+    if (!editorWorkspace_->activeEditor()) editorWorkspace_->reloadSettings();
     tray_->setVisible(QSettings().value("General/minimizeToTray", false).toBool() && QSystemTrayIcon::isSystemTrayAvailable());
 }
 
@@ -1804,17 +1027,9 @@ void MainWindow::closeNotebook() {
     if (!save()) return;
     ArticleRenderer(book->path, book->type == "site" ? "sites" : "notebooks").clearCache();
     const QString id = book->id;
-    {
-        const QSignalBlocker blocker(tabs_);
-        for (int index = tabs_->count() - 1; index >= 0; --index) {
-            const auto noteId = tabs_->tabData(index).toString();
-            const auto *owner = store_.owner(noteId);
-            if (owner && owner->id == id) {
-                tabs_->removeTab(index);
-                removeEditor(noteId);
-            }
-        }
-    }
+    QSet<QString> noteIds;
+    for (const auto &note: book->notes) noteIds.insert(note.id);
+    editorWorkspace_->removeDocuments(noteIds);
     for (int index = 0; index < store_.notebooks.size(); ++index) {
         if (store_.notebooks[index].id == id) {
             store_.notebooks.removeAt(index);
@@ -1844,8 +1059,7 @@ void MainWindow::createNote(const QString &parentId, bool folder, const QString 
         book->notes.append(note);
         save();
         refreshTree();
-        openNote(note.id);
-        setViewMode(ViewMode::Edit);
+        editorWorkspace_->openNote(note.id, true);
         return;
     }
     const auto kind = folder ? tr("文件夹") : book->type == "ebook" ? tr("章节")
@@ -1863,8 +1077,7 @@ void MainWindow::createNote(const QString &parentId, bool folder, const QString 
     save();
     refreshTree();
     if (!folder) {
-        openNote(note.id);
-        setViewMode(ViewMode::Edit);
+        editorWorkspace_->openNote(note.id, true);
     }
 }
 
@@ -2002,9 +1215,9 @@ void MainWindow::exportNotebook() {
     if (book->type == "site") {
         publishSite(*book);
     } else if (book->type == "normal" || book->type == "ebook") {
-        EbookExportDialog dialog(*book, currentNoteId(), this);
+        EbookExportDialog dialog(*book, editorWorkspace_->currentNoteId(), this);
         const auto path = dialog.run();
-        if (!path.isEmpty()) status_->setText(tr("已导出至 ") + path);
+        if (!path.isEmpty()) editorWorkspace_->showStatus(tr("已导出至 ") + path);
     }
 }
 
@@ -2027,11 +1240,11 @@ void MainWindow::publishSite(const Notebook &book) {
     const bool ok = SitePublisher::publish(snapshot, &error);
     progress.close();
     if (!ok) {
-        status_->setText(tr("站点发布失败"));
+        editorWorkspace_->showStatus(tr("站点发布失败"));
         QMessageBox::warning(this, tr("站点发布失败"), error);
         return;
     }
-    status_->setText(snapshot.config["publishMethod"].toString() == "github"
-        ? tr("已推送至 GitHub Pages 发布分支，等待 GitHub 部署完成")
-        : tr("站点已通过 SSH SCP 上传"));
+    editorWorkspace_->showStatus(snapshot.config["publishMethod"].toString() == "github"
+                                         ? tr("已推送至 GitHub Pages 发布分支，等待 GitHub 部署完成")
+                                         : tr("站点已通过 SSH SCP 上传"));
 }

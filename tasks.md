@@ -170,13 +170,13 @@
 
 ### T16 [P2] 提取编辑器工作区与会话状态
 
-- [ ] 完成
+- [x] 完成
 - 依赖：T03、T04、T07、T09、T13、T15。
 - 位置：`EditorSession`、标签管理、`activateEditor()`、`removeEditor()`、`refreshEditor()`、`setViewMode()`、`refreshOutline()`、编辑工具栏及相关信号连接。
 - 工作：提取 `EditorWorkspace`，拥有标签、编辑器生命周期、会话状态、大纲、模式切换、预览定时器及滚动同步；梳理 `save()` 中的数据落盘与编辑器同步边界。
 - 边界：外部文件继续保留 BOM、CRLF 等保存行为；各文档保留自己的撤销历史和视图状态；主窗口通过明确接口连接文档、保存及笔记本选择。
 - 验收：多标签切换和关闭、撤销重做、编辑/预览/分屏、滚动恢复、大纲跳转、任务复选框、搜索替换、外部文件打开保存、会话恢复全部通过回归；待办工作区不受影响。
-- 验证记录：待填写。
+- 验证记录：EditorWorkspace 拥有标签/编辑器生命周期、外部文件、会话、工具栏、大纲、模式、预览定时器与滚动同步；主窗口只协调布局、笔记本、保存结果与设置。同步保存回调保留失败时阻止关闭，笔记本落盘后由工作区保存外部文件并同步编辑器。`cmake --build build --parallel 4`（clang-tidy 开启）及 `tests/editor-workspace.cpp` 通过，覆盖独立撤销/重做、模式/选区/滚动恢复、任务勾选与过期预览保护、搜索替换、待办暂停、BOM/CRLF、关闭失败/对象释放/批量关闭、标签顺序及外部文档会话恢复。workspace-state、todo-workspace、notebook-removal、settings-dialog、post-properties、notebook-categories、chapter-operations、ebook-export-dialog 八项相关回归亦通过。
 
 ## 第四阶段：拆分站点生成器
 

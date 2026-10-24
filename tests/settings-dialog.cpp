@@ -4,6 +4,7 @@
 #include <vtextedit/texteditorconfig.h>
 #include <vtextedit/vtextedit.h>
 #define private public
+#include "ui/EditorWorkspace.h"
 #include "ui/MainWindow.h"
 #undef private
 
@@ -34,7 +35,7 @@ int main(int argc, char **argv) {
     MainWindow window;
     window.resize(1200, 800);
     window.show();
-    require(!window.markdownEditor_, "empty workspace");
+    require(!window.editorWorkspace_->markdownEditor_, "empty workspace");
     QString selectedFamily;
     for (bool save: {false, true}) {
         const auto before = values();
@@ -70,20 +71,20 @@ int main(int argc, char **argv) {
     QFile file(path);
     require(file.open(QIODevice::WriteOnly) && file.write("# Heading\n") > 0, "note fixture");
     file.close();
-    window.openExternalFile(path);
-    require(window.markdownEditor_->baseEditorFontPointSize() == 19 && window.markdownEditor_->getConfig().m_tabStopWidth == 7, "future editor uses saved settings");
+    window.editorWorkspace_->openExternalFile(path);
+    require(window.editorWorkspace_->markdownEditor_->baseEditorFontPointSize() == 19 && window.editorWorkspace_->markdownEditor_->getConfig().m_tabStopWidth == 7, "future editor uses saved settings");
     const auto secondPath = temp.filePath("second.md");
     require(QFile::copy(path, secondPath), "second note fixture");
-    window.openExternalFile(secondPath);
+    window.editorWorkspace_->openExternalFile(secondPath);
     QTimer::singleShot(0, [&] {
         auto *dialog = qobject_cast<SettingsDialog *>(QApplication::activeModalWidget());
         dialog->findChild<QSpinBox *>("fontSize")->setValue(21);
         dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Save)->click();
     });
     window.showSettings();
-    for (const auto &session: window.editorSessions_) require(session.editor->baseEditorFontPointSize() == 21, "all live editor settings applied");
+    for (const auto &session: window.editorWorkspace_->editorSessions_) require(session.editor->baseEditorFontPointSize() == 21, "all live editor settings applied");
     {
-        SettingsDialog dialog(window.markdownEditor_, &window);
+        SettingsDialog dialog(window.editorWorkspace_->markdownEditor_, &window);
         bool requested = false;
         QObject::connect(&dialog, &SettingsDialog::updateCheckRequested, [&](QLabel *status) {
             require(status == dialog.findChild<QLabel *>("updateStatus"), "explicit update status interface");

@@ -4,6 +4,7 @@
 #include <QtWidgets>
 #include <vtextedit/vtextedit.h>
 #define private public
+#include "ui/EditorWorkspace.h"
 #include "ui/MainWindow.h"
 #undef private
 
@@ -65,9 +66,9 @@ int main(int argc, char **argv) {
     window.show();
     const bool chmAvailable = !EbookExporter::chmCompiler().isEmpty();
     for (const auto &type: {QString("normal"), QString("ebook")}) {
-        window.openNote(type + "-current");
-        window.setViewMode(MainWindow::ViewMode::Edit);
-        auto cursor = window.editor_->textCursor();
+        window.editorWorkspace_->openNote(type + "-current");
+        window.editorWorkspace_->setViewMode(EditorWorkspace::ViewMode::Edit);
+        auto cursor = window.editorWorkspace_->editor_->textCursor();
         cursor.select(QTextCursor::Document);
         cursor.insertText("UNSAVED snapshot body");
         window.saveTimer_->stop();
@@ -126,7 +127,7 @@ int main(int argc, char **argv) {
         choose(dialog, EbookExporter::Format::Html, true, directory);
     });
     window.exportNotebook();
-    require(window.status_->text().contains(directory), "export status");
+    require(window.editorWorkspace_->status_->text().contains(directory), "export status");
     window.store_.notebooks.append({"site", "Site", "site", {}, {}, temp.filePath("site")});
     window.currentNotebookId_ = "site";
     bool publishWarning = false, siteConfig = false;

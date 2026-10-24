@@ -1,6 +1,7 @@
 #include "core/NotebookStore.h"
 #include <QtWidgets>
 #define private public
+#include "ui/EditorWorkspace.h"
 #include "ui/MainWindow.h"
 #include "ui/TodoWorkspace.h"
 #undef private
@@ -99,16 +100,16 @@ int main(int argc, char **argv) {
     QSettings().setValue("session/notebookId", "ui");
     MainWindow window;
     window.show();
-    window.openNote("child");
+    window.editorWorkspace_->openNote("child");
     const auto external = temp.filePath("external.md");
     write(external, "Original");
-    window.openExternalFile(external);
-    window.externalFiles_.begin()->content = "Updated";
-    window.externalFiles_.begin()->contentDirty = true;
-    window.openNote("keep");
+    window.editorWorkspace_->openExternalFile(external);
+    window.editorWorkspace_->externalFiles_.begin()->content = "Updated";
+    window.editorWorkspace_->externalFiles_.begin()->contentDirty = true;
+    window.editorWorkspace_->openNote("keep");
     window.applyRemoval(window.store_.removeNotes("ui", {"folder"}));
     window.refreshEditor();
-    require(window.tabs_->count() == 2 && window.currentNoteId() == "keep" && !window.editorSessions_.contains("child"), "close descendant sessions only");
+    require(window.editorWorkspace_->tabs_->count() == 2 && window.editorWorkspace_->currentNoteId() == "keep" && !window.editorWorkspace_->editorSessions_.contains("child"), "close descendant sessions only");
     require(read(external) == "Updated", "save external document alongside deletion");
     Notebook todos{"ui-todo", "Todos", "todo", {}, {}, temp.filePath("ui-todo")};
     for (int i = 0; i < 47; ++i) todos.notes.append({"todo-" + QString::number(i), {}, QString::number(i), "Body", false, {{"completed", i % 2 == 0}, {"category", i % 3 == 0 ? "A" : "B"}}});
