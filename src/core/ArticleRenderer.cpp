@@ -130,7 +130,7 @@ QString ArticleRenderer::html(const QDomDocument &document) {
 bool ArticleRenderer::render(const QString &markdown, const QString &documentId, QDomDocument &document, QString *error) {
     // Cache before callers resolve links, number chapters or package authored images.
     // PlantUML can include external files, so those articles must be rendered again.
-    const bool cacheable = !markdown.contains("plantuml", Qt::CaseInsensitive);
+    const bool cacheable = !markdown.contains("plantuml", Qt::CaseInsensitive) && !markdown.contains("puml", Qt::CaseInsensitive);
     const auto path = cachePath(documentId);
     const auto key = QCryptographicHash::hash("article-v1\n" + rendererFingerprint() + markdown.toUtf8(), QCryptographicHash::Sha256).toHex() + '\n';
     QFile cache(path);

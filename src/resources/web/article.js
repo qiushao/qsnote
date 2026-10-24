@@ -6,6 +6,10 @@ window.qsnoteArticle = (() => {
     let viz = new Viz();
     mermaid.initialize({startOnLoad: false, securityLevel: 'strict', suppressErrorRendering: true,
         theme: 'default', htmlLabels: false, flowchart: {htmlLabels: false}});
+    function codeLanguage(code) {
+        const language = ([...code.classList].find(name => name.startsWith('language-'))?.slice(9) || '').toLowerCase();
+        return language === 'puml' ? 'plantuml' : language;
+    }
     function markdown(text, strict = false) {
         let metadata = '';
         const md = markdownit({html: true, linkify: true, maxNesting: 500});
@@ -67,7 +71,7 @@ window.qsnoteArticle = (() => {
         let waveIndex = 0;
         for (const code of root.querySelectorAll('pre > code')) {
             if (options.cancelled?.()) return;
-            const language = ([...code.classList].find(name => name.startsWith('language-'))?.slice(9) || '').toLowerCase();
+            const language = codeLanguage(code);
             const graph = document.createElement('div');
             graph.className = 'diagram';
             graph.id = `diagram-${++graphId}`;
@@ -124,5 +128,5 @@ window.qsnoteArticle = (() => {
             }
         }
     }
-    return {markdown, graphs};
+    return {markdown, graphs, codeLanguage};
 })();

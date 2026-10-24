@@ -4,7 +4,7 @@ window.qsnoteExport = {
         const root = qsnoteArticle.markdown(text, true);
         document.getElementById('content').replaceChildren(root);
         return [...root.querySelectorAll('pre > code')]
-            .filter(code => /language-plantuml/i.test(code.className)).map(code => code.textContent);
+            .filter(code => qsnoteArticle.codeLanguage(code) === 'plantuml').map(code => code.textContent);
     },
     async finish(plantUml, mathCss) {
         try {

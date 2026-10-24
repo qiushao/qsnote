@@ -29,13 +29,13 @@
 
 ### T02 [P2] 统一 PlantUML 语言别名
 
-- [ ] 完成
+- [x] 完成
 - 依赖：无。
 - 位置：`src/ui/InplacePreview.cpp`、`src/resources/web/article.js`、`src/resources/web/article-export.js`、`src/core/ArticleRenderer.cpp`。
 - 问题：就地预览支持 `plantuml` 和 `puml`，阅读预览与导出仅识别 `plantuml`。
 - 工作：统一语言别名判断，让阅读预览与导出共用 JavaScript 判断逻辑；同步检查 C++ 侧的分派与缓存绕过条件，避免别名支持遗漏在其他入口。
 - 验收：两种语言标记在就地预览、阅读预览、站点生成和电子书导出中都能渲染；非法图表仍有错误反馈；其他图表类型不受影响。
-- 验证记录：待填写。审查阶段已用隔离脚本确认现有 `article.js` 的两个分支行为不同。
+- 验证记录：修复前 `tests/plantuml-aliases.cpp` 复现 puml 导出未生成图片；修复后 `python3 tests/run-regression.py tests/plantuml-aliases.cpp` 通过，覆盖 plantuml/puml/PUML 就地与阅读预览、站点图片落盘、HTML/EPUB 图片、缓存绕过、非法图表错误反馈，以及 Mermaid/Graphviz/普通代码。C++ 就地分派与缩放已支持两个别名，保持原实现。`cmake --build build --parallel 4` 通过。
 
 ### T03 [P3] 消除重复刷新调用
 
