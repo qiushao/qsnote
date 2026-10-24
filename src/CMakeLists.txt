@@ -27,6 +27,8 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         ui/SiteConfigDialog.h
         ui/TodoWorkspace.cpp
         ui/TodoWorkspace.h
+        ui/SitePreviewDialog.cpp
+        ui/SitePreviewDialog.h
         ui/MarkdownEditor.cpp
         ui/MarkdownEditor.h
         ui/InplacePreview.cpp
@@ -42,6 +44,8 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         core/NotebookCategories.h
         core/ChapterOperations.cpp
         core/ChapterOperations.h
+        core/SitePreviewServer.cpp
+        core/SitePreviewServer.h
         core/AtomicFile.cpp
         core/AtomicFile.h
         core/ArticleRenderer.cpp

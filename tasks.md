@@ -150,13 +150,13 @@
 
 ### T14 [P2] 提取站点预览界面与 HTTP 服务
 
-- [ ] 完成
+- [x] 完成
 - 依赖：T11。
 - 位置：匿名命名空间中的 `SiteServer`、`MainWindow::showSitePreview()`。
 - 工作：提取 `SitePreviewServer` 和 `SitePreviewDialog`，分别负责本地文件服务与浏览器界面；主窗口保留生成站点后启动预览的编排。
 - 边界：保留 loopback 监听、站点根路径、GET/HEAD、目录重定向及路径边界检查；对话框关闭时释放服务和浏览器。
 - 验收：各内置主题及自定义主题可预览；子路径站点、搜索和资源加载正确；关闭再打开预览不残留监听服务；站点目录外文件不能被访问。
-- 验证记录：待填写。
+- 验证记录：SitePreviewServer 独立处理文件 HTTP 请求，SitePreviewDialog 拥有服务及浏览器，主窗口保留生成后启动预览。`cmake --build build --parallel 4` 和 `python3 tests/run-regression.py tests/site-preview.cpp` 通过；覆盖 loopback、GET/HEAD、目录重定向与查询参数、缺失/越界/编码穿越/符号链接路径，以及 Pure/NexT/Yilia/3-Jekyll/示例自定义主题在 /blog/ 下的首页/文章/本地资源/搜索索引，逐主题关闭重开后确认浏览器和服务销毁且端口停止监听。
 
 ### T15 [P2] 提取电子书导出对话框
 
