@@ -182,13 +182,13 @@
 
 ### T17 [P2] 提取 front matter 解析模块
 
-- [ ] 完成
+- [x] 完成
 - 依赖：无。
 - 位置：`src/core/SiteGenerator.cpp` 的 `frontMatter()`；对照 `StaticSite::postSource()`、`postBody()` 的职责。
 - 工作：提取独立解析函数或 `FrontMatter` 模块，保留当前 JSON 与简单 YAML 支持范围、正文分离及错误返回。
 - 边界：不要把“剥离 QSNote 自动生成元数据”和“解析作者 front matter”混为同一种操作；不扩展 YAML 语法支持。
 - 验收：无元数据、JSON、简单 YAML、CRLF、无效 JSON、缺失结束分隔符及不支持的 YAML 行都有明确结果；现有站点生成结果保持一致。
-- 验证记录：待填写。
+- 验证记录：FrontMatter::parse 原样迁移 JSON/简单 YAML 解析、CRLF 归一化、正文分离及 SiteGenerator 翻译上下文；StaticSite::postSource/postBody 继续只负责作者元数据保留和 QSNote 自动头剥离。`cmake --build build --parallel 4`、`tests/front-matter.cpp` 与 `tests/site-preview.cpp` 通过；覆盖无元数据、JSON、简单 YAML 标量/列表、CRLF、无效 JSON、缺失/错误分隔符、不支持 YAML 行、作者与自动头的区别、错误源路径及失败保留旧输出，五种主题实际预览保持通过。
 
 ### T18 [P2] 提取站点模板与主题呈现逻辑
 

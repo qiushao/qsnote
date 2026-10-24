@@ -63,6 +63,8 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         core/DiagramRuntime.h
         core/StaticSite.cpp
         core/SiteGenerator.cpp
+        core/FrontMatter.cpp
+        core/FrontMatter.h
         core/SitePublisher.cpp
         core/SitePublisher.h
         core/StaticSite.h
