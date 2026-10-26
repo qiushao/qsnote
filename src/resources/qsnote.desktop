@@ -1,8 +1,9 @@
 [Desktop Entry]
 Type=Application
 Name=QSNote
-Exec=qsnote
+Exec=qsnote -- %F
 Icon=qsnote
 StartupWMClass=qsnote
 Terminal=false
 Categories=Office;
+MimeType=text/markdown;text/x-markdown;

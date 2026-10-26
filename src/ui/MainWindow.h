@@ -29,6 +29,7 @@ class MainWindow : public QMainWindow {
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     void maximizeWindow();
+    void openFile(const QString &path);
 
 protected:
     void resizeEvent(QResizeEvent *event) override;

@@ -26,6 +26,7 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QInputDialog>
@@ -237,6 +238,23 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     auto *escape = new QShortcut(QKeySequence(Qt::Key_Escape), search_);
     escape->setContext(Qt::WidgetShortcut);
     connect(escape, &QShortcut::activated, search_, &QLineEdit::clear);
+}
+
+void MainWindow::openFile(const QString &path) {
+    // Open after session restoration, including files delivered by macOS during startup.
+    QTimer::singleShot(0, this, [this, path] {
+        if (!QFileInfo(path).isFile()) return;
+        const auto *book = store_.notebook(currentNotebookId_);
+        if (book && book->type == "todo") {
+            currentNotebookId_.clear();
+            refreshNotebooks();
+        }
+        editorWorkspace_->openExternalFile(path);
+        if (isMinimized()) showNormal();
+        show();
+        raise();
+        activateWindow();
+    });
 }
 
 void MainWindow::buildUi() {

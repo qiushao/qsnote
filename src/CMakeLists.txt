@@ -85,6 +85,7 @@ target_link_libraries(qsnote PRIVATE qsnote_i18n Qt6::Core Qt6::Gui Qt6::GuiPriv
 target_compile_definitions(qsnote PRIVATE APP_VERSION="${APP_VERSION}")
 
 if (WIN32)
+    target_link_libraries(qsnote PRIVATE shell32)
     add_custom_command(TARGET qsnote POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     $<TARGET_FILE:VTextEdit> $<TARGET_FILE_DIR:qsnote>
@@ -108,6 +109,7 @@ if (UNIX AND NOT APPLE)
 elseif (APPLE)
     set_target_properties(qsnote PROPERTIES
             INSTALL_RPATH "@executable_path/../Frameworks"
+            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/resources/Info.plist.in"
             MACOSX_BUNDLE_ICON_FILE "qsnote.icns")
     set(app_icon "${CMAKE_CURRENT_BINARY_DIR}/qsnote.icns")
     add_custom_command(OUTPUT "${app_icon}"
