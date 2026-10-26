@@ -1287,6 +1287,20 @@ void MainWindow::showTreeMenu(const QPoint &position) {
     }
     if (book && note) {
         if (!menu.actions().isEmpty()) menu.addSeparator();
+        const auto path = note->path.isEmpty() ? QString() : QDir(book->path).absoluteFilePath(note->path);
+        auto *copyRelativePath = menu.addAction(tr("复制相对路径"), this, [relativePath = note->path] {
+            QApplication::clipboard()->setText(QDir::toNativeSeparators(relativePath));
+        });
+        copyRelativePath->setEnabled(!path.isEmpty());
+        auto *copyPath = menu.addAction(tr("复制绝对路径"), this, [path] {
+            QApplication::clipboard()->setText(QDir::toNativeSeparators(path));
+        });
+        copyPath->setEnabled(!path.isEmpty());
+        auto *openPath = menu.addAction(tr("打开路径"), this, [path, folder = note->folder] {
+            QDesktopServices::openUrl(QUrl::fromLocalFile(folder ? path : QFileInfo(path).absolutePath()));
+        });
+        openPath->setEnabled(!path.isEmpty());
+        menu.addSeparator();
         if (book->type == "site") {
             menu.addAction(tr("属性更改"), this, [this, book, id] {
                 auto *target = store_.note(id);
