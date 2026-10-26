@@ -17,6 +17,7 @@
 #include "core/UpdateChecker.h"
 #include <QApplication>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDate>
@@ -26,7 +27,9 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
+#include <QFileIconProvider>
 #include <QFileInfo>
+#include <QFileSystemWatcher>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QInputDialog>
@@ -36,6 +39,7 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QProgressDialog>
@@ -168,6 +172,21 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     const auto available = screen()->availableGeometry().size();
     resize(available.width() * 4 / 5, available.height() * 4 / 5);
     buildUi();
+    fileWatcher_ = new QFileSystemWatcher(this);
+    auto *refreshTimer = new QTimer(this);
+    refreshTimer->setSingleShot(true);
+    refreshTimer->setInterval(200);
+    connect(fileWatcher_, &QFileSystemWatcher::directoryChanged, refreshTimer, [refreshTimer] { refreshTimer->start(); });
+    connect(fileWatcher_, &QFileSystemWatcher::fileChanged, refreshTimer, [this, refreshTimer](const QString &path) {
+        for (auto &book: store_.notebooks) {
+            if (book.type != "normal") continue;
+            for (auto &note: book.notes) {
+                if (QDir(book.path).filePath(note.path) == path) note.metadata.remove("modified");
+            }
+        }
+        refreshTimer->start();
+    });
+    connect(refreshTimer, &QTimer::timeout, this, &MainWindow::refreshDirectories);
     setupTray();
     QTimer::singleShot(1500, this, [this] {
         if (QSettings().value("General/checkUpdatesOnStartup", true).toBool()) checkForUpdates();
@@ -392,19 +411,17 @@ void MainWindow::buildUi() {
     noteTree->orderChanged = [this] {
         auto *book = store_.notebook(currentNotebookId_);
         if (!book) return;
-        QList<Note> reordered;
         QTreeWidgetItemIterator it(tree_);
         while (*it) {
             auto *entry = *it;
             auto *note = store_.note(entry->data(0, Qt::UserRole).toString());
             if (note) {
                 note->parentId = entry->parent() ? entry->parent()->data(0, Qt::UserRole).toString() : QString();
-                reordered.append(*note);
             }
             ++it;
         }
-        book->notes = reordered;
         save();
+        refreshTree();
     };
     tree_->setObjectName("noteTree");
     tree_->setItemDelegate(new NoteDelegate(tree_));
@@ -415,6 +432,18 @@ void MainWindow::buildUi() {
     tree_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     tree_->setContextMenuPolicy(Qt::CustomContextMenu);
     tree_->setMinimumSize(0, 0);
+    auto *copyTree = new QShortcut(QKeySequence::Copy, tree_);
+    copyTree->setContext(Qt::WidgetShortcut);
+    connect(copyTree, &QShortcut::activated, this, [this] {
+        const auto *item = tree_->currentItem();
+        if (item) copyTreeItem(item->data(0, Qt::UserRole).toString());
+    });
+    auto *pasteTree = new QShortcut(QKeySequence::Paste, tree_);
+    pasteTree->setContext(Qt::WidgetShortcut);
+    connect(pasteTree, &QShortcut::activated, this, [this] {
+        const auto *item = tree_->currentItem();
+        pasteTreeFiles(item ? item->data(0, Qt::UserRole).toString() : QString());
+    });
     bodyLayout->addWidget(tree_, 1);
     leftLayout->addWidget(leftBody, 1);
 
@@ -487,20 +516,32 @@ void MainWindow::buildUi() {
         search_->clear();
         refreshNotebooks();
     });
-    connect(search_, &QLineEdit::textChanged, this, [this] {
+    auto *searchTimer = new QTimer(this);
+    searchTimer->setSingleShot(true);
+    searchTimer->setInterval(200);
+    connect(search_, &QLineEdit::textChanged, searchTimer, [searchTimer] { searchTimer->start(); });
+    connect(searchTimer, &QTimer::timeout, this, [this] {
+        auto *book = store_.notebook(currentNotebookId_);
+        if (book && book->type == "normal" && !search_->text().trimmed().isEmpty()) {
+            QString error;
+            if (!NotebookStore::loadAllFiles(*book, &error)) editorWorkspace_->showStatus(error);
+        }
         refreshTree();
     });
     connect(groupBy_, &QComboBox::currentIndexChanged, this, &MainWindow::refreshTree);
     connect(tree_, &QTreeWidget::customContextMenuRequested, this, &MainWindow::showTreeMenu);
-    connect(tree_, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item) {
-        const auto id = item->data(0, Qt::UserRole).toString();
-        auto *note = store_.note(id);
-        if (note && !note->folder) editorWorkspace_->openNote(id);
-    });
     connect(tree_, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem *item) {
         const auto id = item->data(0, Qt::UserRole).toString();
         auto *note = store_.note(id);
         if (note && !note->folder) editorWorkspace_->openNote(id);
+    });
+    connect(tree_, &QTreeWidget::itemExpanded, this, [this](QTreeWidgetItem *item) {
+        auto *book = store_.notebook(currentNotebookId_);
+        const auto *note = store_.note(item->data(0, Qt::UserRole).toString());
+        if (!book || book->type != "normal" || !note || !note->folder || book->loadedDirectories.contains(note->path)) return;
+        QString error;
+        if (!NotebookStore::loadDirectory(*book, note->path, &error)) QMessageBox::warning(this, tr("无法读取笔记"), error);
+        refreshTree();
     });
     connect(toggleLeft_, &QPushButton::clicked, this, [this] {
         leftRequested_ = !left_->isVisible();
@@ -550,6 +591,8 @@ void MainWindow::refreshNotebooks() {
 }
 
 void MainWindow::refreshTree() {
+    watchDirectories();
+    const QSignalBlocker treeBlocker(tree_);
     const auto *currentBook = store_.notebook(currentNotebookId_);
     const bool todo = currentBook && currentBook->type == "todo";
     todoWorkspace_->setNotebook(currentNotebookId_, storageReady_);
@@ -563,8 +606,10 @@ void MainWindow::refreshTree() {
         return;
     }
     QSet<QString> collapsed;
+    QSet<QString> expanded;
     QTreeWidgetItemIterator iterator(tree_);
     while (*iterator) {
+        if ((*iterator)->isExpanded()) expanded.insert((*iterator)->data(0, Qt::UserRole).toString());
         if (!(*iterator)->isExpanded() && (*iterator)->childCount()) collapsed.insert((*iterator)->data(0, Qt::UserRole).toString());
         ++iterator;
     }
@@ -577,8 +622,10 @@ void MainWindow::refreshTree() {
     tree_->setDragDropMode(book->type == "normal" && query.isEmpty() ? QAbstractItemView::InternalMove : QAbstractItemView::NoDragDrop);
     QHash<QString, QTreeWidgetItem *> nodes;
     const auto titles = NotebookStore::chapterTitles(*book);
+    QFileIconProvider fileIcons;
     int matches = 0;
     for (const auto &note: book->notes) {
+        if (book->type == "normal" && !QFileInfo::exists(QDir(book->path).filePath(note.path)) && !QFileInfo(QDir(book->path).filePath(note.path)).isSymLink()) continue;
         if (!query.isEmpty() && (note.folder || (!note.title.contains(query, Qt::CaseInsensitive) && !note.content.contains(query, Qt::CaseInsensitive)))) continue;
         QStringList groups{QString()};
         if (book->type == "site" && query.isEmpty()) {
@@ -595,7 +642,14 @@ void MainWindow::refreshTree() {
             auto *item = new QTreeWidgetItem;
             item->setText(0, titles.value(note.id));
             if (!note.folder) item->setFlags(item->flags() & ~Qt::ItemIsDropEnabled);
-            if (book->type != "ebook") item->setIcon(0, icon(note.folder ? "folder" : book->type));
+            if (book->type == "normal" && note.folder && !book->loadedDirectories.contains(note.path)) item->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
+            if (book->type == "normal") {
+                const QFileInfo file(QDir(book->path).filePath(note.path));
+                const bool markdown = file.suffix().compare("md", Qt::CaseInsensitive) == 0 || file.suffix().compare("markdown", Qt::CaseInsensitive) == 0;
+                item->setIcon(0, note.folder ? icon("folder") : markdown ? icon("site")
+                                                                         : fileIcons.icon(file));
+            } else if (book->type != "ebook")
+                item->setIcon(0, icon(note.folder ? "folder" : book->type));
             item->setData(0, Qt::UserRole, note.id);
             item->setToolTip(0, note.title);
             if (!query.isEmpty()) {
@@ -642,7 +696,7 @@ void MainWindow::refreshTree() {
                 parent->addChild(item);
             }
         }
-        for (auto *item: nodes) item->setExpanded(!collapsed.contains(item->data(0, Qt::UserRole).toString()));
+        for (auto *item: nodes) item->setExpanded(book->type == "normal" ? expanded.contains(item->data(0, Qt::UserRole).toString()) : !collapsed.contains(item->data(0, Qt::UserRole).toString()));
     }
     QTreeWidgetItemIterator active(tree_);
     while (*active) {
@@ -654,6 +708,44 @@ void MainWindow::refreshTree() {
         treeHint_->setText(book->type == "site" ? tr("暂无文章，右键新建") : book->type == "ebook" ? tr("暂无章节，右键添加")
                                                                                                : tr("暂无内容，右键新建"));
     treeHint_->setVisible(!query.isEmpty() || book->notes.isEmpty());
+}
+
+void MainWindow::watchDirectories() {
+    if (!fileWatcher_) return;
+    QSet<QString> paths;
+    for (const auto &book: store_.notebooks) {
+        if (book.type != "normal") continue;
+        paths.insert(book.path);
+        for (const auto &note: book.notes) {
+            const auto path = QDir(book.path).filePath(note.path);
+            if (!QFileInfo(path).isSymLink() && (note.folder ? book.loadedDirectories.contains(note.path) : note.contentLoaded)) paths.insert(path);
+        }
+    }
+    auto watched = fileWatcher_->directories();
+    watched.append(fileWatcher_->files());
+    for (const auto &path: watched) {
+        if (!paths.remove(path)) fileWatcher_->removePath(path);
+    }
+    if (!paths.isEmpty()) fileWatcher_->addPaths(paths.values());
+}
+
+void MainWindow::refreshDirectories() {
+    QSet<QString> removed;
+    for (auto &book: store_.notebooks) {
+        if (book.type != "normal") continue;
+        QSet<QString> before;
+        for (const auto &note: book.notes) before.insert(note.id);
+        QString error;
+        if (!NotebookStore::scanDirectory(book, &error)) {
+            editorWorkspace_->showStatus(error);
+            continue;
+        }
+        for (const auto &note: book.notes) before.remove(note.id);
+        removed.unite(before);
+    }
+    editorWorkspace_->removeDocuments(removed);
+    editorWorkspace_->saveExternalFilesAndSync();
+    refreshEditor();
 }
 
 void MainWindow::refreshEditor() {
@@ -832,7 +924,12 @@ void MainWindow::closeEvent(QCloseEvent *event) {
         // 记住当前笔记本与全部标签页，供下次启动时恢复。
         QSettings session;
         session.setValue("session/notebookId", currentNotebookId_);
-        session.setValue("session/noteId", editorWorkspace_->currentNoteId());
+        const auto currentId = editorWorkspace_->currentNoteId();
+        const auto *currentBook = store_.owner(currentId);
+        const auto *currentNote = store_.note(currentId);
+        session.setValue("session/noteId", currentBook && currentBook->type == "normal" && currentNote
+                                                   ? QUrl::fromLocalFile(QDir(currentBook->path).filePath(currentNote->path)).toString()
+                                                   : currentId);
         session.setValue("session/openNotes", editorWorkspace_->openDocuments());
         session.setValue("session/leftPanelExpanded", leftRequested_);
         session.setValue("session/rightPanelExpanded", rightRequested_);
@@ -1099,6 +1196,50 @@ void MainWindow::createNote(const QString &parentId, bool folder, const QString 
     }
 }
 
+void MainWindow::copyTreeItem(const QString &id) {
+    const auto *book = store_.owner(id);
+    if (!book || book->type != "normal" || !save()) return;
+    const auto *note = store_.note(id);
+    if (!note) return;
+    auto *mime = new QMimeData;
+    mime->setUrls({QUrl::fromLocalFile(QDir(book->path).absoluteFilePath(note->path))});
+    QApplication::clipboard()->setMimeData(mime);
+}
+
+void MainWindow::pasteTreeFiles(const QString &id) {
+    const auto *book = store_.notebook(currentNotebookId_);
+    if (!book || book->type != "normal") return;
+    const auto *mime = QApplication::clipboard()->mimeData();
+    if (!mime) return;
+    QStringList paths;
+    for (const auto &url: mime->urls()) {
+        if (url.isLocalFile()) paths.append(url.toLocalFile());
+    }
+    paths.removeDuplicates();
+    if (paths.isEmpty() || !save()) return;
+    const auto *note = store_.note(id);
+    const auto parentId = note ? (note->folder ? note->id : note->parentId) : QString();
+    QString error;
+    const bool imported = store_.importFiles(currentNotebookId_, parentId, paths, &error);
+    // A batch may have copied earlier entries before encountering an error.
+    const bool saved = save();
+    search_->clear();
+    refreshTree();
+    tree_->setCurrentItem(nullptr);
+    QTreeWidgetItemIterator item(tree_);
+    while (*item) {
+        if ((*item)->data(0, Qt::UserRole).toString() == parentId) {
+            tree_->setCurrentItem(*item);
+            (*item)->setExpanded(true);
+            break;
+        }
+        ++item;
+    }
+    if (!imported) QMessageBox::warning(this, tr("粘贴失败"), error);
+    else if (saved)
+        editorWorkspace_->showStatus(tr("已粘贴 %1 项").arg(paths.size()));
+}
+
 void MainWindow::showTreeMenu(const QPoint &position) {
     auto *book = store_.notebook(currentNotebookId_);
     auto *item = tree_->itemAt(position);
@@ -1164,20 +1305,25 @@ void MainWindow::showTreeMenu(const QPoint &position) {
             if (!accepted || title.isEmpty()) return;
             target->title = title;
             save();
-            refreshTree();
+            refreshEditor();
         });
         }
         menu.addAction(tr("删除"), this, [this, id] {
             if (QMessageBox::question(this, tr("删除"), tr("确认删除此内容及其子项？该操作不可恢复。"), QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
-            if (!storageReady_) {
-                save();
-                return;
-            }
+            if (!save()) return;
             const auto *owner = store_.owner(id);
             if (!owner) return;
             applyRemoval(store_.removeNotes(owner->id, {id}));
             refreshEditor();
         });
+    }
+    if (book && book->type == "normal") {
+        if (!menu.actions().isEmpty()) menu.addSeparator();
+        if (note) menu.addAction(tr("复制"), this, [this, id] { copyTreeItem(id); });
+        auto *paste = menu.addAction(tr("粘贴"), this, [this, id] { pasteTreeFiles(id); });
+        const auto *mime = QApplication::clipboard()->mimeData();
+        const auto urls = mime ? mime->urls() : QList<QUrl>();
+        paste->setEnabled(std::any_of(urls.cbegin(), urls.cend(), [](const QUrl &url) { return url.isLocalFile(); }));
     }
     if (!menu.actions().isEmpty()) menu.addSeparator();
     menu.addAction(tr("打开笔记本…"), this, &MainWindow::openNotebook);
@@ -1233,7 +1379,14 @@ void MainWindow::exportNotebook() {
     if (book->type == "site") {
         publishSite(*book);
     } else if (book->type == "normal" || book->type == "ebook") {
-        EbookExportDialog dialog(*book, editorWorkspace_->currentNoteId(), this);
+        if (!save()) return;
+        auto snapshot = *book;
+        QString error;
+        if (snapshot.type == "normal" && !NotebookStore::loadAllFiles(snapshot, &error)) {
+            QMessageBox::warning(this, tr("无法读取笔记"), error);
+            return;
+        }
+        EbookExportDialog dialog(snapshot, editorWorkspace_->currentNoteId(), this);
         const auto path = dialog.run();
         if (!path.isEmpty()) editorWorkspace_->showStatus(tr("已导出至 ") + path);
     }

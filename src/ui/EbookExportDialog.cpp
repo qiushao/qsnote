@@ -34,7 +34,7 @@ EbookExportDialog::EbookExportDialog(const Notebook &book, const QString &noteId
     scope_->setObjectName("exportScope");
     scope_->addItem((book_.type == "normal" ? tr("整本笔记本 · ") : tr("整本电子书 · ")) + book_.name, QString());
     for (const auto &note: book_.notes) {
-        if (note.id == noteId && !note.folder) scope_->addItem(tr("当前文档 · ") + note.title, note.id);
+        if (note.id == noteId && !note.folder && note.kind == Note::Kind::Markdown) scope_->addItem(tr("当前文档 · ") + note.title, note.id);
     }
     format_ = new QComboBox(this);
     format_->setObjectName("exportFormat");

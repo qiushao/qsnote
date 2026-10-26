@@ -22,6 +22,7 @@ class QSystemTrayIcon;
 class UpdateChecker;
 class QTreeWidget;
 class QTreeWidgetItem;
+class QFileSystemWatcher;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -41,6 +42,8 @@ private:
     void buildUi();
     void refreshNotebooks();
     void refreshTree();
+    void refreshDirectories();
+    void watchDirectories();
     void refreshEditor();
     void updatePanels();
     void updateResizeHandles();
@@ -50,6 +53,8 @@ private:
     void closeNotebook();
     void createNote(const QString &parentId, bool folder, const QString &category = {});
     void showTreeMenu(const QPoint &position);
+    void copyTreeItem(const QString &id);
+    void pasteTreeFiles(const QString &id);
     void toggleMaximized();
     void showSettings();
     void applyUiSettings();
@@ -78,6 +83,7 @@ private:
     TodoWorkspace *todoWorkspace_ = nullptr;
     QLineEdit *search_ = nullptr;
     QTreeWidget *tree_ = nullptr;
+    QFileSystemWatcher *fileWatcher_ = nullptr;
     QLabel *treeHint_ = nullptr;
     QStackedWidget *pages_ = nullptr;
     EditorWorkspace *editorWorkspace_ = nullptr;

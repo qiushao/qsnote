@@ -3,6 +3,7 @@
 
 #include "core/NotebookStore.h"
 #include <QHash>
+#include <QPixmap>
 #include <QWidget>
 #include <functional>
 
@@ -16,6 +17,8 @@ class QTreeWidget;
 class QLabel;
 class QPushButton;
 class QUrl;
+class QPlainTextEdit;
+class QScrollArea;
 namespace vte {
 class VTextEdit;
 }
@@ -71,11 +74,14 @@ private:
     void showTabMenu(const QPoint &position);
     void closeTab(int index);
     void activateEditor(const QString &id);
+    void deactivateEditor();
+    void activatePlainText(const QString &id);
     void removeEditor(const QString &id);
     void setPreview(bool enabled);
     void setViewMode(ViewMode mode);
     void refreshOutline();
     void updateStatus();
+    void updateImage();
     NotebookStore &store_;
     std::function<bool()> save_;
     QHash<QString, Note> externalFiles_;
@@ -88,6 +94,12 @@ private:
     QStackedWidget *pages_ = nullptr;
     QStackedWidget *editors_ = nullptr;
     QHash<QString, EditorSession> editorSessions_;
+    QHash<QString, QPlainTextEdit *> textEditors_;
+    QScrollArea *imageView_ = nullptr;
+    QWidget *image_ = nullptr;
+    QPixmap imagePixmap_;
+    QString imageId_;
+    qreal imageScale_ = 0;// Zero fits the viewport without enlarging small images.
     QString activeEditorId_;
     MarkdownEditor *markdownEditor_ = nullptr;
     vte::VTextEdit *editor_ = nullptr;

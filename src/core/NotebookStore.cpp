@@ -3,14 +3,18 @@
 #include "AtomicFile.h"
 #include "StaticSite.h"
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QMimeDatabase>
 #include <QRegularExpression>
 #include <QSet>
 #include <QStandardPaths>
+#include <QStringConverter>
+#include <QTemporaryDir>
 #include <QUrl>
 #include <QUuid>
 #include <algorithm>
@@ -121,6 +125,17 @@ QString NotebookStore::chapterBase(const QString &path) {
 }
 
 QString NotebookStore::relativePath(const Notebook &book, const Note &note) {
+    if (book.type == "normal") {
+        QString directory;
+        for (const auto &parent: book.notes) {
+            if (parent.id == note.parentId) {
+                directory = parent.path;
+                break;
+            }
+        }
+        const auto name = note.title == QFileInfo(note.path).fileName() ? note.title : sanitized(note.title);
+        return directory.isEmpty() ? name : directory + '/' + name;
+    }
     auto name = sanitized(note.title);
     if (name.isEmpty()) name = QStringLiteral("未命名");
     if (!note.folder && !name.endsWith(QStringLiteral(".md"))) name += QStringLiteral(".md");
@@ -175,13 +190,14 @@ bool NotebookStore::removeNoteFiles(const Notebook &book, const Note &note, QStr
     const QDir root(book.path);
     const QString absolute = root.absoluteFilePath(note.path);
     const auto remove = [error](const QString &path, bool directory) {
-        if (!QFileInfo::exists(path)) return true;
+        if (!QFileInfo::exists(path) && !QFileInfo(path).isSymLink()) return true;
         if (directory ? QDir(path).removeRecursively() : QFile::remove(path)) return true;
         *error = QCoreApplication::translate("NotebookStore", "无法删除：%1").arg(path);
         return false;
     };
     if (!remove(absolute, note.folder)) return false;
     if (book.type == "ebook" && !remove(root.absoluteFilePath(chapterBase(note.path)), true)) return false;
+    if (book.type == "normal") return true;
     // 清理变空的分类/章节目录
     auto parent = QFileInfo(absolute).absolutePath();
     while (parent.startsWith(book.path) && parent != book.path && QDir().rmdir(parent)) parent = QFileInfo(parent).absolutePath();
@@ -207,6 +223,22 @@ NotebookStore::RemovalResult NotebookStore::removeNotes(const QString &notebookI
     }
     if (result.removedIds.isEmpty()) return result;
     const auto original = *book;
+    if (book->type == "normal") {
+        bool removed = true;
+        for (const auto &entry: original.notes) {
+            if (!result.removedIds.contains(entry.id) || result.removedIds.contains(entry.parentId)) continue;
+            if (!removeNoteFiles(original, entry, &result.error)) {
+                removed = false;
+                break;
+            }
+        }
+        QString scanError;
+        result.saved = scanDirectory(*book, &scanError) && removed;
+        if (result.error.isEmpty()) result.error = scanError;
+        for (const auto &entry: book->notes) result.removedIds.remove(entry.id);
+        return result;
+    }
+
     for (int index = static_cast<int>(book->notes.size()) - 1; index >= 0; --index) {
         if (result.removedIds.contains(book->notes[index].id)) book->notes.removeAt(index);
     }
@@ -237,9 +269,86 @@ NotebookStore::RemovalResult NotebookStore::removeCompletedTodos(const QString &
     return removeNotes(notebookId, ids);
 }
 
+bool NotebookStore::importFiles(const QString &notebookId, const QString &parentId, const QStringList &paths, QString *error) {
+    auto *book = notebook(notebookId);
+    const auto *parent = note(parentId);
+    if (!book || book->type != "normal" || (!parentId.isEmpty() && (!parent || !parent->folder || owner(parentId) != book))) {
+        *error = QCoreApplication::translate("NotebookStore", "请选择普通笔记本中的目标文件夹。");
+        return false;
+    }
+    const QDir root(book->path);
+    const QString directory = root.absoluteFilePath(parent ? parent->path : QString());
+    for (const auto &path: paths) {
+        const QFileInfo source(QDir::cleanPath(path));
+        const auto sourcePath = source.canonicalFilePath();
+        const auto targetPath = QFileInfo(directory).canonicalFilePath();
+        const auto sourcePrefix = sourcePath.endsWith('/') ? sourcePath : sourcePath + '/';
+        if (source.isDir() && (sourcePath == targetPath || targetPath.startsWith(sourcePrefix))) {
+            *error = QCoreApplication::translate("NotebookStore", "不能将目录复制到自身或其子目录：%1").arg(path);
+            return false;
+        }
+        auto name = source.fileName();
+        const auto taken = [&](const QString &candidate) {
+            const QFileInfo existing(QDir(directory).filePath(candidate));
+            return existing.exists() || existing.isSymLink();
+        };
+        for (int index = 2; taken(name); ++index) {
+            name = source.isDir() || source.suffix().isEmpty()
+                           ? source.fileName() + '-' + QString::number(index)
+                           : source.completeBaseName() + '-' + QString::number(index) + '.' + source.suffix();
+        }
+        const QString destination = QDir(directory).filePath(name);
+        QTemporaryDir staging(QDir(directory).filePath(".qsnote-paste-XXXXXX"));
+        if (!staging.isValid()) {
+            *error = staging.errorString();
+            return false;
+        }
+        struct Entry {
+            QString source;
+            QString relative;
+        };
+        QList<Entry> pending{{source.absoluteFilePath(), {}}};
+        while (!pending.isEmpty()) {
+            const auto entry = pending.takeLast();
+            const QFileInfo info(entry.source);
+            const auto staged = staging.filePath("content" + entry.relative);
+            if (info.isSymLink() || (!info.isDir() && !info.isFile()) || !info.isReadable()) {
+                *error = QCoreApplication::translate("NotebookStore", "无法复制文件或目录（不支持符号链接）：%1").arg(entry.source);
+                return false;
+            }
+            if (info.isDir()) {
+                if (!QDir().mkpath(staged)) {
+                    *error = QCoreApplication::translate("NotebookStore", "无法创建目录：") + staged;
+                    return false;
+                }
+                const auto children = QDir(entry.source).entryInfoList(QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot, QDir::DirsFirst | QDir::Name);
+                for (auto it = children.crbegin(); it != children.crend(); ++it) {
+                    pending.append({it->absoluteFilePath(), entry.relative + '/' + it->fileName()});
+                }
+            } else {
+                QFile file(entry.source);
+                if (!file.copy(staged)) {
+                    *error = entry.source + ": " + file.errorString();
+                    return false;
+                }
+            }
+        }
+        if (!QDir().rename(staging.filePath("content"), destination)) {
+            *error = QCoreApplication::translate("NotebookStore", "无法将 %1 复制到 %2").arg(path, destination);
+            return false;
+        }
+        if (!loadDirectory(*book, root.relativeFilePath(directory) == "." ? QString() : root.relativeFilePath(directory), error)) return false;
+    }
+    return true;
+}
+
 bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
     if (book.path.isEmpty()) {
         *error = QCoreApplication::translate("NotebookStore", "笔记本「%1」未设置保存目录").arg(book.name);
+        return false;
+    }
+    if (book.type == "normal" && !book.notes.isEmpty() && !QDir(book.path).exists()) {
+        *error = QCoreApplication::translate("NotebookStore", "无法读取目录：%1").arg(book.path);
         return false;
     }
     if (!QDir().mkpath(book.path)) {
@@ -274,16 +383,26 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
     QSet<QString> used;
     for (auto *note: order) {
         const QString oldPath = note->path;
+        if (book.type == "normal" && !oldPath.isEmpty() && !QFileInfo::exists(root.filePath(oldPath)) && !QFileInfo(root.filePath(oldPath)).isSymLink()) {
+            if (!note->contentDirty) continue;
+            *error = QCoreApplication::translate("NotebookStore", "文件已被移除，未保存的编辑仍保留：%1").arg(oldPath);
+            return false;
+        }
         // 目标路径与同笔记本其它条目或磁盘残留冲突时追加序号。
         QString expected = relativePath(book, *note);
         const auto taken = [&](const QString &candidate) {
-            return used.contains(candidate) || (candidate != oldPath && QFileInfo::exists(root.absoluteFilePath(candidate)));
+            const QFileInfo existing(root.absoluteFilePath(candidate));
+            return used.contains(candidate) || (candidate != oldPath && (existing.exists() || existing.isSymLink()));
         };
         if (taken(expected)) {
-            const QString base = chapterBase(expected);
-            const bool markdown = expected.endsWith(QStringLiteral(".md"));
+            QString suffix = expected.endsWith(QStringLiteral(".md")) ? QStringLiteral(".md") : QString();
+            if (book.type == "normal") {
+                const QFileInfo info(expected);
+                suffix = !note->folder && !info.completeBaseName().isEmpty() && !info.suffix().isEmpty() ? '.' + info.suffix() : QString();
+            }
+            const QString base = expected.left(expected.size() - suffix.size());
             for (int index = 2;; ++index) {
-                const QString candidate = base + "-" + QString::number(index) + (markdown ? QStringLiteral(".md") : QString());
+                const QString candidate = base + "-" + QString::number(index) + suffix;
                 if (!taken(candidate)) {
                     expected = candidate;
                     break;
@@ -294,9 +413,8 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
             const QString oldAbsolute = root.absoluteFilePath(oldPath);
             const QString newAbsolute = root.absoluteFilePath(expected);
             auto content = note->content;
-            if (!note->folder && !copyInsertedImages(content, QFileInfo(oldAbsolute).absolutePath(),
-                                                     QFileInfo(newAbsolute).absolutePath(), error)) return false;
-            if (QFileInfo::exists(oldAbsolute) && (!QDir().mkpath(QFileInfo(newAbsolute).absolutePath()) || !QDir().rename(oldAbsolute, newAbsolute))) {
+            if (!note->folder && note->kind == Note::Kind::Markdown && !copyInsertedImages(content, QFileInfo(oldAbsolute).absolutePath(), QFileInfo(newAbsolute).absolutePath(), error)) return false;
+            if ((QFileInfo::exists(oldAbsolute) || QFileInfo(oldAbsolute).isSymLink()) && (!QDir().mkpath(QFileInfo(newAbsolute).absolutePath()) || !QDir().rename(oldAbsolute, newAbsolute))) {
                 *error = QCoreApplication::translate("NotebookStore", "无法将 %1 移动到 %2").arg(oldAbsolute, newAbsolute);
                 return false;
             }
@@ -320,9 +438,17 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
             for (auto &child: book.notes) {
                 if (child.path.startsWith(oldPrefix)) child.path = newPrefix + child.path.mid(oldPrefix.size());
             }
+            if (book.type == "normal" && note->folder) {
+                QSet<QString> directories;
+                for (const auto &directory: book.loadedDirectories) {
+                    directories.insert(directory == oldPath ? expected : directory.startsWith(oldPrefix) ? newPrefix + directory.mid(oldPrefix.size())
+                                                                                                         : directory);
+                }
+                book.loadedDirectories = directories;
+            }
             // 清理移动后变空的目录（如旧分类目录）。
             auto parent = QFileInfo(oldAbsolute).absolutePath();
-            while (parent.startsWith(book.path) && parent != book.path && QDir().rmdir(parent)) parent = QFileInfo(parent).absolutePath();
+            while (book.type != "normal" && parent.startsWith(book.path) && parent != book.path && QDir().rmdir(parent)) parent = QFileInfo(parent).absolutePath();
         }
         note->path = expected;
         used.insert(expected);
@@ -331,11 +457,14 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
                 *error = QCoreApplication::translate("NotebookStore", "无法创建目录：") + root.absoluteFilePath(expected);
                 return false;
             }
-        } else if (book.type == "site" || note->contentDirty || !QFileInfo::exists(root.absoluteFilePath(expected))) {
-            if (!AtomicFile::write(root.absoluteFilePath(expected), book.type == "site" ? StaticSite::postSource(*note) : note->content.toUtf8(), error)) return false;
+        } else if ((book.type != "normal" || note->kind == Note::Kind::Markdown || note->kind == Note::Kind::Text) && (book.type == "site" || note->contentDirty || !QFileInfo::exists(root.absoluteFilePath(expected)))) {
+            if (!AtomicFile::write(root.absoluteFilePath(expected), book.type == "site" ? StaticSite::postSource(*note) : book.type == "normal" ? fileContents(*note)
+                                                                                                                                                : note->content.toUtf8(),
+                                   error)) return false;
             note->contentDirty = false;
         }
     }
+    if (book.type == "normal") return scanDirectory(book, error);
     QJsonArray entries;
     for (const auto &note: book.notes) {
         entries.append(QJsonObject{{"id", note.id}, {"parentId", note.parentId}, {"title", note.title}, {"folder", note.folder}, {"path", note.path}, {"metadata", note.metadata}});
@@ -356,8 +485,145 @@ bool NotebookStore::save(QString *error) {
     return AtomicFile::write(storagePath(), QJsonDocument(books).toJson(), error);
 }
 
+bool NotebookStore::readFile(Note &note, const QString &path, QString *error) {
+    const QFileInfo info(path);
+    note.kind = Note::Kind::Unsupported;
+    note.contentLoaded = true;
+    if (info.isSymLink() || !info.isFile()) return true;
+    const auto mime = QMimeDatabase().mimeTypeForFile(info);
+    if (mime.name().startsWith("image/")) {
+        note.kind = Note::Kind::Image;
+        return true;
+    }
+    const bool markdown = info.suffix().compare("md", Qt::CaseInsensitive) == 0 || info.suffix().compare("markdown", Qt::CaseInsensitive) == 0;
+    if (!markdown && info.size() != 0 && !mime.inherits("text/plain")) return true;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        *error = file.errorString();
+        return false;
+    }
+    const auto bytes = file.readAll();
+    if (file.error() != QFileDevice::NoError) {
+        *error = file.errorString();
+        return false;
+    }
+    const auto encoding = QStringConverter::encodingForData(bytes);
+    QStringDecoder decoder(encoding.value_or(QStringConverter::Utf8), QStringConverter::Flag::Stateless);
+    const QString content = decoder(bytes);
+    if (decoder.hasError() || content.contains(QChar::Null)) {
+        *error = QCoreApplication::translate("NotebookStore", "无法解码文本文件：%1").arg(path);
+        return false;
+    }
+    note.kind = markdown ? Note::Kind::Markdown : Note::Kind::Text;
+    note.content = content;
+    note.metadata["encoding"] = int(encoding.value_or(QStringConverter::Utf8));
+    note.metadata["bom"] = encoding.has_value();
+    note.metadata["crlf"] = content.contains("\r\n");
+    note.content.replace("\r\n", "\n");
+    return true;
+}
+
+QByteArray NotebookStore::fileContents(const Note &note) {
+    auto content = note.content;
+    if (note.metadata["crlf"].toBool()) content.replace("\n", "\r\n");
+    QStringEncoder encoder(static_cast<QStringConverter::Encoding>(note.metadata["encoding"].toInt(int(QStringConverter::Utf8))),
+                           note.metadata["bom"].toBool() ? QStringConverter::Flag::WriteBom : QStringConverter::Flag::Default);
+    return encoder(content);
+}
+
+bool NotebookStore::scanDirectory(Notebook &book, QString *error) {
+    const QDir root(book.path);
+    if (!root.exists() || !QFileInfo(book.path).isReadable()) {
+        *error = QCoreApplication::translate("NotebookStore", "无法读取目录：%1").arg(book.path);
+        return false;
+    }
+    QHash<QString, Note> previous;
+    for (const auto &note: book.notes) previous.insert(note.path, note);
+    QList<Note> scanned;
+    const bool initial = book.loadedDirectories.isEmpty();
+    QSet<QString> loaded;
+    QList<QPair<QString, QString>> pending{{QString(), QString()}};
+    while (!pending.isEmpty()) {
+        const auto entry = pending.takeLast();
+        const QDir directory(root.filePath(entry.first));
+        if (!QFileInfo(directory.path()).isReadable()) continue;
+        loaded.insert(entry.first);
+        const auto files = directory.entryInfoList(QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot, QDir::DirsFirst | QDir::Name | QDir::IgnoreCase);
+        for (const auto &file: files) {
+            const auto path = root.relativeFilePath(file.absoluteFilePath());
+            auto note = previous.value(path);
+            if (note.id.isEmpty()) {
+                note.id = QUrl::fromLocalFile(file.absoluteFilePath()).toString();
+                note.contentLoaded = false;
+                note.kind = Note::Kind::Unsupported;
+            }
+            note.path = path;
+            note.title = file.fileName();
+            note.parentId = entry.second;
+            note.folder = file.isDir() && !file.isSymLink();
+            if (note.folder) {
+                if (book.loadedDirectories.contains(path) || (initial && entry.first.isEmpty())) pending.append({path, note.id});
+            } else if (!note.contentDirty && note.contentLoaded && (note.metadata["modified"].toVariant().toLongLong() != file.lastModified().toMSecsSinceEpoch() || note.metadata["size"].toVariant().toLongLong() != file.size() || note.metadata["extension"].toString() != file.suffix())) {
+                QString readError;
+                note.content.clear();
+                note.metadata = {};
+                readFile(note, file.absoluteFilePath(), &readError);
+                if (!readError.isEmpty()) note.metadata["readError"] = readError;
+            }
+            note.metadata["modified"] = file.lastModified().toMSecsSinceEpoch();
+            note.metadata["size"] = file.size();
+            note.metadata["extension"] = file.suffix();
+            scanned.append(note);
+        }
+    }
+    // Keep unsaved buffers if an external operation removes their files.
+    for (const auto &note: book.notes) {
+        if (note.contentDirty && !QFileInfo::exists(root.filePath(note.path))) scanned.append(note);
+    }
+    book.notes = scanned;
+    book.loadedDirectories = loaded;
+    return true;
+}
+
+bool NotebookStore::loadDirectory(Notebook &book, const QString &path, QString *error) {
+    const QFileInfo target(QDir(book.path).filePath(path));
+    if (!target.isDir() || !target.isReadable()) {
+        *error = QCoreApplication::translate("NotebookStore", "无法读取目录：%1").arg(target.filePath());
+        return false;
+    }
+    auto directory = path;
+    while (!directory.isEmpty() && directory != ".") {
+        book.loadedDirectories.insert(directory);
+        directory = QFileInfo(directory).path();
+    }
+    book.loadedDirectories.insert(QString());
+    return scanDirectory(book, error);
+}
+
+bool NotebookStore::loadAllFiles(Notebook &book, QString *error) {
+    for (;;) {
+        bool unloaded = false;
+        for (const auto &note: book.notes) {
+            if (note.folder && !book.loadedDirectories.contains(note.path)) {
+                if (!QFileInfo(QDir(book.path).filePath(note.path)).isReadable()) continue;
+                book.loadedDirectories.insert(note.path);
+                unloaded = true;
+            }
+        }
+        if (!unloaded) break;
+        if (!scanDirectory(book, error)) return false;
+    }
+    for (auto &note: book.notes) {
+        if (note.folder || note.contentLoaded) continue;
+        QString readError;
+        readFile(note, QDir(book.path).filePath(note.path), &readError);
+    }
+    return true;
+}
+
 bool NotebookStore::loadNotebook(Notebook &book, QString *error) {
     if (book.path.isEmpty()) return true;
+    if (book.type == "normal") return scanDirectory(book, error);
     const QDir root(book.path);
     QFile index(root.absoluteFilePath(indexFileName()));
     if (!index.exists()) return true;  // 索引不存在视为空笔记本
@@ -409,16 +675,19 @@ bool NotebookStore::loadNotebook(Notebook &book, QString *error) {
 }
 
 bool NotebookStore::readNotebook(const QString &path, Notebook &book, QString *error) {
-    if (!QFileInfo::exists(QDir(path).absoluteFilePath(indexFileName()))) {
-        *error = QCoreApplication::translate("NotebookStore", "所选目录不是 qsnote 笔记本（缺少 %1）").arg(indexFileName());
-        return false;
+    book.path = QDir(path).absolutePath();
+    book.id = newId();
+    book.type = QStringLiteral("normal");
+    book.name = QDir(path).dirName();
+    QFile index(QDir(path).filePath(indexFileName()));
+    if (index.open(QIODevice::ReadOnly)) {
+        const auto object = QJsonDocument::fromJson(index.readAll()).object();
+        book.id = object["id"].toString(book.id);
+        book.name = object["name"].toString(book.name);
+        book.type = object["type"].toString(book.type);
+        book.config = object["config"].toObject();
     }
-    book.path = path;
-    if (!loadNotebook(book, error)) return false;
-    if (book.id.isEmpty()) book.id = newId();
-    if (book.type.isEmpty()) book.type = QStringLiteral("normal");
-    if (book.name.isEmpty()) book.name = QDir(path).dirName();
-    return true;
+    return loadNotebook(book, error);
 }
 
 bool NotebookStore::load(QString *error) {

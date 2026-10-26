@@ -276,7 +276,7 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
     QList<Chapter> chapters;
     if (!noteId.isEmpty()) {
         for (const auto &note: book.notes) {
-            if (note.id == noteId && !note.folder) chapters.append({&note, 0, "chapter-1"});
+            if (note.id == noteId && !note.folder && note.kind == Note::Kind::Markdown) chapters.append({&note, 0, "chapter-1"});
         }
     } else {
         QList<QPair<QString, int>> pending{{QString(), 0}};
@@ -287,7 +287,7 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
                 if (visited.contains(entry.first)) continue;
                 visited.insert(entry.first);
                 for (const auto &note: book.notes) {
-                    if (note.id == entry.first) chapters.append({&note, entry.second - 1, "chapter-" + QString::number(chapters.size() + 1)});
+                    if (note.id == entry.first && (note.folder || note.kind == Note::Kind::Markdown)) chapters.append({&note, entry.second - 1, "chapter-" + QString::number(chapters.size() + 1)});
                 }
             }
             for (auto it = book.notes.crbegin(); it != book.notes.crend(); ++it) {

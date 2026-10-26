@@ -151,6 +151,30 @@
     <context>
         <name>MainWindow</name>
         <message>
+            <source>无法打开文件</source>
+            <translation>Unable to open file</translation>
+        </message>
+        <message>
+            <source>无法打开此类型的文件：%1</source>
+            <translation>Unable to open this file type: %1</translation>
+        </message>
+        <message>
+            <source>复制</source>
+            <translation>Copy</translation>
+        </message>
+        <message>
+            <source>粘贴</source>
+            <translation>Paste</translation>
+        </message>
+        <message>
+            <source>粘贴失败</source>
+            <translation>Paste failed</translation>
+        </message>
+        <message>
+            <source>已粘贴 %1 项</source>
+            <translation>Pasted %1 item(s)</translation>
+        </message>
+        <message>
             <source>默认分类不可重命名或删除。</source>
             <translation>The default category cannot be renamed or deleted.</translation>
         </message>
@@ -2197,6 +2221,34 @@ It will be removed from the list. Files on disk will be kept, and you can add it
     </context>
     <context>
         <name>NotebookStore</name>
+        <message>
+            <source>无法读取目录：%1</source>
+            <translation>Unable to read directory: %1</translation>
+        </message>
+        <message>
+            <source>无法解码文本文件：%1</source>
+            <translation>Unable to decode text file: %1</translation>
+        </message>
+        <message>
+            <source>文件已被移除，未保存的编辑仍保留：%1</source>
+            <translation>The file was removed. Unsaved edits have been retained: %1</translation>
+        </message>
+        <message>
+            <source>请选择普通笔记本中的目标文件夹。</source>
+            <translation>Select a destination folder in a regular notebook.</translation>
+        </message>
+        <message>
+            <source>不能将目录复制到自身或其子目录：%1</source>
+            <translation>Cannot copy a directory into itself or its subdirectory: %1</translation>
+        </message>
+        <message>
+            <source>无法复制文件或目录（不支持符号链接）：%1</source>
+            <translation>Unable to copy the file or directory (symbolic links are not supported): %1</translation>
+        </message>
+        <message>
+            <source>无法将 %1 复制到 %2</source>
+            <translation>Unable to copy %1 to %2</translation>
+        </message>
         <message>
             <source>无法删除：%1</source>
             <translation>Unable to delete: %1</translation>
