@@ -53,6 +53,7 @@ private:
     void closeNotebook();
     void createNote(const QString &parentId, bool folder, const QString &category = {});
     void showTreeMenu(const QPoint &position);
+    void deleteSelectedTreeItems();
     void copyTreeItem(const QString &id);
     void pasteTreeFiles(const QString &id);
     void toggleMaximized();

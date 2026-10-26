@@ -1223,6 +1223,10 @@ It will be removed from the list. Files on disk will be kept, and you can add it
             <translation>Delete this item and its children? This cannot be undone.</translation>
         </message>
         <message>
+            <source>确认删除选中的 %1 项内容及其子项？该操作不可恢复。</source>
+            <translation>Delete the %1 selected items and their children? This cannot be undone.</translation>
+        </message>
+        <message>
             <location line="+117" />
             <source>基本信息</source>
             <translation>Basic Information</translation>

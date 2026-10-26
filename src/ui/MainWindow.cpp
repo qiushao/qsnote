@@ -426,12 +426,17 @@ void MainWindow::buildUi() {
     tree_->setObjectName("noteTree");
     tree_->setItemDelegate(new NoteDelegate(tree_));
     tree_->setHeaderHidden(true);
+    tree_->setSelectionMode(QAbstractItemView::ExtendedSelection);
     tree_->setIndentation(14);
     tree_->setIconSize(QSize(16, 16));
     tree_->setTextElideMode(Qt::ElideRight);
     tree_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     tree_->setContextMenuPolicy(Qt::CustomContextMenu);
     tree_->setMinimumSize(0, 0);
+    auto *deleteTree = new QShortcut(QKeySequence(Qt::Key_Delete), tree_);
+    deleteTree->setContext(Qt::WidgetShortcut);
+    deleteTree->setAutoRepeat(false);
+    connect(deleteTree, &QShortcut::activated, this, &MainWindow::deleteSelectedTreeItems);
     auto *copyTree = new QShortcut(QKeySequence::Copy, tree_);
     copyTree->setContext(Qt::WidgetShortcut);
     connect(copyTree, &QShortcut::activated, this, [this] {
@@ -1240,9 +1245,34 @@ void MainWindow::pasteTreeFiles(const QString &id) {
         editorWorkspace_->showStatus(tr("已粘贴 %1 项").arg(paths.size()));
 }
 
+void MainWindow::deleteSelectedTreeItems() {
+    const auto notebookId = currentNotebookId_;
+    QSet<QString> ids;
+    QStringList names;
+    for (const auto *item: tree_->selectedItems()) {
+        const auto id = item->data(0, Qt::UserRole).toString();
+        const auto *note = store_.note(id);
+        if (!note || ids.contains(id)) continue;
+        ids.insert(id);
+        names.append(note->title);
+    }
+    if (ids.isEmpty()) return;
+    const auto message = ids.size() == 1 ? tr("确认删除此内容及其子项？该操作不可恢复。")
+                                         : tr("确认删除选中的 %1 项内容及其子项？该操作不可恢复。").arg(ids.size());
+    QMessageBox confirmation(QMessageBox::Question, tr("删除"), message, QMessageBox::Yes | QMessageBox::Cancel, this);
+    confirmation.setTextFormat(Qt::PlainText);
+    confirmation.setInformativeText(names.join('\n'));
+    confirmation.setDefaultButton(QMessageBox::Cancel);
+    if (confirmation.exec() != QMessageBox::Yes) return;
+    if (!save()) return;
+    applyRemoval(store_.removeNotes(notebookId, ids));
+    refreshEditor();
+}
+
 void MainWindow::showTreeMenu(const QPoint &position) {
     auto *book = store_.notebook(currentNotebookId_);
     auto *item = tree_->itemAt(position);
+    if (item && !item->isSelected()) tree_->setCurrentItem(item);
     const auto id = item ? item->data(0, Qt::UserRole).toString() : QString();
     auto *note = store_.note(id);
     QMenu menu(this);
@@ -1322,14 +1352,7 @@ void MainWindow::showTreeMenu(const QPoint &position) {
             refreshEditor();
         });
         }
-        menu.addAction(tr("删除"), this, [this, id] {
-            if (QMessageBox::question(this, tr("删除"), tr("确认删除此内容及其子项？该操作不可恢复。"), QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) return;
-            if (!save()) return;
-            const auto *owner = store_.owner(id);
-            if (!owner) return;
-            applyRemoval(store_.removeNotes(owner->id, {id}));
-            refreshEditor();
-        });
+        menu.addAction(tr("删除"), this, &MainWindow::deleteSelectedTreeItems);
     }
     if (book && book->type == "normal") {
         if (!menu.actions().isEmpty()) menu.addSeparator();
