@@ -125,6 +125,7 @@ EditorWorkspace::EditorWorkspace(NotebookStore &store, std::function<bool()> sav
     editors_->setMinimumSize(0, 0);
     editorSplitter_->addWidget(editors_);
     preview_ = new MarkdownPreview(editorSplitter_);
+    preview_->installEventFilter(this);
     connect(preview_, &MarkdownPreview::localLinkActivated, this, &EditorWorkspace::openLocalLink);
     editorSplitter_->addWidget(preview_);
     preview_->hide();
@@ -765,7 +766,7 @@ bool EditorWorkspace::saveExternalFilesAndSync() {
 }
 
 bool EditorWorkspace::eventFilter(QObject *watched, QEvent *event) {
-    if (((watched == pages_ && !suspended_) || (editor_ && watched == editor_->viewport())) && (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove || event->type() == QEvent::Drop)) {
+    if ((((watched == pages_ || watched == preview_) && !suspended_) || (editor_ && watched == editor_->viewport())) && (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove || event->type() == QEvent::Drop)) {
         auto *drop = dynamic_cast<QDropEvent *>(event);
         if (!drop) return QWidget::eventFilter(watched, event);
         QStringList paths;
