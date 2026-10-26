@@ -2,6 +2,13 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="en_US" sourcelanguage="zh_CN">
     <context>
+        <name>PlainTextEditor</name>
+        <message>
+            <source>显示行号</source>
+            <translation>Show Line Numbers</translation>
+        </message>
+    </context>
+    <context>
         <name>ArticleRenderer</name>
         <message>
             <location filename="../core/ArticleRenderer.cpp" line="+103" />

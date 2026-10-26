@@ -3,9 +3,11 @@
 #include "MarkdownEditor.h"
 #include "MarkdownPreview.h"
 #include "UiStyle.h"
+#include <Definition>
 #include <QApplication>
 #include <QButtonGroup>
 #include <QClipboard>
+#include <QContextMenuEvent>
 #include <QDesktopServices>
 #include <QDir>
 #include <QDropEvent>
@@ -19,6 +21,7 @@
 #include <QPlainTextEdit>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QScopedPointer>
 #include <QScopedValueRollback>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -31,6 +34,9 @@
 #include <QTimer>
 #include <QTreeWidget>
 #include <QWheelEvent>
+#include <Repository>
+#include <SyntaxHighlighter>
+#include <Theme>
 #include <cmath>
 #include <vtextedit/previewmgr.h>
 #include <vtextedit/texteditutils.h>
@@ -39,6 +45,77 @@
 
 namespace {
 QIcon icon(const QString &name) { return QIcon(":/icons/" + name + ".svg"); }
+class PlainTextEditor : public QPlainTextEdit {
+public:
+    explicit PlainTextEditor(QWidget *parent) : QPlainTextEdit(parent), lineNumberArea_(new QWidget(this)) {
+        lineNumberArea_->setObjectName("lineNumberArea");
+        lineNumberArea_->installEventFilter(this);
+        connect(this, &QPlainTextEdit::blockCountChanged, this, [this] { updateLineNumberArea(); });
+        connect(this, &QPlainTextEdit::updateRequest, this, [this](const QRect &rect, int dy) {
+            if (dy != 0) lineNumberArea_->scroll(0, dy);
+            else
+                lineNumberArea_->update(0, rect.y(), lineNumberArea_->width(), rect.height());
+            if (rect.contains(viewport()->rect())) updateLineNumberArea();
+        });
+        updateLineNumberArea();
+    }
+
+protected:
+    void resizeEvent(QResizeEvent *event) override {
+        QPlainTextEdit::resizeEvent(event);
+        updateLineNumberArea();
+    }
+
+    void changeEvent(QEvent *event) override {
+        QPlainTextEdit::changeEvent(event);
+        if (event->type() == QEvent::FontChange) updateLineNumberArea();
+    }
+
+    void contextMenuEvent(QContextMenuEvent *event) override {
+        const QScopedPointer<QMenu> menu(createStandardContextMenu());
+        menu->addSeparator();
+        auto *showLineNumbers = menu->addAction(QCoreApplication::translate("PlainTextEditor", "显示行号"));
+        showLineNumbers->setCheckable(true);
+        showLineNumbers->setChecked(lineNumbersVisible_);
+        connect(showLineNumbers, &QAction::toggled, this, [this](bool checked) {
+            lineNumbersVisible_ = checked;
+            updateLineNumberArea();
+        });
+        menu->exec(event->globalPos());
+    }
+
+    bool eventFilter(QObject *watched, QEvent *event) override {
+        if (watched != lineNumberArea_ || event->type() != QEvent::Paint) return QPlainTextEdit::eventFilter(watched, event);
+        QPainter painter(lineNumberArea_);
+        painter.fillRect(lineNumberArea_->rect(), palette().color(QPalette::AlternateBase));
+        painter.setPen(palette().color(QPalette::PlaceholderText));
+        painter.setFont(font());
+        auto block = firstVisibleBlock();
+        qreal top = blockBoundingGeometry(block).translated(contentOffset()).top();
+        while (block.isValid() && top < lineNumberArea_->height()) {
+            const qreal height = blockBoundingRect(block).height();
+            if (block.isVisible() && top + height >= 0) {
+                painter.drawText(0, qRound(top), lineNumberArea_->width() - 6, fontMetrics().height(), Qt::AlignRight, QString::number(block.blockNumber() + 1));
+            }
+            top += height;
+            block = block.next();
+        }
+        return true;
+    }
+
+private:
+    void updateLineNumberArea() {
+        const int width = lineNumbersVisible_ ? 12 + fontMetrics().horizontalAdvance(QLatin1Char('9')) * static_cast<int>(QString::number(blockCount()).size()) : 0;
+        setViewportMargins(width, 0, 0, 0);
+        lineNumberArea_->setGeometry(contentsRect().left(), viewport()->geometry().top(), width, viewport()->height());
+        lineNumberArea_->setVisible(lineNumbersVisible_);
+        lineNumberArea_->update();
+    }
+
+    QWidget *lineNumberArea_;
+    bool lineNumbersVisible_ = true;
+};
+
 class NoteTabBar : public QTabBar {
 public:
     using QTabBar::QTabBar;
@@ -586,8 +663,16 @@ void EditorWorkspace::deactivateEditor() {
 
 void EditorWorkspace::activatePlainText(const QString &id) {
     if (!textEditors_.contains(id)) {
-        auto *editor = new QPlainTextEdit(pages_);
+        static KSyntaxHighlighting::Repository syntaxRepository;
+        if (syntaxRepository.customSearchPaths().isEmpty()) syntaxRepository.addCustomSearchPath(":/demo/data");
+        auto *editor = new PlainTextEditor(pages_);
         editor->setObjectName("plainTextEditor");
+        const auto definition = syntaxRepository.definitionForFileName(documentNote(id)->path);
+        if (definition.isValid()) {
+            auto *highlighter = new KSyntaxHighlighting::SyntaxHighlighter(editor->document());
+            highlighter->setTheme(syntaxRepository.defaultTheme(editor->palette().color(QPalette::Base).lightness() < 128 ? KSyntaxHighlighting::Repository::DarkTheme : KSyntaxHighlighting::Repository::LightTheme));
+            highlighter->setDefinition(definition);
+        }
         editor->setPlainText(documentNote(id)->content);
         textEditors_.insert(id, editor);
         pages_->addWidget(editor);
