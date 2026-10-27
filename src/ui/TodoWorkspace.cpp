@@ -419,10 +419,6 @@ void TodoWorkspace::refreshTodoDetails() {
 void TodoWorkspace::createTodo() {
     auto *book = store_.notebook(notebookId_);
     if (!book || book->type != "todo") return;
-    QInputDialog original(this);
-    original.setLabelText(QCoreApplication::translate("MainWindow", "事项标题："));
-    original.setInputMode(QInputDialog::TextInput);
-    const int dialogWidth = original.sizeHint().width() * 2;
     QDialog dialog(this);
     dialog.setWindowTitle(QCoreApplication::translate("MainWindow", "新建事项"));
     auto *layout = new QFormLayout(&dialog);
@@ -440,20 +436,32 @@ void TodoWorkspace::createTodo() {
     }
     category->setCurrentIndex(category->findData(todoCategoryFilter_.isEmpty() ? QStringLiteral("默认") : todoCategoryFilter_));
     layout->addRow(QCoreApplication::translate("MainWindow", "分类"), category);
+    auto *priority = new QComboBox(&dialog);
+    priority->setObjectName("newTodoPriority");
+    priority->setAccessibleName(QCoreApplication::translate("MainWindow", "优先级"));
+    priority->addItems({QCoreApplication::translate("MainWindow", "低"), QCoreApplication::translate("MainWindow", "中"), QCoreApplication::translate("MainWindow", "高")});
+    priority->setCurrentIndex(1);
+    layout->addRow(QCoreApplication::translate("MainWindow", "优先级"), priority);
+    auto *content = new QPlainTextEdit(&dialog);
+    content->setObjectName("todoContent");
+    content->setAccessibleName(QCoreApplication::translate("MainWindow", "事项详情正文"));
+    content->setMinimumHeight(120);
+    layout->addRow(QCoreApplication::translate("MainWindow", "事项详情"), content);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     setPrimaryButton(buttons->button(QDialogButtonBox::Ok));
     layout->addRow(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    dialog.resize(dialogWidth, dialog.sizeHint().height());
+    dialog.resize(560, dialog.sizeHint().height());
     if (dialog.exec() != QDialog::Accepted) return;
     const auto title = titleEdit->text().trimmed();
     if (title.isEmpty()) return;
     Note note;
     note.id = NotebookStore::newId();
     note.title = title;
+    note.content = content->toPlainText();
     note.metadata = {{"category", category->currentData().toString()},
-                     {"priority", 1},
+                     {"priority", priority->currentIndex()},
                      {"completed", false},
                      {"created", QDateTime::currentDateTime().toString(Qt::ISODate)}};
     book->notes.append(note);
