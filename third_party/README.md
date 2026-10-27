@@ -2,6 +2,20 @@
 
 本目录直接保存源码，不包含 Git 子模块；配置和构建不访问网络。
 
+## Tree-sitter 源码大纲
+
+`tree-sitter/` 包含 Tree-sitter 运行库 v0.27.1，以及 C v0.24.2、C++ v0.23.4、
+Java v0.23.5、Python v0.25.0、JavaScript v0.25.0、TypeScript/TSX v0.23.2、Bash v0.25.1。
+各组件来自 https://github.com/tree-sitter 下的同名官方仓库，固定标签、下载地址和归档
+SHA256 记录在 `tree-sitter/sources.json`。
+
+保留运行库的 C 源码、头文件，以及各语言预生成的 parser/scanner、语法说明、节点类型、
+查询和许可证；不修改上游源码。宿主 `tree-sitter/CMakeLists.txt` 将其静态链接到应用，
+无需 Tree-sitter CLI、Node.js 或运行时下载。各组件 LICENSE 及运行库 Unicode LICENSE
+随安装包分发。符号提取逻辑位于 `src/core/SourceOutline.*`。
+
+## VTextEdit
+
 | 目录 | 来源 | 固定版本 |
 | --- | --- | --- |
 | vtextedit | 用户指定的本地 vtextedit 仓库 | `9087ec628f8e2aec93bc742aa0110169826a3b7d` |

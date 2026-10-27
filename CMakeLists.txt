@@ -19,7 +19,7 @@ if (DEFINED ENV{Qt6_DIR})
     list(PREPEND CMAKE_PREFIX_PATH "$ENV{Qt6_DIR}")
 endif ()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network WebEngineWidgets WebChannel Xml)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network WebEngineWidgets WebChannel Xml Concurrent)
 if (NOT TARGET Qt6::GuiPrivate)
     find_package(Qt6GuiPrivate REQUIRED)
 endif ()

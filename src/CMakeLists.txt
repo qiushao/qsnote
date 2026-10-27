@@ -70,6 +70,8 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         core/SiteThemeRenderer.h
         core/FrontMatter.cpp
         core/FrontMatter.h
+        core/SourceOutline.cpp
+        core/SourceOutline.h
         core/SitePublisher.cpp
         core/SitePublisher.h
         core/StaticSite.h
@@ -81,7 +83,7 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
 )
 
 target_include_directories(qsnote PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(qsnote PRIVATE qsnote_i18n Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Widgets Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Network Qt6::Xml VTextEdit VSyntaxHighlighting)
+target_link_libraries(qsnote PRIVATE qsnote_i18n Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Widgets Qt6::WebEngineWidgets Qt6::WebChannel Qt6::Network Qt6::Xml Qt6::Concurrent VTextEdit VSyntaxHighlighting qsnote_tree_sitter)
 target_compile_definitions(qsnote PRIVATE APP_VERSION="${APP_VERSION}")
 
 if (WIN32)

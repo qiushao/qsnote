@@ -27,7 +27,7 @@ signals:
     void sourceLineReceived(int revision, int line);
     void taskChangedReceived(int revision, int line, bool checked);
     void documentChanged(const QString &markdown, int revision, bool resetScroll, const QString &baseUrl);
-    void scrollRequested(int revision, int line);
+    void scrollRequested(int revision, int line, bool center);
     void plantUmlRendered(int revision, int id, const QString &data, const QString &error);
     void localLinkRequested(int revision, const QString &url);
 };
@@ -37,7 +37,7 @@ class MarkdownPreview : public QWebEngineView {
 public:
     explicit MarkdownPreview(QWidget *parent = nullptr);
     void setMarkdown(const QString &markdown, const QString &documentId, const QString &directory = {});
-    void scrollToLine(int line);
+    void scrollToLine(int line, bool center = false);
     void scrollToAnchor(const QString &anchor);
     void showFind();
     void showSettings();
@@ -73,6 +73,7 @@ private:
     int revision_ = 0;
     int renderedRevision_ = -1;
     int pendingLine_ = -1;
+    bool pendingLineCentered_ = false;
     bool loading_ = false;
     bool ready_ = false;
 };

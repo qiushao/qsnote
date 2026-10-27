@@ -2,6 +2,7 @@
 #define QSNOTE_EDITORWORKSPACE_H
 
 #include "core/NotebookStore.h"
+#include "core/SourceOutline.h"
 #include <QHash>
 #include <QPixmap>
 #include <QWidget>
@@ -19,6 +20,8 @@ class QPushButton;
 class QUrl;
 class QPlainTextEdit;
 class QScrollArea;
+template<typename T>
+class QFutureWatcher;
 namespace vte {
 class VTextEdit;
 }
@@ -80,6 +83,7 @@ private:
     void setPreview(bool enabled);
     void setViewMode(ViewMode mode);
     void refreshOutline();
+    void showSourceOutline(const SourceOutline::Result &result);
     void updateStatus();
     void updateImage();
     NotebookStore &store_;
@@ -95,6 +99,7 @@ private:
     QStackedWidget *editors_ = nullptr;
     QHash<QString, EditorSession> editorSessions_;
     QHash<QString, QPlainTextEdit *> textEditors_;
+    QHash<QString, QSet<QString>> collapsedSourceSymbols_;
     QScrollArea *imageView_ = nullptr;
     QWidget *image_ = nullptr;
     QPixmap imagePixmap_;
@@ -106,6 +111,11 @@ private:
     MarkdownPreview *preview_ = nullptr;
     QSplitter *editorSplitter_ = nullptr;
     QTimer *previewTimer_ = nullptr;
+    QTimer *outlineTimer_ = nullptr;
+    QFutureWatcher<SourceOutline::Result> *sourceOutlineWatcher_ = nullptr;
+    QString sourceOutlineId_;
+    QString sourceOutlinePath_;
+    QString sourceOutlineContent_;
     ViewMode viewMode_ = ViewMode::Preview;
     bool syncingPreviewScroll_ = false;
     QTreeWidget *outline_ = nullptr;

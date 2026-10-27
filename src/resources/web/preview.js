@@ -9,6 +9,7 @@
     let pending = null;
     let rendering = false;
     let requestedLine = null;
+    let requestedLineCentered = false;
     let ignoreScroll = false;
     let collapsedSections = new Set();
     const folding = new HeadingFolding(content);
@@ -101,7 +102,7 @@
         window.scrollTo(0, y);
         requestAnimationFrame(() => requestAnimationFrame(() => { ignoreScroll = false; }));
     }
-    function scrollToLine(line, reveal = true) {
+    function scrollToLine(line, reveal = true, center = false) {
         if (reveal) {
             const nodes = [...content.querySelectorAll('[data-source-line]')]
                 .sort((a, b) => Number(a.dataset.sourceLine) - Number(b.dataset.sourceLine));
@@ -116,7 +117,7 @@
         for (let i = 1; i < map.length; ++i) {
             if (map[i].line >= line) {
                 const a = map[i - 1], b = map[i];
-                scrollToPosition(a.y + (b.y - a.y) * (line - a.line) / Math.max(1, b.line - a.line));
+                scrollToPosition(a.y + (b.y - a.y) * (line - a.line) / Math.max(1, b.line - a.line) - (center ? window.innerHeight / 2 : 0));
                 return;
             }
         }
@@ -177,7 +178,7 @@
                 decorateHeadings(collapsedSections);
                 revision = request.revision;
                 // Content edits must not round the viewport position to a source line.
-                if (requestedLine !== null) scrollToLine(requestedLine);
+                if (requestedLine !== null) scrollToLine(requestedLine, true, requestedLineCentered);
                 else scrollToPosition(oldScrollY);
                 requestedLine = null;
                 bridge.rendered(revision);
@@ -230,14 +231,19 @@
         bridge = channel.objects.previewBridge;
         bridge.documentChanged.connect((text, generation, reset, baseUrl) => {
             requestedRevision = generation;
-            if (reset) requestedLine = 0;
+            if (reset) {
+                requestedLine = 0;
+                requestedLineCentered = false;
+            }
             pending = {text, revision: generation, reset: reset || !!pending?.reset, baseUrl};
             renderLatest();
         });
-        bridge.scrollRequested.connect((generation, line) => {
+        bridge.scrollRequested.connect((generation, line, center) => {
             if (generation !== requestedRevision) return;
-            if (rendering) requestedLine = line;
-            else scrollToLine(line);
+            if (rendering) {
+                requestedLine = line;
+                requestedLineCentered = center;
+            } else scrollToLine(line, true, center);
         });
         bridge.ready();
     });

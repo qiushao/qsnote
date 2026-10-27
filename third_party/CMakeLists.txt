@@ -7,6 +7,7 @@ set(QT_DEFAULT_MAJOR_VERSION 6)
 set(BUILD_SHARED_LIBS OFF)
 add_subdirectory(vtextedit/libs EXCLUDE_FROM_ALL)
 add_subdirectory(vtextedit/src)
+add_subdirectory(tree-sitter)
 
 if (WIN32)
     set(QSNOTE_LICENSE_DIR "${CMAKE_INSTALL_BINDIR}/licenses")
@@ -22,3 +23,8 @@ install(FILES vtextedit/libs/syntax-highlighting/COPYING DESTINATION ${QSNOTE_LI
 install(FILES vtextedit/libs/hunspell/COPYING vtextedit/libs/hunspell/COPYING.LESSER vtextedit/libs/hunspell/COPYING.MPL
         DESTINATION ${QSNOTE_LICENSE_DIR}/hunspell)
 install(DIRECTORY vtextedit/libs/sonnet/LICENSES/ DESTINATION ${QSNOTE_LICENSE_DIR}/sonnet)
+install(FILES tree-sitter/sources.json DESTINATION ${QSNOTE_LICENSE_DIR}/tree-sitter)
+foreach(component runtime c cpp java python javascript typescript bash)
+    install(FILES "tree-sitter/${component}/LICENSE" DESTINATION "${QSNOTE_LICENSE_DIR}/tree-sitter/${component}")
+endforeach()
+install(FILES tree-sitter/runtime/lib/src/unicode/LICENSE DESTINATION ${QSNOTE_LICENSE_DIR}/tree-sitter/runtime/unicode)

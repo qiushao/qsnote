@@ -84,7 +84,7 @@ MarkdownPreview::MarkdownPreview(QWidget *parent) : QWebEngineView(parent), brid
         applyReaderSettings();
         setHeadingFoldingEnabled(QSettings().value("reader/headingFolding", false).toBool());
         emit bridge_->documentChanged(markdown_, revision_, true, baseUrl_);
-        if (pendingLine_ >= 0) scrollToLine(pendingLine_);
+        if (pendingLine_ >= 0) scrollToLine(pendingLine_, pendingLineCentered_);
     });
     connect(bridge_, &PreviewBridge::renderedReceived, this, [this](int revision) {
         if (revision != revision_) return;
@@ -382,8 +382,10 @@ void MarkdownPreview::scrollToAnchor(const QString &anchor) {
     pendingAnchor_.clear();
 }
 
-void MarkdownPreview::scrollToLine(int line) {
-    if (ready_) emit bridge_->scrollRequested(revision_, qMax(0, line));
-    else
+void MarkdownPreview::scrollToLine(int line, bool center) {
+    if (ready_) emit bridge_->scrollRequested(revision_, qMax(0, line), center);
+    else {
         pendingLine_ = qMax(0, line);
+        pendingLineCentered_ = center;
+    }
 }

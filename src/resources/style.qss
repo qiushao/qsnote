@@ -68,7 +68,10 @@ QTreeWidget#noteTree::item, QTreeWidget#outline::item { border: none; border-rad
 QTreeWidget::branch { background: transparent; }
 QTreeWidget#noteTree::branch:has-children:closed { image: url(:/icons/right.svg); }
 QTreeWidget#noteTree::branch:has-children:open { image: url(:/icons/down.svg); }
-QTreeWidget#outline::item { min-height: 28px; color: #66758a; }
+QTreeWidget#outline::branch:has-children:closed { image: url(:/icons/right.svg); }
+QTreeWidget#outline::branch:has-children:open { image: url(:/icons/down.svg); }
+QTreeWidget#outline { color: #66758a; }
+QTreeWidget#outline::item { min-height: 28px; }
 QTreeWidget#outline::item:selected { color: #315fb8; }
 QTabWidget#editorSettingsTabs::pane { border: none; border-top: 1px solid #e7ebf0; background: #ffffff; top: -1px; }
 QTabWidget#editorSettingsTabs > QWidget > QWidget { background: #ffffff; }

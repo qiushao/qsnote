@@ -2,6 +2,60 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="en_US" sourcelanguage="zh_CN">
     <context>
+        <name>EditorWorkspace</name>
+        <message>
+            <source>正在解析源码...</source>
+            <translation>Parsing source...</translation>
+        </message>
+        <message>
+            <source>暂无可识别的源码符号</source>
+            <translation>No source symbols found</translation>
+        </message>
+        <message>
+            <source>此文件类型暂不支持源码大纲</source>
+            <translation>Source outline is not supported for this file type</translation>
+        </message>
+        <message>
+            <source>第 %1 行</source>
+            <translation>Line %1</translation>
+        </message>
+    </context>
+    <context>
+        <name>SourceOutline</name>
+        <message>
+            <source>命名空间</source>
+            <translation>Namespace</translation>
+        </message>
+        <message>
+            <source>类</source>
+            <translation>Class</translation>
+        </message>
+        <message>
+            <source>枚举</source>
+            <translation>Enum</translation>
+        </message>
+        <message>
+            <source>函数</source>
+            <translation>Function</translation>
+        </message>
+        <message>
+            <source>成员函数</source>
+            <translation>Method</translation>
+        </message>
+        <message>
+            <source>全局变量</source>
+            <translation>Global variable</translation>
+        </message>
+        <message>
+            <source>成员变量</source>
+            <translation>Field</translation>
+        </message>
+        <message>
+            <source>类型</source>
+            <translation>Type</translation>
+        </message>
+    </context>
+    <context>
         <name>PlainTextEditor</name>
         <message>
             <source>显示行号</source>

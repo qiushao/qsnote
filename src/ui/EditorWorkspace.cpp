@@ -12,6 +12,7 @@
 #include <QDir>
 #include <QDropEvent>
 #include <QFileInfo>
+#include <QFutureWatcher>
 #include <QImageReader>
 #include <QMenu>
 #include <QMessageBox>
@@ -34,6 +35,7 @@
 #include <QTimer>
 #include <QTreeWidget>
 #include <QWheelEvent>
+#include <QtConcurrentRun>
 #include <Repository>
 #include <SyntaxHighlighter>
 #include <Theme>
@@ -57,7 +59,9 @@ public:
                 lineNumberArea_->update(0, rect.y(), lineNumberArea_->width(), rect.height());
             if (rect.contains(viewport()->rect())) updateLineNumberArea();
         });
+        connect(this, &QPlainTextEdit::cursorPositionChanged, this, &PlainTextEditor::highlightCurrentLine);
         updateLineNumberArea();
+        highlightCurrentLine();
     }
 
 protected:
@@ -104,6 +108,15 @@ protected:
     }
 
 private:
+    void highlightCurrentLine() {
+        QTextEdit::ExtraSelection selection;
+        selection.format.setBackground(QColor(245, 247, 250));
+        selection.format.setProperty(QTextFormat::FullWidthSelection, true);
+        selection.cursor = textCursor();
+        selection.cursor.clearSelection();
+        setExtraSelections({selection});
+    }
+
     void updateLineNumberArea() {
         const int width = lineNumbersVisible_ ? 12 + fontMetrics().horizontalAdvance(QLatin1Char('9')) * static_cast<int>(QString::number(blockCount()).size()) : 0;
         setViewportMargins(width, 0, 0, 0);
@@ -270,16 +283,47 @@ EditorWorkspace::EditorWorkspace(NotebookStore &store, std::function<bool()> sav
     outline_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     outline_->setMinimumSize(0, 0);
     rightLayout->addWidget(outline_, 1);
+    connect(outline_, &QTreeWidget::itemCollapsed, this, [this](QTreeWidgetItem *item) {
+        const auto key = item->data(0, Qt::UserRole + 1).toString();
+        if (!key.isEmpty()) collapsedSourceSymbols_[currentNoteId()].insert(key);
+    });
+    connect(outline_, &QTreeWidget::itemExpanded, this, [this](QTreeWidgetItem *item) {
+        const auto key = item->data(0, Qt::UserRole + 1).toString();
+        if (!key.isEmpty()) collapsedSourceSymbols_[currentNoteId()].remove(key);
+    });
     connect(outline_, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *item) {
         const int line = item->data(0, Qt::UserRole).toInt();
+        if (auto *textEditor = textEditors_.value(currentNoteId())) {
+            const auto block = textEditor->document()->findBlockByNumber(line);
+            if (!block.isValid()) return;
+            textEditor->setTextCursor(QTextCursor(block));
+            textEditor->setFocus();
+            textEditor->centerCursor();
+            return;
+        }
+        if (!editor_) return;
+        const QScopedValueRollback<bool> guard(syncingPreviewScroll_, true);
         if (viewMode_ == ViewMode::Preview) {
-            preview_->scrollToLine(line);
+            preview_->scrollToLine(line, true);
         } else {
             editor_->setTextCursor(QTextCursor(editor_->document()->findBlockByNumber(line)));
-            editor_->ensureCursorVisible();
-            if (viewMode_ == ViewMode::Split) preview_->scrollToLine(line);
             editor_->setFocus();
+            vte::TextEditUtils::scrollBlockInPage(editor_, line, vte::TextEditUtils::PagePosition::Center);
+            if (viewMode_ == ViewMode::Split) preview_->scrollToLine(line, true);
         }
+    });
+    outlineTimer_ = new QTimer(this);
+    outlineTimer_->setSingleShot(true);
+    outlineTimer_->setInterval(250);
+    connect(outlineTimer_, &QTimer::timeout, this, &EditorWorkspace::refreshOutline);
+    sourceOutlineWatcher_ = new QFutureWatcher<SourceOutline::Result>(this);
+    connect(sourceOutlineWatcher_, &QFutureWatcher<SourceOutline::Result>::finished, this, [this] {
+        if (suspended_) return;
+        const auto *note = documentNote(currentNoteId());
+        if (!note || note->kind != Note::Kind::Text) return;
+        if (note->id == sourceOutlineId_ && note->path == sourceOutlinePath_ && note->content == sourceOutlineContent_) showSourceOutline(sourceOutlineWatcher_->result());
+        else
+            outlineTimer_->start();
     });
     auto *find = new QShortcut(QKeySequence::Find, window());
     connect(find, &QShortcut::activated, this, [this] {
@@ -685,6 +729,7 @@ void EditorWorkspace::activatePlainText(const QString &id) {
                 if (tabs_->tabData(index).toString() == id) tabs_->setTabIcon(index, icon("dirty"));
             }
             updateStatus();
+            if (currentNoteId() == id) outlineTimer_->start();
             emit saveRequested();
         });
     }
@@ -773,6 +818,7 @@ void EditorWorkspace::activateEditor(const QString &id) {
 }
 
 void EditorWorkspace::removeEditor(const QString &id) {
+    collapsedSourceSymbols_.remove(id);
     if (imageId_ == id) {
         imageId_.clear();
         imagePixmap_ = {};
@@ -845,6 +891,25 @@ void EditorWorkspace::refreshOutline() {
     if (suspended_) return;
     outline_->clear();
     const auto *note = documentNote(currentNoteId());
+    outline_->setRootIsDecorated(note && note->kind == Note::Kind::Text);
+    if (note && note->kind == Note::Kind::Text) {
+        const bool matches = note->id == sourceOutlineId_ && note->path == sourceOutlinePath_ && note->content == sourceOutlineContent_;
+        if (matches && sourceOutlineWatcher_->isFinished()) {
+            showSourceOutline(sourceOutlineWatcher_->result());
+            return;
+        }
+        outlineHint_->setText(tr("正在解析源码..."));
+        outlineHint_->show();
+        if (sourceOutlineWatcher_->isRunning()) {
+            if (!matches) outlineTimer_->start();
+            return;
+        }
+        sourceOutlineId_ = note->id;
+        sourceOutlinePath_ = note->path;
+        sourceOutlineContent_ = note->content;
+        sourceOutlineWatcher_->setFuture(QtConcurrent::run(&SourceOutline::parse, sourceOutlinePath_, sourceOutlineContent_));
+        return;
+    }
     outlineHint_->setText(note ? QCoreApplication::translate("MainWindow", "本文暂无标题") : QCoreApplication::translate("MainWindow", "打开一篇笔记后自动生成大纲"));
     if (note && note->kind == Note::Kind::Markdown && editorSessions_.contains(note->id)) {
         QList<QPair<int, QTreeWidgetItem *>> parents;
@@ -861,6 +926,53 @@ void EditorWorkspace::refreshOutline() {
         outline_->expandAll();
     }
     outlineHint_->setVisible(outline_->topLevelItemCount() == 0);
+}
+
+void EditorWorkspace::showSourceOutline(const SourceOutline::Result &result) {
+    const QSignalBlocker blocker(outline_);
+    outline_->clear();
+    QVector<QTreeWidgetItem *> items;
+    for (const auto &symbol: result.symbols) {
+        auto *item = new QTreeWidgetItem;
+        const auto kind = SourceOutline::kindName(symbol.kind);
+        item->setText(0, symbol.name);
+        switch (symbol.kind) {
+            case SourceOutline::Kind::Class:
+            case SourceOutline::Kind::Type:
+                item->setForeground(0, QColor("#8656b8"));
+                break;
+            case SourceOutline::Kind::Function:
+            case SourceOutline::Kind::Method:
+                item->setForeground(0, QColor("#2563b5"));
+                break;
+            case SourceOutline::Kind::Variable:
+            case SourceOutline::Kind::Field:
+                item->setForeground(0, QColor("#167863"));
+                break;
+            case SourceOutline::Kind::Namespace:
+                item->setForeground(0, QColor("#63748b"));
+                break;
+            case SourceOutline::Kind::Enum:
+                item->setForeground(0, QColor("#a25f1b"));
+                break;
+        }
+        item->setToolTip(0, symbol.name + '\n' + kind + " · " + tr("第 %1 行").arg(symbol.line + 1));
+        item->setData(0, Qt::UserRole, symbol.line);
+        QStringList scope{symbol.name};
+        for (int parent = symbol.parent; parent >= 0; parent = result.symbols[parent].parent) scope.prepend(result.symbols[parent].name);
+        item->setData(0, Qt::UserRole + 1, QString::number(static_cast<int>(symbol.kind)) + ':' + scope.join("::"));
+        items.append(item);
+    }
+    for (int index = 0; index < items.size(); ++index) {
+        const int parent = result.symbols[index].parent;
+        if (parent < 0) outline_->addTopLevelItem(items[index]);
+        else
+            items[parent]->addChild(items[index]);
+    }
+    const auto collapsed = collapsedSourceSymbols_.value(currentNoteId());
+    for (auto *item: items) item->setExpanded(!collapsed.contains(item->data(0, Qt::UserRole + 1).toString()));
+    outlineHint_->setText(result.supported ? tr("暂无可识别的源码符号") : tr("此文件类型暂不支持源码大纲"));
+    outlineHint_->setVisible(items.isEmpty());
 }
 
 void EditorWorkspace::updateStatus() {
@@ -893,6 +1005,7 @@ bool EditorWorkspace::saveExternalFilesAndSync() {
         restored.setPosition(qMin(cursor.anchor(), end));
         restored.setPosition(qMin(cursor.position(), end), QTextCursor::KeepAnchor);
         it.value()->setTextCursor(restored);
+        if (it.key() == currentNoteId()) outlineTimer_->start();
     }
     for (auto it = editorSessions_.cbegin(); it != editorSessions_.cend(); ++it) {
         const auto directory = noteDirectory(it.key());
@@ -992,6 +1105,7 @@ void EditorWorkspace::refresh(bool suspended) {
     suspended_ = suspended;
     if (suspended_) {
         previewTimer_->stop();
+        outlineTimer_->stop();
         return;
     }
     const auto id = currentNoteId();

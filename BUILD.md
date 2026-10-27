@@ -1,6 +1,7 @@
 # 构建 qsnote
 
-需要 CMake 3.18+、支持 C++17 的编译器及 Qt 6（Core、Gui、Widgets、Network、Svg、Core5Compat、LinguistTools、WebEngineWidgets、WebChannel，及与运行库版本匹配的 Gui 私有开发头文件）。Linux 默认启用 clang-tidy。
+需要 CMake 3.18+、支持 C11/C++17 的编译器及 Qt 6（Core、Gui、Widgets、Network、Concurrent、Svg、Core5Compat、LinguistTools、WebEngineWidgets、WebChannel，及与运行库版本匹配的 Gui 私有开发头文件）。Linux 默认启用 clang-tidy。
+
 
 ## Linux
 
