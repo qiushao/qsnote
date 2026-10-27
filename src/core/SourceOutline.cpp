@@ -1,24 +1,11 @@
 #include "SourceOutline.h"
+#include "SourceLanguage.h"
 #include <QCoreApplication>
-#include <QFileInfo>
 #include <QHash>
 #include <QSet>
 #include <cstring>
 #include <memory>
 #include <tree_sitter/api.h>
-
-extern "C" {
-// NOLINTBEGIN(readability-identifier-naming): Upstream grammar entry points have a fixed C ABI.
-const TSLanguage *tree_sitter_c();
-const TSLanguage *tree_sitter_cpp();
-const TSLanguage *tree_sitter_java();
-const TSLanguage *tree_sitter_python();
-const TSLanguage *tree_sitter_javascript();
-const TSLanguage *tree_sitter_typescript();
-const TSLanguage *tree_sitter_tsx();
-const TSLanguage *tree_sitter_bash();
-// NOLINTEND(readability-identifier-naming)
-}
 
 namespace {
 using SourceOutline::Kind;
@@ -31,41 +18,6 @@ TSNode field(TSNode node, const char *name) {
 
 bool isType(TSNode node, const char *type) {
     return !ts_node_is_null(node) && std::strcmp(ts_node_type(node), type) == 0;
-}
-
-const TSLanguage *languageForFile(const QString &fileName) {
-    using Factory = const TSLanguage *(*) ();
-    static const QHash<QString, Factory> languages = {
-            {"c", tree_sitter_c},
-            {"cpp", tree_sitter_cpp},
-            {"cc", tree_sitter_cpp},
-            {"cxx", tree_sitter_cpp},
-            {"c++", tree_sitter_cpp},
-            {"h", tree_sitter_cpp},
-            {"hpp", tree_sitter_cpp},
-            {"hh", tree_sitter_cpp},
-            {"hxx", tree_sitter_cpp},
-            {"ipp", tree_sitter_cpp},
-            {"inl", tree_sitter_cpp},
-            {"java", tree_sitter_java},
-            {"py", tree_sitter_python},
-            {"pyw", tree_sitter_python},
-            {"pyi", tree_sitter_python},
-            {"js", tree_sitter_javascript},
-            {"jsx", tree_sitter_javascript},
-            {"mjs", tree_sitter_javascript},
-            {"cjs", tree_sitter_javascript},
-            {"ts", tree_sitter_typescript},
-            {"mts", tree_sitter_typescript},
-            {"cts", tree_sitter_typescript},
-            {"tsx", tree_sitter_tsx},
-            {"sh", tree_sitter_bash},
-            {"bash", tree_sitter_bash}};
-    const QFileInfo info(fileName);
-    if (info.suffix() == "C") return tree_sitter_cpp();
-    if (info.fileName() == ".bashrc" || info.fileName() == ".bash_profile" || info.fileName() == ".profile") return tree_sitter_bash();
-    const auto factory = languages.value(info.suffix().toLower(), nullptr);
-    return factory ? factory() : nullptr;
 }
 
 // Declarator wrappers carry the declared name, not the identifiers in parameters or initializers.
@@ -292,7 +244,7 @@ private:
 }// namespace
 
 SourceOutline::Result SourceOutline::parse(const QString &fileName, const QString &source) {
-    const auto *language = languageForFile(fileName);
+    const auto *language = SourceLanguage::forFile(fileName).grammar;
     if (!language) return {};
     const std::unique_ptr<TSParser, decltype(&ts_parser_delete)> parser(ts_parser_new(), ts_parser_delete);
     if (!ts_parser_set_language(parser.get(), language)) return {};

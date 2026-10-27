@@ -2,9 +2,9 @@
 #include "FlowLayout.h"
 #include "MarkdownEditor.h"
 #include "MarkdownPreview.h"
+#include "SourceHighlighter.h"
 #include "UiStyle.h"
 #include "core/StaticSite.h"
-#include <Definition>
 #include <QApplication>
 #include <QButtonGroup>
 #include <QClipboard>
@@ -38,9 +38,6 @@
 #include <QTreeWidget>
 #include <QWheelEvent>
 #include <QtConcurrentRun>
-#include <Repository>
-#include <SyntaxHighlighter>
-#include <Theme>
 #include <cmath>
 #include <vtextedit/previewmgr.h>
 #include <vtextedit/texteditutils.h>
@@ -736,16 +733,9 @@ void EditorWorkspace::deactivateEditor() {
 
 void EditorWorkspace::activatePlainText(const QString &id) {
     if (!textEditors_.contains(id)) {
-        static KSyntaxHighlighting::Repository syntaxRepository;
-        if (syntaxRepository.customSearchPaths().isEmpty()) syntaxRepository.addCustomSearchPath(":/demo/data");
         auto *editor = new PlainTextEditor(pages_);
         editor->setObjectName("plainTextEditor");
-        const auto definition = syntaxRepository.definitionForFileName(documentNote(id)->path);
-        if (definition.isValid()) {
-            auto *highlighter = new KSyntaxHighlighting::SyntaxHighlighter(editor->document());
-            highlighter->setTheme(syntaxRepository.defaultTheme(editor->palette().color(QPalette::Base).lightness() < 128 ? KSyntaxHighlighting::Repository::DarkTheme : KSyntaxHighlighting::Repository::LightTheme));
-            highlighter->setDefinition(definition);
-        }
+        new SourceHighlighter(editor->document(), documentNote(id)->path, editor->palette().color(QPalette::Base).lightness() < 128);
         editor->setPlainText(documentNote(id)->content);
         textEditors_.insert(id, editor);
         pages_->addWidget(editor);

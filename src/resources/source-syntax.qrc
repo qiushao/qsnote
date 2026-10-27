@@ -1,0 +1,12 @@
+<RCC>
+    <qresource prefix="/syntax">
+        <file alias="c.scm">syntax/c.scm</file>
+        <file alias="cpp.scm">syntax/cpp.scm</file>
+        <file alias="java.scm">syntax/java.scm</file>
+        <file alias="python.scm">syntax/python.scm</file>
+        <file alias="javascript.scm">syntax/javascript.scm</file>
+        <file alias="typescript.scm">syntax/typescript.scm</file>
+        <file alias="tsx.scm">syntax/typescript.scm</file>
+        <file alias="bash.scm">syntax/bash.scm</file>
+    </qresource>
+</RCC>

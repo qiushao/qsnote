@@ -500,7 +500,7 @@ MatchResult KeywordListRule::doMatch(const QString& text, int offset, const QStr
     if (newOffset == offset)
         return offset;
 
-    QStringView view;
+    const QStringView view(text);
     if (m_hasCaseSensitivityOverride) {
         if (m_keywordList->contains(view.mid(offset, newOffset - offset), m_caseSensitivityOverride))
             return newOffset;

@@ -17,6 +17,8 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         main.cpp
         ui/EditorWorkspace.cpp
         ui/EditorWorkspace.h
+        ui/SourceHighlighter.cpp
+        ui/SourceHighlighter.h
         ui/MainWindow.cpp
         ui/MainWindow.h
         ui/PostPropertiesDialog.cpp
@@ -74,11 +76,14 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         core/FrontMatter.h
         core/SourceOutline.cpp
         core/SourceOutline.h
+        core/SourceLanguage.cpp
+        core/SourceLanguage.h
         core/SitePublisher.cpp
         core/SitePublisher.h
         core/StaticSite.h
         core/NotebookStore.h
         resources/ui.qrc
+        resources/source-syntax.qrc
         resources/site.qrc
         ../third_party/vtextedit/demo/data/syntax/syntax.qrc
         ../third_party/vnote-web.qrc
