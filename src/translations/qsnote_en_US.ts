@@ -4,6 +4,34 @@
     <context>
         <name>EditorWorkspace</name>
         <message>
+            <source>文本编码：点击重新打开或切换保存编码</source>
+            <translation>Text encoding: click to reopen or change the save encoding</translation>
+        </message>
+        <message>
+            <source>文本编码</source>
+            <translation>Text Encoding</translation>
+        </message>
+        <message>
+            <source>以指定编码重新打开</source>
+            <translation>Reopen with Encoding</translation>
+        </message>
+        <message>
+            <source>切换保存编码</source>
+            <translation>Change Save Encoding</translation>
+        </message>
+        <message>
+            <source>切换编码</source>
+            <translation>Change Encoding</translation>
+        </message>
+        <message>
+            <source>当前文件有未保存的修改，请先保存，再以指定编码重新打开。</source>
+            <translation>This file has unsaved changes. Save it before reopening with another encoding.</translation>
+        </message>
+        <message>
+            <source>无法重新读取当前文本文件。</source>
+            <translation>Unable to reload the current text file.</translation>
+        </message>
+        <message>
             <source>正在解析源码...</source>
             <translation>Parsing source...</translation>
         </message>
@@ -2312,6 +2340,10 @@ It will be removed from the list. Files on disk will be kept, and you can add it
     </context>
     <context>
         <name>NotebookStore</name>
+        <message>
+            <source>无法使用 %1 编码保存 %2，部分字符无法表示。请切换保存编码为 UTF-8。</source>
+            <translation>Cannot save %2 using %1 because some characters cannot be represented. Change the save encoding to UTF-8.</translation>
+        </message>
         <message>
             <source>无法读取目录：%1</source>
             <translation>Unable to read directory: %1</translation>

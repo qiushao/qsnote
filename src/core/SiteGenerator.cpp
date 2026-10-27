@@ -62,7 +62,8 @@ public:
             }
             SitePage page;
             page.source = file;
-            page.body = QString::fromUtf8(data);
+            TextEncoding::Format format;
+            if (!TextEncoding::decode(data, page.body, format)) return fail(QCoreApplication::translate("NotebookStore", "无法解码文本文件：%1").arg(file));
             QJsonObject metadata;
             if (!FrontMatter::parse(page.body, metadata, error_)) {
                 *error_ = file + ": " + *error_;

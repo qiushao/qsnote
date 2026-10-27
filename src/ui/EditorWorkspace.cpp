@@ -3,6 +3,7 @@
 #include "MarkdownEditor.h"
 #include "MarkdownPreview.h"
 #include "UiStyle.h"
+#include "core/StaticSite.h"
 #include <Definition>
 #include <QApplication>
 #include <QButtonGroup>
@@ -258,9 +259,19 @@ EditorWorkspace::EditorWorkspace(NotebookStore &store, std::function<bool()> sav
         cursor.insertText(checked ? "x" : " ");
     });
     centerLayout->addWidget(pages_, 1);
-    status_ = label({}, center, true);
+    auto *statusBar = new QWidget(center);
+    statusBar->setObjectName("statusBar");
+    auto *statusLayout = row(statusBar, 20, 3, 12);
+    status_ = label({}, statusBar, true);
     status_->setObjectName("status");
-    centerLayout->addWidget(status_);
+    statusLayout->addWidget(status_, 1);
+    encoding_ = button({}, "encoding", statusBar);
+    encoding_->setToolTip(tr("文本编码：点击重新打开或切换保存编码"));
+    encoding_->setAccessibleName(tr("文本编码"));
+    encoding_->hide();
+    statusLayout->addWidget(encoding_);
+    connect(encoding_, &QPushButton::clicked, this, &EditorWorkspace::showEncodingMenu);
+    centerLayout->addWidget(statusBar);
 
     outlinePanel_ = new QWidget(this);
     outlinePanel_->setObjectName("outlinePanel");
@@ -1023,16 +1034,84 @@ void EditorWorkspace::showSourceOutline(const SourceOutline::Result &result) {
 
 void EditorWorkspace::updateStatus() {
     const auto *note = documentNote(currentNoteId());
-    if (!note || note->kind == Note::Kind::Image) return;
+    const bool text = note && !note->folder && (note->kind == Note::Kind::Markdown || note->kind == Note::Kind::Text);
+    encoding_->setVisible(text);
+    if (!text) return;
+    encoding_->setText(QString::fromLatin1(note->format.name) + (note->format.bom ? QStringLiteral(" BOM") : QString()));
     status_->setText(QCoreApplication::translate("MainWindow", "%1 字 · %2 行 · %3").arg(note->content.size()).arg(note->content.count('\n') + 1).arg(note->kind == Note::Kind::Text ? QCoreApplication::translate("MainWindow", "编辑中") : viewMode_ == ViewMode::Split ? QCoreApplication::translate("MainWindow", "分屏")
                                                                                                                                                                                                                                      : viewMode_ == ViewMode::Preview     ? QCoreApplication::translate("MainWindow", "预览")
                                                                                                                                                                                                                                                                           : QCoreApplication::translate("MainWindow", "编辑中")));
 }
 
+void EditorWorkspace::showEncodingMenu() {
+    const auto *note = documentNote(currentNoteId());
+    if (!note) return;
+    QMenu menu(this);
+    auto *reload = menu.addMenu(tr("以指定编码重新打开"));
+    auto *convert = menu.addMenu(tr("切换保存编码"));
+    reload->setEnabled(!note->path.isEmpty());
+    for (const auto &name: {"UTF-8", "GBK", "UTF-16LE", "UTF-16BE", "UTF-32LE", "UTF-32BE"}) {
+        reload->addAction(QString::fromLatin1(name), this, [this, name] { changeEncoding(name, true); });
+        auto *action = convert->addAction(QString::fromLatin1(name), this, [this, name] { changeEncoding(name, false); });
+        action->setCheckable(true);
+        action->setChecked(note->format.name == name);
+    }
+    menu.exec(encoding_->mapToGlobal(QPoint(0, encoding_->height())));
+}
+
+void EditorWorkspace::changeEncoding(const QByteArray &encoding, bool reload) {
+    const auto id = currentNoteId();
+    auto *note = documentNote(id);
+    if (!note) return;
+    if (reload && note->contentDirty) {
+        QMessageBox::warning(this, tr("切换编码"), tr("当前文件有未保存的修改，请先保存，再以指定编码重新打开。"));
+        return;
+    }
+    auto changed = *note;
+    QString error;
+    if (reload) {
+        const auto *book = store_.owner(id);
+        const auto path = book ? QDir(book->path).filePath(note->path) : note->path;
+        if (!NotebookStore::readFile(changed, path, &error, encoding) || (changed.kind != Note::Kind::Markdown && changed.kind != Note::Kind::Text)) {
+            QMessageBox::warning(this, tr("切换编码"), error.isEmpty() ? tr("无法重新读取当前文本文件。") : error);
+            return;
+        }
+        if (book && book->type == "site") changed.content = StaticSite::postBody(changed.content);
+    } else {
+        if (encoding == note->format.name) return;
+        changed.format.name = encoding;
+        changed.format.bom = encoding.startsWith("UTF-16") || encoding.startsWith("UTF-32");
+        QByteArray bytes;
+        if (!NotebookStore::fileContents(changed, bytes, &error)) {
+            QMessageBox::warning(this, tr("切换编码"), error);
+            return;
+        }
+        changed.contentDirty = true;
+    }
+    *note = changed;
+    if (reload) {
+        if (auto *editor = textEditors_.value(id)) {
+            const QSignalBlocker blocker(editor);
+            editor->setPlainText(note->content);
+        }
+        if (editorSessions_.contains(id)) editorSessions_[id].editor->setText(note->content);
+        refresh(false);
+    } else {
+        tabs_->setTabIcon(tabs_->currentIndex(), icon("dirty"));
+        emit saveRequested();
+    }
+    updateStatus();
+}
+
 bool EditorWorkspace::saveExternalFilesAndSync() {
     for (auto &note: externalFiles_) {
         if (!note.contentDirty) continue;
-        const auto bytes = NotebookStore::fileContents(note);
+        QByteArray bytes;
+        QString error;
+        if (!NotebookStore::fileContents(note, bytes, &error)) {
+            QMessageBox::warning(this, QCoreApplication::translate("MainWindow", "无法保存笔记"), error);
+            return false;
+        }
         QSaveFile file(note.path);
         if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) {
             QMessageBox::warning(this, QCoreApplication::translate("MainWindow", "无法保存笔记"), file.errorString());
@@ -1182,6 +1261,7 @@ void EditorWorkspace::refresh(bool suspended) {
         }
         if (preview_->revision() > 0) preview_->setMarkdown({}, {});
     }
+    updateStatus();
     refreshOutline();
 }
 

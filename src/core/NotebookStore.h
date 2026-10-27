@@ -1,6 +1,7 @@
 #ifndef QSNOTE_NOTEBOOKSTORE_H
 #define QSNOTE_NOTEBOOKSTORE_H
 
+#include "TextEncoding.h"
 #include <QByteArray>
 #include <QHash>
 #include <QJsonObject>
@@ -24,6 +25,7 @@ struct Note {
     bool contentDirty = false;  // 内容自上次写入磁盘后被修改
     Kind kind = Kind::Markdown;
     bool contentLoaded = true;
+    TextEncoding::Format format;
 };
 
 struct Notebook {
@@ -66,8 +68,8 @@ public:
     static bool scanDirectory(Notebook &book, QString *error);
     static bool loadDirectory(Notebook &book, const QString &path, QString *error);
     static bool loadAllFiles(Notebook &book, QString *error);
-    static bool readFile(Note &note, const QString &path, QString *error);
-    static QByteArray fileContents(const Note &note);
+    static bool readFile(Note &note, const QString &path, QString *error, const QByteArray &encoding = {});
+    static bool fileContents(const Note &note, QByteArray &bytes, QString *error);
     static bool readNotebook(const QString &path, Notebook &book, QString *error);
 
 private:

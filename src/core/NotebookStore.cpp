@@ -13,7 +13,6 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QStandardPaths>
-#include <QStringConverter>
 #include <QTemporaryDir>
 #include <QUrl>
 #include <QUuid>
@@ -458,10 +457,17 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
                 return false;
             }
         } else if ((book.type != "normal" || note->kind == Note::Kind::Markdown || note->kind == Note::Kind::Text) && (book.type == "site" || note->contentDirty || !QFileInfo::exists(root.absoluteFilePath(expected)))) {
-            if (!AtomicFile::write(root.absoluteFilePath(expected), book.type == "site" ? StaticSite::postSource(*note) : book.type == "normal" ? fileContents(*note)
-                                                                                                                                                : note->content.toUtf8(),
-                                   error)) return false;
+            auto source = *note;
+            if (book.type == "site") source.content = QString::fromUtf8(StaticSite::postSource(*note));
+            QByteArray bytes;
+            if (!fileContents(source, bytes, error) || !AtomicFile::write(root.absoluteFilePath(expected), bytes, error)) return false;
             note->contentDirty = false;
+            if (book.type == "normal") {
+                const QFileInfo saved(root.absoluteFilePath(expected));
+                note->metadata["modified"] = saved.lastModified().toMSecsSinceEpoch();
+                note->metadata["size"] = saved.size();
+                note->metadata["extension"] = saved.suffix();
+            }
         }
     }
     if (book.type == "normal") return scanDirectory(book, error);
@@ -485,7 +491,7 @@ bool NotebookStore::save(QString *error) {
     return AtomicFile::write(storagePath(), QJsonDocument(books).toJson(), error);
 }
 
-bool NotebookStore::readFile(Note &note, const QString &path, QString *error) {
+bool NotebookStore::readFile(Note &note, const QString &path, QString *error, const QByteArray &encoding) {
     const QFileInfo info(path);
     note.kind = Note::Kind::Unsupported;
     note.contentLoaded = true;
@@ -507,28 +513,23 @@ bool NotebookStore::readFile(Note &note, const QString &path, QString *error) {
         *error = file.errorString();
         return false;
     }
-    const auto encoding = QStringConverter::encodingForData(bytes);
-    QStringDecoder decoder(encoding.value_or(QStringConverter::Utf8), QStringConverter::Flag::Stateless);
-    const QString content = decoder(bytes);
-    if (decoder.hasError() || content.contains(QChar::Null)) {
+    QString content;
+    TextEncoding::Format format;
+    if (!TextEncoding::decode(bytes, content, format, encoding)) {
         *error = QCoreApplication::translate("NotebookStore", "无法解码文本文件：%1").arg(path);
         return false;
     }
     note.kind = markdown ? Note::Kind::Markdown : Note::Kind::Text;
     note.content = content;
-    note.metadata["encoding"] = int(encoding.value_or(QStringConverter::Utf8));
-    note.metadata["bom"] = encoding.has_value();
-    note.metadata["crlf"] = content.contains("\r\n");
-    note.content.replace("\r\n", "\n");
+    note.format = format;
     return true;
 }
 
-QByteArray NotebookStore::fileContents(const Note &note) {
-    auto content = note.content;
-    if (note.metadata["crlf"].toBool()) content.replace("\n", "\r\n");
-    QStringEncoder encoder(static_cast<QStringConverter::Encoding>(note.metadata["encoding"].toInt(int(QStringConverter::Utf8))),
-                           note.metadata["bom"].toBool() ? QStringConverter::Flag::WriteBom : QStringConverter::Flag::Default);
-    return encoder(content);
+bool NotebookStore::fileContents(const Note &note, QByteArray &bytes, QString *error) {
+    if (TextEncoding::encode(note.content, note.format, bytes)) return true;
+    *error = QCoreApplication::translate("NotebookStore", "无法使用 %1 编码保存 %2，部分字符无法表示。请切换保存编码为 UTF-8。")
+                     .arg(QString::fromLatin1(note.format.name), note.path);
+    return false;
 }
 
 bool NotebookStore::scanDirectory(Notebook &book, QString *error) {
@@ -665,7 +666,10 @@ bool NotebookStore::loadNotebook(Notebook &book, QString *error) {
                 *error = content.fileName() + ": " + content.errorString();
                 return false;
             }
-            note.content = QString::fromUtf8(bytes);
+            if (!TextEncoding::decode(bytes, note.content, note.format)) {
+                *error = QCoreApplication::translate("NotebookStore", "无法解码文本文件：%1").arg(content.fileName());
+                return false;
+            }
             if (book.type == "site") note.content = StaticSite::postBody(note.content);
         }
         loaded.append(note);
