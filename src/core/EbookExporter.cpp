@@ -327,8 +327,8 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
     QMap<QString, QByteArray> assets;
     QMap<QString, QString> imagePaths;
     ArticleRenderer renderer(book.path, "notebooks");
-    QString body = "<nav epub:type=\"toc\"><h2>目录</h2>" + contents(chapters, false) + "</nav>";
-    body.replace("book.html#", "#");
+    QList<Chapter> navigation;
+    QString body;
     const int total = int(chapters.size()) + 1;
     int completed = 0;
     for (const auto &chapter: chapters) {
@@ -342,8 +342,21 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
             return {};
         }
         const auto elements = ArticleRenderer::elements(document);
+        QList<int> headingLevels;
         for (auto node: elements) {
             if (node.hasAttribute("id")) node.setAttribute("id", chapter.anchor + "-" + node.attribute("id"));
+            const auto tag = node.tagName();
+            if (!noteId.isEmpty() && tag.size() == 2 && tag[0] == 'h' && tag[1] >= '1' && tag[1] <= '6') {
+                const int level = tag[1].digitValue();
+                while (!headingLevels.isEmpty() && headingLevels.last() >= level) headingLevels.removeLast();
+                const auto anchor = "outline-" + QString::number(navigation.size() + 1);
+                navigation.append({&note, int(headingLevels.size()), anchor, node.text().trimmed()});
+                headingLevels.append(level);
+                // ASCII aliases also work as PDF destinations; keep existing heading links intact.
+                auto target = document.createElement("a");
+                target.setAttribute("id", anchor);
+                node.insertBefore(target, node.firstChild());
+            }
             const bool imageNode = node.tagName() == "img";
             if (!imageNode && node.tagName() != "a") continue;
             const auto attribute = imageNode ? "src" : "href";
@@ -386,6 +399,10 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
         body += R"(<div class="chapter" id=")" + chapter.anchor + "\"><h1>" + chapter.title.toHtmlEscaped() + "</h1>" + ArticleRenderer::html(document) + "</div>";
         ++completed;
     }
+    if (navigation.isEmpty()) navigation = chapters;
+    auto tocBody = "<nav epub:type=\"toc\"><h2>目录</h2>" + contents(navigation, false) + "</nav>";
+    tocBody.replace("book.html#", "#");
+    body.prepend(tocBody);
     auto html = page(title, body);
     QString extension;
     switch (format) {
@@ -406,11 +423,11 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
         zip.setCompressionPolicy(QZipWriter::AutoCompress);
         zip.addFile("META-INF/container.xml", QByteArray(R"(<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>)"));
         zip.addFile("book.xhtml", html.toUtf8());
-        auto toc = contents(chapters, false);
+        auto toc = contents(navigation, false);
         toc.replace("book.html#", "book.xhtml#");
         zip.addFile("nav.xhtml", page(title, "<nav epub:type=\"toc\" id=\"toc\"><h1>目录</h1>" + toc + "</nav>").toUtf8());
         const auto uid = "urn:uuid:" + QUuid::createUuid().toString(QUuid::WithoutBraces);
-        zip.addFile("toc.ncx", ncx(title, uid, chapters).toUtf8());
+        zip.addFile("toc.ncx", ncx(title, uid, navigation).toUtf8());
         QString manifest = R"(<item id="book" href="book.xhtml" media-type="application/xhtml+xml"/><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>)";
         for (auto it = assets.cbegin(); it != assets.cend(); ++it) {
             zip.addFile(it.key(), it.value());
@@ -429,9 +446,9 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
             if (!writeFile(staging.filePath(it.key()), it.value(), error)) return {};
         }
         if (format == Format::Pdf) {
-            if (!printPdf(staging.filePath("book.html"), output, chapters, error)) return {};
+            if (!printPdf(staging.filePath("book.html"), output, navigation, error)) return {};
         } else {
-            const auto toc = "<!DOCTYPE HTML><html><head><meta charset=\"utf-8\"></head><body>" + contents(chapters, true) + "</body></html>";
+            const auto toc = "<!DOCTYPE HTML><html><head><meta charset=\"utf-8\"></head><body>" + contents(navigation, true) + "</body></html>";
             // Numeric entities keep Chinese TOC labels portable across compiler code pages.
             QString asciiToc;
             for (const auto character: toc.toUcs4()) asciiToc += character > 127 ? "&#" + QString::number(character) + ";" : QString(QChar(ushort(character)));
