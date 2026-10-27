@@ -14,6 +14,7 @@
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QImageReader>
+#include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
 #include <QMimeData>
@@ -271,6 +272,17 @@ EditorWorkspace::EditorWorkspace(NotebookStore &store, std::function<bool()> sav
     outlineTitle->setObjectName("sectionTitle");
     rightHeaderLayout->addWidget(outlineTitle);
     rightLayout->addWidget(rightHeader);
+    auto *filterRow = new QWidget(outlinePanel_);
+    auto *filterLayout = row(filterRow, 18, 0, 0);
+    outlineFilter_ = new QLineEdit(filterRow);
+    outlineFilter_->setObjectName("outlineFilter");
+    outlineFilter_->setPlaceholderText(QCoreApplication::translate("MainWindow", "筛选大纲"));
+    outlineFilter_->setAccessibleName(QCoreApplication::translate("MainWindow", "筛选大纲"));
+    outlineFilter_->setClearButtonEnabled(true);
+    outlineFilter_->addAction(icon("search"), QLineEdit::LeadingPosition);
+    filterLayout->addWidget(outlineFilter_);
+    rightLayout->addWidget(filterRow);
+    connect(outlineFilter_, &QLineEdit::textChanged, this, &EditorWorkspace::applyOutlineFilter);
     outlineHint_ = label(QCoreApplication::translate("MainWindow", "打开一篇笔记后自动生成大纲"), outlinePanel_, true);
     outlineHint_->setContentsMargins(18, 20, 18, 0);
     rightLayout->addWidget(outlineHint_);
@@ -925,7 +937,41 @@ void EditorWorkspace::refreshOutline() {
         }
         outline_->expandAll();
     }
-    outlineHint_->setVisible(outline_->topLevelItemCount() == 0);
+    applyOutlineFilter();
+}
+
+void EditorWorkspace::applyOutlineFilter() {
+    const auto query = outlineFilter_->text().trimmed().toCaseFolded();
+    const auto matches = [&query](const QString &text) {
+        const auto candidate = text.toCaseFolded();
+        int matched = 0;
+        for (const auto ch: candidate) {
+            if (matched < query.size() && ch == query.at(matched)) ++matched;
+        }
+        return matched == query.size();
+    };
+    const auto *note = documentNote(currentNoteId());
+    const bool source = note && note->kind == Note::Kind::Text;
+    const auto collapsed = collapsedSourceSymbols_.value(currentNoteId());
+    const QSignalBlocker blocker(outline_);
+    std::function<bool(QTreeWidgetItem *)> filterItem = [&](QTreeWidgetItem *item) {
+        bool childVisible = false;
+        for (int index = 0; index < item->childCount(); ++index) {
+            const bool visible = filterItem(item->child(index));
+            childVisible = childVisible || visible;
+        }
+        const bool visible = matches(item->text(0)) || childVisible;
+        item->setHidden(!visible);
+        item->setExpanded(query.isEmpty() ? !source || !collapsed.contains(item->data(0, Qt::UserRole + 1).toString()) : childVisible);
+        return visible;
+    };
+    bool anyVisible = false;
+    for (int index = 0; index < outline_->topLevelItemCount(); ++index) {
+        const bool visible = filterItem(outline_->topLevelItem(index));
+        anyVisible = anyVisible || visible;
+    }
+    if (!query.isEmpty() && outline_->topLevelItemCount() > 0) outlineHint_->setText(QCoreApplication::translate("MainWindow", "没有匹配的大纲"));
+    outlineHint_->setVisible(outline_->topLevelItemCount() == 0 || (!query.isEmpty() && !anyVisible));
 }
 
 void EditorWorkspace::showSourceOutline(const SourceOutline::Result &result) {
@@ -972,7 +1018,7 @@ void EditorWorkspace::showSourceOutline(const SourceOutline::Result &result) {
     const auto collapsed = collapsedSourceSymbols_.value(currentNoteId());
     for (auto *item: items) item->setExpanded(!collapsed.contains(item->data(0, Qt::UserRole + 1).toString()));
     outlineHint_->setText(result.supported ? tr("暂无可识别的源码符号") : tr("此文件类型暂不支持源码大纲"));
-    outlineHint_->setVisible(items.isEmpty());
+    applyOutlineFilter();
 }
 
 void EditorWorkspace::updateStatus() {

@@ -18,6 +18,7 @@ class QTreeWidget;
 class QLabel;
 class QPushButton;
 class QUrl;
+class QLineEdit;
 class QPlainTextEdit;
 class QScrollArea;
 template<typename T>
@@ -83,6 +84,7 @@ private:
     void setPreview(bool enabled);
     void setViewMode(ViewMode mode);
     void refreshOutline();
+    void applyOutlineFilter();
     void showSourceOutline(const SourceOutline::Result &result);
     void updateStatus();
     void updateImage();
@@ -119,6 +121,7 @@ private:
     ViewMode viewMode_ = ViewMode::Preview;
     bool syncingPreviewScroll_ = false;
     QTreeWidget *outline_ = nullptr;
+    QLineEdit *outlineFilter_ = nullptr;
     QLabel *outlineHint_ = nullptr;
     QLabel *status_ = nullptr;
     QPushButton *editMode_ = nullptr;

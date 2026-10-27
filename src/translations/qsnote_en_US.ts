@@ -525,6 +525,14 @@
             <translation>Outline</translation>
         </message>
         <message>
+            <source>筛选大纲</source>
+            <translation>Filter outline</translation>
+        </message>
+        <message>
+            <source>没有匹配的大纲</source>
+            <translation>No matching outline items</translation>
+        </message>
+        <message>
             <location line="+4" />
             <location line="+756" />
             <source>打开一篇笔记后自动生成大纲</source>
