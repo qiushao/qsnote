@@ -3,6 +3,7 @@
 #include "ArticleRenderer.h"
 #include <QBuffer>
 #include <QDateTime>
+#include <QDebug>
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
@@ -263,7 +264,7 @@ QString EbookExporter::chmCompiler() {
 }
 
 QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, Format format,
-                                 const QString &directory, QString *error) {
+                                  const QString &directory, QString *error, const ProgressCallback &progress) {
     error->clear();
     if (!QFileInfo(directory).isDir()) {
         *error = QCoreApplication::translate("EbookExporter", "请选择已有的保存目录。");
@@ -299,6 +300,17 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
             return {};
         }
     }
+    if (book.type == "normal") {
+        QSet<QString> included;
+        // Children precede their parents in reverse traversal, so keep only
+        // Markdown documents and the directories needed to reach them.
+        for (auto it = chapters.crbegin(); it != chapters.crend(); ++it) {
+            if (it->note->folder && !included.contains(it->note->id)) continue;
+            included.insert(it->note->id);
+            included.insert(it->note->parentId);
+        }
+        chapters.removeIf([&](const Chapter &chapter) { return !included.contains(chapter.note->id); });
+    }
     if (chapters.isEmpty()) {
         *error = noteId.isEmpty() ? QCoreApplication::translate("EbookExporter", "电子书中没有可导出的章节。") : QCoreApplication::translate("EbookExporter", "请选择当前电子书中的文档。");
         return {};
@@ -317,8 +329,11 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
     ArticleRenderer renderer(book.path, "notebooks");
     QString body = "<nav epub:type=\"toc\"><h2>目录</h2>" + contents(chapters, false) + "</nav>";
     body.replace("book.html#", "#");
+    const int total = int(chapters.size()) + 1;
+    int completed = 0;
     for (const auto &chapter: chapters) {
         const auto &note = *chapter.note;
+        if (progress) progress(completed, total, QCoreApplication::translate("EbookExporter", "正在处理章节（%1/%2）…\n%3").arg(completed + 1).arg(chapters.size()).arg(note.path.isEmpty() ? note.title : note.path));
         const auto source = QDir(book.path).absoluteFilePath(note.path.isEmpty() ? "document.md" : note.path);
         const auto base = QUrl::fromLocalFile(source);
         QDomDocument document;
@@ -339,21 +354,27 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
             if (imageNode) {
                 const auto key = resolved.toString();
                 if (!imagePaths.contains(key)) {
-                    const auto bytes = imageData(resolved, error);
+                    QString imageError;
+                    const auto bytes = imageData(resolved, &imageError);
                     const auto image = QImage::fromData(bytes);
                     if (image.isNull()) {
-                        *error = QCoreApplication::translate("EbookExporter", "无法读取图片 %1（%2）：%3").arg(original.toString(), note.title, *error);
-                        return {};
+                        qWarning().noquote() << QCoreApplication::translate("EbookExporter", "无法读取图片 %1（%2）：%3").arg(original.toString(), note.title, imageError);
+                        imagePaths[key] = QString();
+                    } else {
+                        QByteArray png;
+                        QBuffer buffer(&png);
+                        buffer.open(QIODevice::WriteOnly);
+                        image.save(&buffer, "PNG");
+                        const auto name = "image-" + QString::number(assets.size() + 1) + ".png";
+                        assets[name] = png;
+                        imagePaths[key] = name;
                     }
-                    QByteArray png;
-                    QBuffer buffer(&png);
-                    buffer.open(QIODevice::WriteOnly);
-                    image.save(&buffer, "PNG");
-                    const auto name = "image-" + QString::number(assets.size() + 1) + ".png";
-                    assets[name] = png;
-                    imagePaths[key] = name;
                 }
                 replacement = imagePaths[key];
+                if (replacement.isEmpty()) {
+                    node.parentNode().replaceChild(document.createTextNode(node.attribute("alt")), node);
+                    continue;
+                }
             } else if (resolved.isLocalFile()) {
                 const auto target = chapterPaths.value(QDir::cleanPath(resolved.toLocalFile()));
                 if (original.path().isEmpty() && original.hasFragment()) replacement = "#" + chapter.anchor + "-" + original.fragment(QUrl::FullyEncoded);
@@ -363,6 +384,7 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
             if (!replacement.isEmpty()) node.setAttribute(attribute, replacement);
         }
         body += R"(<div class="chapter" id=")" + chapter.anchor + "\"><h1>" + chapter.title.toHtmlEscaped() + "</h1>" + ArticleRenderer::html(document) + "</div>";
+        ++completed;
     }
     auto html = page(title, body);
     QString extension;
@@ -372,6 +394,7 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
     case Format::Chm: extension = "chm"; break;
     case Format::Html: extension = "html"; break;
     }
+    if (progress) progress(completed, total, QCoreApplication::translate("EbookExporter", "正在生成 %1 文件…").arg(extension.toUpper()));
     const auto output = staging.filePath("output." + extension);
     if (format == Format::Html) {
         for (auto it = assets.cbegin(); it != assets.cend(); ++it) html.replace("src=\"" + it.key() + "\"", "src=\"data:image/png;base64," + QString::fromLatin1(it.value().toBase64()) + "\"");
@@ -435,10 +458,12 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
             }
         }
     }
+    if (progress) progress(completed, total, QCoreApplication::translate("EbookExporter", "正在保存电子书…"));
     const auto baseName = NotebookStore::sanitized(title);
     auto destination = QDir(directory).filePath(baseName + "." + extension);
     for (int suffix = 2; QFileInfo::exists(destination); ++suffix) destination = QDir(directory).filePath(baseName + "-" + QString::number(suffix) + "." + extension);
     QFile generated(output);
     if (!generated.copy(destination)) { *error = QCoreApplication::translate("EbookExporter", "无法保存导出文件：") + generated.errorString(); return {}; }
+    if (progress) progress(total, total, QCoreApplication::translate("EbookExporter", "导出完成"));
     return destination;
 }

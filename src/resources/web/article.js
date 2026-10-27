@@ -20,6 +20,25 @@ window.qsnoteArticle = (() => {
             .use(markdownitInjectLinenumbers).use(markdownItAnchor, {slugify: text => text.trim().toLowerCase().replace(/\s+/g, '-')})
             .use(markdownItTocDoneRight).use(markdownitImplicitFigure, {figcaption: true})
             .use(markdownitMark).use(markdownitFrontMatter, text => { metadata = text; });
+        // A dollar in prose may belong to a shell variable. Only consume a
+        // single-dollar pair when its contents can actually be parsed as math.
+        const dollarRule = texmath.rules.dollars.inline.find(rule => rule.name === 'math_dollars_inline');
+        const parseDollar = texmath.inline(dollarRule);
+        md.inline.ruler.at(dollarRule.name, (state, silent) => {
+            const start = state.pos;
+            if (!parseDollar(state, true)) return false;
+            const end = state.pos;
+            state.pos = start;
+            // The dollar starting ${NAME} is not a closing math delimiter.
+            if (/^\{[A-Za-z_][A-Za-z0-9_]*\}/.test(state.src.slice(end))) return false;
+            try {
+                katex.renderToString(state.src.slice(start + 1, end - 1), {throwOnError: true, strict: 'ignore', trust: false});
+            } catch (error) {
+                if (error instanceof katex.ParseError) return false;
+                throw error;
+            }
+            return parseDollar(state, silent);
+        });
         texmath.render = (text, display) => katex.renderToString(text, {
             displayMode: display, throwOnError: strict, trust: false
         });

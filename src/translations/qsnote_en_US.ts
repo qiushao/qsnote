@@ -106,6 +106,24 @@
     <context>
         <name>EbookExporter</name>
         <message>
+            <source>正在处理章节（%1/%2）…
+%3</source>
+            <translation>Processing chapter (%1/%2)…
+%3</translation>
+        </message>
+        <message>
+            <source>正在生成 %1 文件…</source>
+            <translation>Generating %1 file…</translation>
+        </message>
+        <message>
+            <source>正在保存电子书…</source>
+            <translation>Saving ebook…</translation>
+        </message>
+        <message>
+            <source>导出完成</source>
+            <translation>Export complete</translation>
+        </message>
+        <message>
             <location filename="../core/EbookExporter.cpp" line="+42" />
             <source>无法写入 %1：%2</source>
             <translation>Unable to write %1: %2</translation>

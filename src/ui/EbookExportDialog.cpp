@@ -1,11 +1,14 @@
 #include "EbookExportDialog.h"
 #include "UiStyle.h"
 #include "core/EbookExporter.h"
+#include <QApplication>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QEventLoop>
 #include <QFileDialog>
 #include <QFormLayout>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QProgressDialog>
@@ -98,10 +101,23 @@ QString EbookExportDialog::run() {
     progress.setWindowModality(Qt::ApplicationModal);
     progress.setCancelButton(nullptr);
     progress.setMinimumDuration(0);
+    progress.setMinimumWidth(520);
+    progress.setAutoClose(false);
+    progress.setAutoReset(false);
+    auto *status = new QLabel(tr("正在导出电子书…"), &progress);
+    status->setTextFormat(Qt::PlainText);
+    status->setWordWrap(true);
+    progress.setLabel(status);
     progress.show();
     QString error;
     const auto path = EbookExporter::exportBook(snapshot, scope_->currentData().toString(),
-                                                static_cast<EbookExporter::Format>(format_->currentData().toInt()), destination, &error);
+                                                static_cast<EbookExporter::Format>(format_->currentData().toInt()), destination, &error,
+                                                [&progress](int completed, int total, const QString &message) {
+                                                    progress.setRange(0, total);
+                                                    progress.setLabelText(message);
+                                                    progress.setValue(completed);
+                                                    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+                                                });
     progress.close();
     if (path.isEmpty()) QMessageBox::warning(parentWidget(), tr("导出失败"), error);
     return path;
