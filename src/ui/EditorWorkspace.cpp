@@ -271,6 +271,12 @@ EditorWorkspace::EditorWorkspace(NotebookStore &store, std::function<bool()> sav
     encoding_->hide();
     statusLayout->addWidget(encoding_);
     connect(encoding_, &QPushButton::clicked, this, &EditorWorkspace::showEncodingMenu);
+    lineEnding_ = button({}, "lineEnding", statusBar);
+    lineEnding_->setToolTip(tr("换行符：点击切换"));
+    lineEnding_->setAccessibleName(tr("换行符"));
+    lineEnding_->hide();
+    statusLayout->addWidget(lineEnding_);
+    connect(lineEnding_, &QPushButton::clicked, this, &EditorWorkspace::showLineEndingMenu);
     centerLayout->addWidget(statusBar);
 
     outlinePanel_ = new QWidget(this);
@@ -746,7 +752,7 @@ void EditorWorkspace::activatePlainText(const QString &id) {
         connect(editor, &QPlainTextEdit::textChanged, this, [this, id, editor] {
             auto *note = documentNote(id);
             if (!note || note->content == editor->toPlainText()) return;
-            note->content = editor->toPlainText();
+            TextEncoding::updateText(note->content, editor->toPlainText(), note->format);
             note->contentDirty = true;
             for (int index = 0; index < tabs_->count(); ++index) {
                 if (tabs_->tabData(index).toString() == id) tabs_->setTabIcon(index, icon("dirty"));
@@ -800,7 +806,7 @@ void EditorWorkspace::activateEditor(const QString &id) {
             if (!note) return;
             const auto text = textEdit->toPlainText();
             if (note->content == text) return;
-            note->content = text;
+            TextEncoding::updateText(note->content, text, note->format);
             note->contentDirty = true;
             for (int index = 0; index < tabs_->count(); ++index) {
                 if (tabs_->tabData(index).toString() == id) tabs_->setTabIcon(index, icon("dirty"));
@@ -1036,11 +1042,41 @@ void EditorWorkspace::updateStatus() {
     const auto *note = documentNote(currentNoteId());
     const bool text = note && !note->folder && (note->kind == Note::Kind::Markdown || note->kind == Note::Kind::Text);
     encoding_->setVisible(text);
+    lineEnding_->setVisible(text);
     if (!text) return;
     encoding_->setText(QString::fromLatin1(note->format.name) + (note->format.bom ? QStringLiteral(" BOM") : QString()));
+    lineEnding_->setText(TextEncoding::hasMixedLineEndings(note->format) ? tr("混合") : note->format.lineEnding == TextEncoding::LineEnding::CRLF ? QStringLiteral("CRLF")
+                                                                                : note->format.lineEnding == TextEncoding::LineEnding::CR         ? QStringLiteral("CR")
+                                                                                                                                                  : QStringLiteral("LF"));
     status_->setText(QCoreApplication::translate("MainWindow", "%1 字 · %2 行 · %3").arg(note->content.size()).arg(note->content.count('\n') + 1).arg(note->kind == Note::Kind::Text ? QCoreApplication::translate("MainWindow", "编辑中") : viewMode_ == ViewMode::Split ? QCoreApplication::translate("MainWindow", "分屏")
                                                                                                                                                                                                                                      : viewMode_ == ViewMode::Preview     ? QCoreApplication::translate("MainWindow", "预览")
                                                                                                                                                                                                                                                                           : QCoreApplication::translate("MainWindow", "编辑中")));
+}
+
+void EditorWorkspace::showLineEndingMenu() {
+    const auto id = currentNoteId();
+    const auto *note = documentNote(id);
+    if (!note) return;
+    QMenu menu(this);
+    for (const auto ending: {TextEncoding::LineEnding::LF, TextEncoding::LineEnding::CRLF, TextEncoding::LineEnding::CR}) {
+        const auto name = ending == TextEncoding::LineEnding::LF ? QStringLiteral("LF") : ending == TextEncoding::LineEnding::CRLF ? QStringLiteral("CRLF")
+                                                                                                                                   : QStringLiteral("CR");
+        auto *action = menu.addAction(name, this, [this, id, ending] {
+            auto *current = documentNote(id);
+            if (!current || (current->format.lineEnding == ending && !TextEncoding::hasMixedLineEndings(current->format))) return;
+            current->format.lineEnding = ending;
+            current->format.lineEndings.clear();
+            current->contentDirty = true;
+            for (int index = 0; index < tabs_->count(); ++index) {
+                if (tabs_->tabData(index).toString() == id) tabs_->setTabIcon(index, icon("dirty"));
+            }
+            updateStatus();
+            emit saveRequested();
+        });
+        action->setCheckable(true);
+        action->setChecked(note->format.lineEnding == ending && !TextEncoding::hasMixedLineEndings(note->format));
+    }
+    menu.exec(lineEnding_->mapToGlobal(QPoint(0, lineEnding_->height())));
 }
 
 void EditorWorkspace::showEncodingMenu() {
@@ -1076,7 +1112,7 @@ void EditorWorkspace::changeEncoding(const QByteArray &encoding, bool reload) {
             QMessageBox::warning(this, tr("切换编码"), error.isEmpty() ? tr("无法重新读取当前文本文件。") : error);
             return;
         }
-        if (book && book->type == "site") changed.content = StaticSite::postBody(changed.content);
+        if (book && book->type == "site") TextEncoding::updateText(changed.content, StaticSite::postBody(changed.content), changed.format);
     } else {
         if (encoding == note->format.name) return;
         changed.format.name = encoding;

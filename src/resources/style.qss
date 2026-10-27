@@ -16,7 +16,7 @@ QLabel#emptyDescription { font-size: 13px; color: #758195; }
 QLabel#emptyShortcut { font-size: 12px; color: #758195; margin-top: 16px; }
 QWidget#statusBar { background: #ffffff; border-top: 1px solid #edf0f4; }
 QLabel#status { font-size: 12px; color: #758195; }
-QPushButton#encoding { border: none; border-radius: 4px; padding: 3px 6px; font-size: 12px; color: #758195; }
+QPushButton#encoding, QPushButton#lineEnding { border: none; border-radius: 4px; padding: 3px 6px; font-size: 12px; color: #758195; }
 QPushButton { border: 1px solid #dfe5ed; background: #ffffff; border-radius: 7px; padding: 6px 12px; font-size: 13px; }
 QPushButton:hover { background: #f0f4f9; border-color: #cad4e1; }
 QPushButton:pressed { background: #e8eef7; }

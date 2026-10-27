@@ -88,6 +88,7 @@ private:
     void showSourceOutline(const SourceOutline::Result &result);
     void updateStatus();
     void showEncodingMenu();
+    void showLineEndingMenu();
     void changeEncoding(const QByteArray &encoding, bool reload);
     void updateImage();
     NotebookStore &store_;
@@ -127,6 +128,7 @@ private:
     QLabel *outlineHint_ = nullptr;
     QLabel *status_ = nullptr;
     QPushButton *encoding_ = nullptr;
+    QPushButton *lineEnding_ = nullptr;
     QPushButton *editMode_ = nullptr;
     QPushButton *previewMode_ = nullptr;
     QPushButton *splitMode_ = nullptr;

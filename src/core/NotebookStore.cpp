@@ -458,7 +458,7 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
             }
         } else if ((book.type != "normal" || note->kind == Note::Kind::Markdown || note->kind == Note::Kind::Text) && (book.type == "site" || note->contentDirty || !QFileInfo::exists(root.absoluteFilePath(expected)))) {
             auto source = *note;
-            if (book.type == "site") source.content = QString::fromUtf8(StaticSite::postSource(*note));
+            if (book.type == "site") TextEncoding::updateText(source.content, QString::fromUtf8(StaticSite::postSource(*note)), source.format);
             QByteArray bytes;
             if (!fileContents(source, bytes, error) || !AtomicFile::write(root.absoluteFilePath(expected), bytes, error)) return false;
             note->contentDirty = false;
@@ -670,7 +670,7 @@ bool NotebookStore::loadNotebook(Notebook &book, QString *error) {
                 *error = QCoreApplication::translate("NotebookStore", "无法解码文本文件：%1").arg(content.fileName());
                 return false;
             }
-            if (book.type == "site") note.content = StaticSite::postBody(note.content);
+            if (book.type == "site") TextEncoding::updateText(note.content, StaticSite::postBody(note.content), note.format);
         }
         loaded.append(note);
     }

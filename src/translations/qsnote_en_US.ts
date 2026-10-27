@@ -4,6 +4,18 @@
     <context>
         <name>EditorWorkspace</name>
         <message>
+            <source>换行符：点击切换</source>
+            <translation>Line endings: click to change</translation>
+        </message>
+        <message>
+            <source>换行符</source>
+            <translation>Line Endings</translation>
+        </message>
+        <message>
+            <source>混合</source>
+            <translation>Mixed</translation>
+        </message>
+        <message>
             <source>文本编码：点击重新打开或切换保存编码</source>
             <translation>Text encoding: click to reopen or change the save encoding</translation>
         </message>
