@@ -581,6 +581,7 @@ void MainWindow::refreshNotebooks() {
     notebooks_->setPlaceholderText(tr("无笔记本"));
     notebooks_->setCurrentIndex(notebooks_->findData(currentNotebookId_));
     auto *book = store_.notebook(currentNotebookId_);
+    if (book && book->type == "todo") rightRequested_ = true;
     const bool site = book && book->type == "site";
     siteConfig_->setVisible(site);
     sitePreview_->setVisible(site);

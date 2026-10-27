@@ -16,6 +16,7 @@
 #include <QFormLayout>
 #include <QFontComboBox>
 #include <QImageReader>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
@@ -27,6 +28,7 @@
 #include <QShortcut>
 #include <QSpinBox>
 #include <QTabWidget>
+#include <QTextBlock>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QWheelEvent>
@@ -394,6 +396,36 @@ void MarkdownEditor::zoom(int delta) {
 }
 
 bool MarkdownEditor::eventFilter(QObject *watched, QEvent *event) {
+    if (watched == getTextEdit() && event->type() == QEvent::KeyPress) {
+        auto *key = dynamic_cast<QKeyEvent *>(event);
+        if (key && key->modifiers() == Qt::AltModifier && (key->key() == Qt::Key_Up || key->key() == Qt::Key_Down)) {
+            auto *edit = getTextEdit();
+            if (!edit->isReadOnly()) {
+                auto cursor = edit->textCursor();
+                const auto current = cursor.block();
+                const bool up = key->key() == Qt::Key_Up;
+                const auto adjacent = up ? current.previous() : current.next();
+                if (adjacent.isValid()) {
+                    const int column = cursor.positionInBlock();
+                    const auto first = up ? adjacent : current;
+                    const auto last = up ? current : adjacent;
+                    const int start = first.position();
+                    const int position = start + (up ? 0 : adjacent.length()) + column;
+                    const auto text = last.text() + '\n' + first.text();
+                    cursor.beginEditBlock();
+                    cursor.setPosition(start);
+                    cursor.setPosition(last.position() + last.length() - 1, QTextCursor::KeepAnchor);
+                    cursor.insertText(text);
+                    cursor.setPosition(position);
+                    cursor.endEditBlock();
+                    edit->setTextCursor(cursor);
+                    edit->ensureCursorVisible();
+                }
+            }
+            key->accept();
+            return true;
+        }
+    }
     if (watched == getTextEdit()->viewport() && event->type() == QEvent::Wheel) {
         auto *wheel = dynamic_cast<QWheelEvent *>(event);
         if (wheel && (wheel->modifiers() & Qt::ControlModifier)) {
