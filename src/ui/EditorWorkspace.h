@@ -43,6 +43,7 @@ public:
     bool saveExternalFilesAndSync();
     void reloadSettings();
     void showStatus(const QString &text);
+    void setFullScreenPreview(bool enabled);
 
 signals:
     void currentDocumentChanged();
@@ -50,6 +51,7 @@ signals:
     void searchRequested();
     void notebookRequested(const QString &id);
     void locateRequested(const QString &id);
+    void fullScreenPreviewChanged(bool enabled);
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -122,6 +124,9 @@ private:
     QString sourceOutlinePath_;
     QString sourceOutlineContent_;
     ViewMode viewMode_ = ViewMode::Preview;
+    bool fullScreenPreview_ = false;
+    ViewMode previousViewMode_ = ViewMode::Preview;
+    QByteArray previousEditorSplitterState_;
     bool syncingPreviewScroll_ = false;
     QTreeWidget *outline_ = nullptr;
     QLineEdit *outlineFilter_ = nullptr;

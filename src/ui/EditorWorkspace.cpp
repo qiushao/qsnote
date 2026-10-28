@@ -372,6 +372,10 @@ EditorWorkspace::EditorWorkspace(NotebookStore &store, std::function<bool()> sav
     });
     auto *mode = new QShortcut(QKeySequence("Ctrl+E"), window());
     connect(mode, &QShortcut::activated, this, [this] { setPreview(viewMode_ != ViewMode::Preview); });
+    auto *exitFullScreen = new QShortcut(QKeySequence(Qt::Key_Escape), window());
+    exitFullScreen->setEnabled(false);
+    connect(exitFullScreen, &QShortcut::activated, this, [this] { setFullScreenPreview(false); });
+    connect(this, &EditorWorkspace::fullScreenPreviewChanged, exitFullScreen, &QShortcut::setEnabled);
     connect(tabs_, &QTabBar::currentChanged, this, &EditorWorkspace::currentDocumentChanged);
     connect(tabs_, &QTabBar::tabCloseRequested, this, &EditorWorkspace::closeTab);
     connect(tabs_, &QTabBar::customContextMenuRequested, this, &EditorWorkspace::showTabMenu);
@@ -537,6 +541,14 @@ void EditorWorkspace::buildToolbar() {
         group->addButton(mode);
         modeLayout->addWidget(mode);
     }
+    auto *fullScreen = button({}, "fullScreenPreview", modes);
+    fullScreen->setProperty("mode", true);
+    fullScreen->setIcon(icon("fullscreen"));
+    fullScreen->setIconSize(QSize(20, 20));
+    fullScreen->setToolTip(tr("全屏预览 (Esc 退出)"));
+    fullScreen->setAccessibleName(tr("全屏预览"));
+    modeLayout->addWidget(fullScreen);
+    connect(fullScreen, &QPushButton::clicked, this, [this] { setFullScreenPreview(true); });
     layout->addWidget(modes);
     connect(editMode_, &QPushButton::clicked, this, [this] { setPreview(false); });
     connect(previewMode_, &QPushButton::clicked, this, [this] { setPreview(true); });
@@ -865,7 +877,32 @@ void EditorWorkspace::removeEditor(const QString &id) {
 }
 
 void EditorWorkspace::setPreview(bool enabled) {
+    setFullScreenPreview(false);
     setViewMode(enabled ? ViewMode::Preview : ViewMode::Edit);
+}
+
+void EditorWorkspace::setFullScreenPreview(bool enabled) {
+    if (fullScreenPreview_ == enabled) return;
+    const auto *note = documentNote(currentNoteId());
+    if (enabled && (!note || note->kind != Note::Kind::Markdown || !markdownEditor_)) return;
+    fullScreenPreview_ = enabled;
+    if (enabled) {
+        previousViewMode_ = viewMode_;
+        previousEditorSplitterState_ = editorSplitter_->saveState();
+        setViewMode(ViewMode::Preview);
+    } else if (activeEditorId_ == currentNoteId()) {
+        setViewMode(previousViewMode_);
+        editorSplitter_->restoreState(previousEditorSplitterState_);
+    } else if (editorSessions_.contains(activeEditorId_)) {
+        editorSessions_[activeEditorId_].mode = previousViewMode_;
+    }
+    tabs_->parentWidget()->setVisible(!enabled);
+    toolbar_->setVisible(!enabled && note && note->kind == Note::Kind::Markdown);
+    status_->parentWidget()->setVisible(!enabled);
+    emit fullScreenPreviewChanged(enabled);
+    if (viewMode_ == ViewMode::Preview) preview_->setFocus();
+    else if (markdownEditor_)
+        markdownEditor_->setFocus();
 }
 
 void EditorWorkspace::setViewMode(ViewMode mode) {
@@ -1253,6 +1290,8 @@ bool EditorWorkspace::eventFilter(QObject *watched, QEvent *event) {
 }
 
 void EditorWorkspace::refresh(bool suspended) {
+    const auto *current = documentNote(currentNoteId());
+    if (fullScreenPreview_ && (suspended || !current || current->kind != Note::Kind::Markdown || currentNoteId() != activeEditorId_)) setFullScreenPreview(false);
     suspended_ = suspended;
     if (suspended_) {
         previewTimer_->stop();
@@ -1261,7 +1300,7 @@ void EditorWorkspace::refresh(bool suspended) {
     }
     const auto id = currentNoteId();
     const auto *note = documentNote(id);
-    toolbar_->setVisible(note && note->kind == Note::Kind::Markdown);
+    toolbar_->setVisible(!fullScreenPreview_ && note && note->kind == Note::Kind::Markdown);
     if (note && note->kind == Note::Kind::Markdown) {
         activateEditor(id);
         setViewMode(viewMode_);

@@ -46,6 +46,7 @@ private:
     void watchDirectories();
     void refreshEditor();
     void updatePanels();
+    void setFullScreenPreview(bool enabled);
     void updateResizeHandles();
     void updateMaximizeButton();
     void createNotebook();
@@ -90,6 +91,7 @@ private:
     EditorWorkspace *editorWorkspace_ = nullptr;
     QPushButton *toggleLeft_ = nullptr;
     QPushButton *toggleRight_ = nullptr;
+    QPushButton *fullScreenOutline_ = nullptr;
     QPushButton *siteConfig_ = nullptr;
     QPushButton *sitePreview_ = nullptr;
     QPushButton *export_ = nullptr;
@@ -100,6 +102,13 @@ private:
     bool rightRequested_ = true;
     bool storageReady_ = true;
     bool maximized_ = false;
+    bool fullScreenPreview_ = false;
+    bool fullScreenOutlineRequested_ = true;
+    bool previousLeftVisible_ = true;
+    bool previousRightVisible_ = true;
+    Qt::WindowStates previousWindowState_;
+    QRect previousGeometry_;
+    QByteArray previousSplitterState_;
     QRect normalGeometry_;
 };
 

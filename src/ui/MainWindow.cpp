@@ -246,6 +246,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     connect(saveTimer_, &QTimer::timeout, this, [this] { save(); });
     auto *findAll = new QShortcut(QKeySequence("Ctrl+Shift+F"), this);
     connect(findAll, &QShortcut::activated, this, [this] {
+        editorWorkspace_->setFullScreenPreview(false);
         leftRequested_ = true;
         updatePanels();
         left_->show();
@@ -490,6 +491,18 @@ void MainWindow::buildUi() {
     right_->installEventFilter(this);
     auto *rightLayout = column(right_);
     rightLayout->addWidget(editorWorkspace_->outlinePanel());
+    fullScreenOutline_ = button({}, "fullScreenOutline", this);
+    fullScreenOutline_->setProperty("iconButton", true);
+    fullScreenOutline_->setIconSize(QSize(20, 20));
+    fullScreenOutline_->setFixedSize(32, 32);
+    fullScreenOutline_->setToolTip(tr("收起/展开右侧栏"));
+    fullScreenOutline_->setAccessibleName(fullScreenOutline_->toolTip());
+    fullScreenOutline_->hide();
+    connect(fullScreenOutline_, &QPushButton::clicked, this, [this] {
+        fullScreenOutlineRequested_ = !right_->isVisible();
+        updatePanels();
+    });
+    connect(editorWorkspace_, &EditorWorkspace::fullScreenPreviewChanged, this, &MainWindow::setFullScreenPreview);
     todoWorkspace_ = new TodoWorkspace(store_, pages_);
     pages_->addWidget(todoWorkspace_);
     bodyLayout->addWidget(todoWorkspace_->categoryPanel(), 1);
@@ -770,8 +783,42 @@ void MainWindow::refreshEditor() {
     refreshTree();
 }
 
+void MainWindow::setFullScreenPreview(bool enabled) {
+    fullScreenPreview_ = enabled;
+    if (enabled) {
+        previousWindowState_ = windowState();
+        previousGeometry_ = geometry();
+        previousSplitterState_ = splitter_->saveState();
+        previousLeftVisible_ = !left_->isHidden();
+        previousRightVisible_ = !right_->isHidden();
+        fullScreenOutlineRequested_ = previousRightVisible_;
+        header_->hide();
+        showFullScreen();
+    } else {
+        header_->show();
+        setWindowState(previousWindowState_);
+        setGeometry(previousGeometry_);
+    }
+    fullScreenOutline_->setVisible(enabled);
+    updatePanels();
+    if (!enabled) {
+        left_->setVisible(previousLeftVisible_);
+        right_->setVisible(previousRightVisible_);
+        splitter_->restoreState(previousSplitterState_);
+    }
+    updateResizeHandles();
+}
+
 void MainWindow::updatePanels() {
     if (!left_ || !right_) return;
+    if (fullScreenPreview_) {
+        left_->hide();
+        right_->setVisible(fullScreenOutlineRequested_);
+        fullScreenOutline_->setIcon(icon(fullScreenOutlineRequested_ ? "right" : "rightCollapsed"));
+        fullScreenOutline_->move(width() - fullScreenOutline_->width() - 8, 8);
+        fullScreenOutline_->raise();
+        return;
+    }
     siteConfig_->setText(width() < 600 ? tr("配置") : tr("站点配置"));
     sitePreview_->setText(width() < 600 ? tr("预览") : tr("站点预览"));
     const auto *book = store_.notebook(currentNotebookId_);
@@ -927,6 +974,7 @@ void MainWindow::applyRemoval(const NotebookStore::RemovalResult &result) {
 
 void MainWindow::closeEvent(QCloseEvent *event) {
     if (!storageReady_ || save()) {
+        editorWorkspace_->setFullScreenPreview(false);
         // 记住当前笔记本与全部标签页，供下次启动时恢复。
         QSettings session;
         session.setValue("session/notebookId", currentNotebookId_);
