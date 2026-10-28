@@ -545,8 +545,8 @@ void EditorWorkspace::buildToolbar() {
     fullScreen->setProperty("mode", true);
     fullScreen->setIcon(icon("fullscreen"));
     fullScreen->setIconSize(QSize(20, 20));
-    fullScreen->setToolTip(tr("全屏预览 (Esc 退出)"));
-    fullScreen->setAccessibleName(tr("全屏预览"));
+    fullScreen->setToolTip(tr("全屏 (Esc 退出)"));
+    fullScreen->setAccessibleName(tr("全屏"));
     modeLayout->addWidget(fullScreen);
     connect(fullScreen, &QPushButton::clicked, this, [this] { setFullScreenPreview(true); });
     layout->addWidget(modes);
@@ -886,16 +886,6 @@ void EditorWorkspace::setFullScreenPreview(bool enabled) {
     const auto *note = documentNote(currentNoteId());
     if (enabled && (!note || note->kind != Note::Kind::Markdown || !markdownEditor_)) return;
     fullScreenPreview_ = enabled;
-    if (enabled) {
-        previousViewMode_ = viewMode_;
-        previousEditorSplitterState_ = editorSplitter_->saveState();
-        setViewMode(ViewMode::Preview);
-    } else if (activeEditorId_ == currentNoteId()) {
-        setViewMode(previousViewMode_);
-        editorSplitter_->restoreState(previousEditorSplitterState_);
-    } else if (editorSessions_.contains(activeEditorId_)) {
-        editorSessions_[activeEditorId_].mode = previousViewMode_;
-    }
     tabs_->parentWidget()->setVisible(!enabled);
     toolbar_->setVisible(!enabled && note && note->kind == Note::Kind::Markdown);
     status_->parentWidget()->setVisible(!enabled);

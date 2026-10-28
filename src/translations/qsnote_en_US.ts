@@ -4,12 +4,12 @@
     <context>
         <name>EditorWorkspace</name>
         <message>
-            <source>全屏预览</source>
-            <translation>Full Screen Preview</translation>
+            <source>全屏</source>
+            <translation>Full Screen</translation>
         </message>
         <message>
-            <source>全屏预览 (Esc 退出)</source>
-            <translation>Full Screen Preview (Esc to exit)</translation>
+            <source>全屏 (Esc 退出)</source>
+            <translation>Full Screen (Esc to exit)</translation>
         </message>
         <message>
             <source>换行符：点击切换</source>

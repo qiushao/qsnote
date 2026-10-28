@@ -125,8 +125,6 @@ private:
     QString sourceOutlineContent_;
     ViewMode viewMode_ = ViewMode::Preview;
     bool fullScreenPreview_ = false;
-    ViewMode previousViewMode_ = ViewMode::Preview;
-    QByteArray previousEditorSplitterState_;
     bool syncingPreviewScroll_ = false;
     QTreeWidget *outline_ = nullptr;
     QLineEdit *outlineFilter_ = nullptr;
