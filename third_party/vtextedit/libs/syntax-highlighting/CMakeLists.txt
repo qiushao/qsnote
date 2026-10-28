@@ -47,9 +47,12 @@ target_include_directories(VSyntaxHighlighting PUBLIC
     src/lib
 )
 
-target_compile_definitions(VSyntaxHighlighting PUBLIC
-    KSYNTAXHIGHLIGHTING_LIBRARY
-)
+if(BUILD_SHARED_LIBS)
+    target_compile_definitions(VSyntaxHighlighting PRIVATE KSYNTAXHIGHLIGHTING_LIBRARY)
+else()
+    # Static consumers must not export these symbols from VTextEdit.dll.
+    target_compile_definitions(VSyntaxHighlighting PUBLIC KSYNTAXHIGHLIGHTING_STATIC_DEFINE)
+endif()
 
 target_link_libraries(VSyntaxHighlighting PUBLIC
     Qt::Core
