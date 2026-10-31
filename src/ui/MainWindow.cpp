@@ -4,6 +4,7 @@
 #include "FlowLayout.h"
 #include "OverlayDialog.h"
 #include "PostPropertiesDialog.h"
+#include "RoundedTreeWidget.h"
 #include "SettingsDialog.h"
 #include "SiteConfigDialog.h"
 #include "SitePreviewDialog.h"
@@ -82,7 +83,7 @@ public:
         adjusted.text = option.fontMetrics.elidedText(adjusted.text, Qt::ElideRight, qMax(0, option.rect.width() - typeWidth - 20));
         option.widget->style()->drawControl(QStyle::CE_ItemViewItem, &adjusted, painter, option.widget);
         painter->save();
-        painter->setPen(option.state & QStyle::State_Selected ? QColor("#3b6fd4") : QColor("#758195"));
+        painter->setPen(option.state & QStyle::State_Selected ? QColor("#7560a8") : QColor("#7a7a87"));
         auto font = option.font;
         font.setPixelSize(11);
         painter->setFont(font);
@@ -135,8 +136,8 @@ public:
                 offset = hit + query.size();
             }
         };
-        drawLine(index.data().toString(), rect.top(), option.state & QStyle::State_Selected ? QColor("#3b6fd4") : QColor("#303b4a"), 13);
-        drawLine(index.data(Qt::UserRole + 3).toString(), rect.top() + 22, QColor("#758195"), 12);
+        drawLine(index.data().toString(), rect.top(), option.state & QStyle::State_Selected ? QColor("#7560a8") : QColor("#34343b"), 13);
+        drawLine(index.data(Qt::UserRole + 3).toString(), rect.top() + 22, QColor("#7a7a87"), 12);
         painter->restore();
     }
     [[nodiscard]] QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override {
@@ -147,9 +148,9 @@ public:
 };
 
 
-class NoteTree : public QTreeWidget {
+class NoteTree : public RoundedTreeWidget {
 public:
-    using QTreeWidget::QTreeWidget;
+    using RoundedTreeWidget::RoundedTreeWidget;
     std::function<void()> orderChanged;
 
 protected:
@@ -284,11 +285,11 @@ void MainWindow::buildUi() {
     auto *header = new QWidget(root);
     header_ = header;
     header->setObjectName("header");
-    header->setMinimumHeight(42);
+    header->setMinimumHeight(50);
     header->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     header->installEventFilter(this);
     auto *headerLayout = new QGridLayout(header);
-    headerLayout->setContentsMargins(16, 3, 16, 3);
+    headerLayout->setContentsMargins(16, 7, 16, 7);
     headerLayout->setSpacing(8);
     headerLayout->setColumnStretch(0, 1);
     headerLayout->setColumnStretch(2, 1);
@@ -399,7 +400,7 @@ void MainWindow::buildUi() {
     left_->installEventFilter(this);
     auto *leftLayout = column(left_);
     auto *leftBody = new QWidget(left_);
-    auto *bodyLayout = column(leftBody, 10, 8);
+    auto *bodyLayout = column(leftBody, 12, 12);
     groupBy_ = new QComboBox(leftBody);
     groupBy_->setObjectName("groupBy");
     groupBy_->addItems({tr("按分类"), tr("按标签"), tr("按日期")});

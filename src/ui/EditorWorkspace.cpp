@@ -2,6 +2,7 @@
 #include "FlowLayout.h"
 #include "MarkdownEditor.h"
 #include "MarkdownPreview.h"
+#include "RoundedTreeWidget.h"
 #include "SourceHighlighter.h"
 #include "UiStyle.h"
 #include "core/StaticSite.h"
@@ -300,7 +301,7 @@ EditorWorkspace::EditorWorkspace(NotebookStore &store, std::function<bool()> sav
     outlineHint_ = label(QCoreApplication::translate("MainWindow", "打开一篇笔记后自动生成大纲"), outlinePanel_, true);
     outlineHint_->setContentsMargins(18, 20, 18, 0);
     rightLayout->addWidget(outlineHint_);
-    outline_ = new QTreeWidget(outlinePanel_);
+    outline_ = new RoundedTreeWidget(outlinePanel_);
     outline_->setObjectName("outline");
     outline_->setHeaderHidden(true);
     outline_->setRootIsDecorated(false);
@@ -383,7 +384,7 @@ EditorWorkspace::EditorWorkspace(NotebookStore &store, std::function<bool()> sav
 
 void EditorWorkspace::buildToolbar() {
     auto *layout = new FlowLayout(toolbar_, 8, 3);
-    layout->setContentsMargins(8, 1, 8, 1);
+    layout->setContentsMargins(12, 5, 12, 5);
     using Type = vte::TypeAction;
     struct Tool {
         QString icon;
@@ -395,7 +396,7 @@ void EditorWorkspace::buildToolbar() {
     const auto addSeparator = [&] {
         auto *separator = new QFrame(toolbar_);
         separator->setFrameShape(QFrame::VLine);
-        separator->setStyleSheet("color: #e7ebf0; margin: 6px 4px;");
+        separator->setStyleSheet("color: #e9e9ee; margin: 6px 4px;");
         separator->setFixedSize(11, 24);
         layout->addWidget(separator);
     };
