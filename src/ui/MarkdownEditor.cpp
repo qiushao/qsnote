@@ -106,11 +106,13 @@ QSharedPointer<vte::MarkdownEditorConfig> editorConfig() {
     // The library default is shared. Keep font overrides local to this config.
     text->m_theme = QSharedPointer<vte::Theme>::create(*vte::TextEditorConfig::defaultTheme());
     auto config = QSharedPointer<vte::MarkdownEditorConfig>::create(text);
-    config->overrideTextFontFamily(settings.value("fontFamily").toString());
+    const auto family = settings.value("fontFamily").toString();
+    config->overrideTextFontFamily(family.isEmpty() ? defaultUiFontFamily() : family);
     auto &font = text->m_theme->editorStyle(vte::Theme::Text);
-    font.m_fontPointSize = settings.value("fontSize", font.m_fontPointSize).toInt();
-    font.m_backgroundColor = qRgb(255, 255, 255);
-    text->m_theme->editorStyle(vte::Theme::CursorLine).m_backgroundColor = qRgb(248, 246, 251);
+    font.m_fontPointSize = settings.value("fontSize", 12).toInt();
+    font.m_textColor = qRgb(36, 36, 36);
+    font.m_backgroundColor = qRgb(253, 253, 252);
+    text->m_theme->editorStyle(vte::Theme::CursorLine).m_backgroundColor = qRgb(243, 242, 246);
     text->m_theme->editorStyle(vte::Theme::ContentMargin).m_backgroundColor = font.m_backgroundColor;
     text->m_theme->editorStyle(vte::Theme::IndicatorsBorder).m_backgroundColor = font.m_backgroundColor;
     config->m_webCodeBlockHighlighterEnabled = true;

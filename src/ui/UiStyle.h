@@ -1,11 +1,20 @@
 #pragma once
 
+#include <QFontDatabase>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
 #include <QStyle>
 #include <QVBoxLayout>
 #include <QVariant>
+
+inline QString defaultUiFontFamily() {
+    const auto available = QFontDatabase::families();
+    for (const auto *family: {"PingFang SC", "Microsoft YaHei UI", "Noto Sans CJK SC", "Source Han Sans SC"}) {
+        if (available.contains(QLatin1String(family))) return QLatin1String(family);
+    }
+    return QFontDatabase::systemFont(QFontDatabase::GeneralFont).family();
+}
 
 inline void setPrimaryButton(QPushButton *button) {
     button->setProperty("primary", true);

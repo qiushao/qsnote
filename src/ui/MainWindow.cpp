@@ -83,9 +83,9 @@ public:
         adjusted.text = option.fontMetrics.elidedText(adjusted.text, Qt::ElideRight, qMax(0, option.rect.width() - typeWidth - 20));
         option.widget->style()->drawControl(QStyle::CE_ItemViewItem, &adjusted, painter, option.widget);
         painter->save();
-        painter->setPen(option.state & QStyle::State_Selected ? QColor("#7560a8") : QColor("#7a7a87"));
+        painter->setPen(option.state & QStyle::State_Selected ? QColor("#685094") : QColor("#606066"));
         auto font = option.font;
-        font.setPixelSize(11);
+        font.setPixelSize(12);
         painter->setFont(font);
         painter->drawText(option.rect.adjusted(0, 0, -10, 0), Qt::AlignRight | Qt::AlignVCenter, type);
         painter->restore();
@@ -136,8 +136,8 @@ public:
                 offset = hit + query.size();
             }
         };
-        drawLine(index.data().toString(), rect.top(), option.state & QStyle::State_Selected ? QColor("#7560a8") : QColor("#34343b"), 13);
-        drawLine(index.data(Qt::UserRole + 3).toString(), rect.top() + 22, QColor("#7a7a87"), 12);
+        drawLine(index.data().toString(), rect.top(), option.state & QStyle::State_Selected ? QColor("#685094") : QColor("#242424"), 14);
+        drawLine(index.data(Qt::UserRole + 3).toString(), rect.top() + 22, QColor("#606066"), 13);
         painter->restore();
     }
     [[nodiscard]] QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override {
@@ -1008,6 +1008,7 @@ void MainWindow::applyUiSettings() {
     auto style = QString::fromUtf8(stylesheet.readAll());
     QSettings settings;
     auto family = settings.value("General/uiFontFamily").toString();
+    if (family.isEmpty()) family = defaultUiFontFamily();
     if (!family.isEmpty()) {
         family.replace('\\', "\\\\");
         family.replace('"', "\\\"");

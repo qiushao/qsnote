@@ -1,5 +1,5 @@
 @import url("article.css");
-:root { color-scheme: light; font: 16px/1.75 system-ui, sans-serif; color: #24292f; background: white; }
+:root { color-scheme: light; font: 16px/1.75 "PingFang SC", "Microsoft YaHei UI", "Noto Sans CJK SC", system-ui, sans-serif; color: #242424; background: #fdfdfc; }
 body { margin: 0; overflow-wrap: anywhere; }
 main { padding: 16px 20px 60px; margin-inline: auto; }
 .vx-heading-fold-toggle { margin-left: .6em; border: 0; border-radius: 3px; background: transparent; color: #656d76; cursor: pointer; font-size: .75em; padding: .15em .4em; }
