@@ -15,6 +15,7 @@ class QStackedWidget;
 class QSplitter;
 class QTimer;
 class QTreeWidget;
+class QTreeWidgetItem;
 class QLabel;
 class QPushButton;
 class QUrl;
@@ -88,6 +89,10 @@ private:
     void refreshOutline();
     void applyOutlineFilter();
     void showSourceOutline(const SourceOutline::Result &result);
+    // Highlights the outline entry owning @p line, and scrolls the body to an entry's line.
+    void syncOutlineToLine(int line);
+    void revealOutlineItem(QTreeWidgetItem *item);
+    int currentSourceLine() const;
     void updateStatus();
     void showEncodingMenu();
     void showLineEndingMenu();
@@ -126,6 +131,8 @@ private:
     ViewMode viewMode_ = ViewMode::Preview;
     bool fullScreenPreview_ = false;
     bool syncingPreviewScroll_ = false;
+    bool syncingOutline_ = false;
+    int outlineSyncLine_ = -1;
     QTreeWidget *outline_ = nullptr;
     QLineEdit *outlineFilter_ = nullptr;
     QLabel *outlineHint_ = nullptr;

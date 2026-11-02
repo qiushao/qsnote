@@ -37,6 +37,7 @@
 #include <QTextBlock>
 #include <QTimer>
 #include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
 #include <QWheelEvent>
 #include <QtConcurrentRun>
 #include <cmath>
@@ -47,6 +48,8 @@
 
 namespace {
 QIcon icon(const QString &name) { return QIcon(":/icons/" + name + ".svg"); }
+// QPlainTextEdit::firstVisibleBlock() is protected, so read the top line from the viewport instead.
+int topVisibleLine(const QPlainTextEdit *editor) { return editor->cursorForPosition(QPoint(0, 0)).blockNumber(); }
 class PlainTextEditor : public QPlainTextEdit {
 public:
     explicit PlainTextEditor(QWidget *parent) : QPlainTextEdit(parent), lineNumberArea_(new QWidget(this)) {
@@ -241,6 +244,7 @@ EditorWorkspace::EditorWorkspace(NotebookStore &store, std::function<bool()> sav
     connect(preview_, &MarkdownPreview::sourceLineChanged, this, [this](int line) {
         if (!editor_ || !preview_->matchesDocument(editor_->toPlainText(), currentNoteId())) return;
         editorSessions_[activeEditorId_].previewLine = line;
+        syncOutlineToLine(line);
         if (viewMode_ != ViewMode::Split) return;
         const QScopedValueRollback<bool> guard(syncingPreviewScroll_, true);
         markdownEditor_->scrollToLine(line, false);
@@ -318,26 +322,10 @@ EditorWorkspace::EditorWorkspace(NotebookStore &store, std::function<bool()> sav
         const auto key = item->data(0, Qt::UserRole + 1).toString();
         if (!key.isEmpty()) collapsedSourceSymbols_[currentNoteId()].remove(key);
     });
-    connect(outline_, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *item) {
-        const int line = item->data(0, Qt::UserRole).toInt();
-        if (auto *textEditor = textEditors_.value(currentNoteId())) {
-            const auto block = textEditor->document()->findBlockByNumber(line);
-            if (!block.isValid()) return;
-            textEditor->setTextCursor(QTextCursor(block));
-            textEditor->setFocus();
-            textEditor->centerCursor();
-            return;
-        }
-        if (!editor_) return;
-        const QScopedValueRollback<bool> guard(syncingPreviewScroll_, true);
-        if (viewMode_ == ViewMode::Preview) {
-            preview_->scrollToLine(line, true);
-        } else {
-            editor_->setTextCursor(QTextCursor(editor_->document()->findBlockByNumber(line)));
-            editor_->setFocus();
-            vte::TextEditUtils::scrollBlockInPage(editor_, line, vte::TextEditUtils::PagePosition::Center);
-            if (viewMode_ == ViewMode::Split) preview_->scrollToLine(line, true);
-        }
+    connect(outline_, &QTreeWidget::itemClicked, this, &EditorWorkspace::revealOutlineItem);
+    connect(outline_, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *current) {
+        // Keyboard navigation in the outline drives the body; programmatic sync does not.
+        if (current && !syncingOutline_ && outline_->hasFocus()) revealOutlineItem(current);
     });
     outlineTimer_ = new QTimer(this);
     outlineTimer_->setSingleShot(true);
@@ -764,6 +752,9 @@ void EditorWorkspace::activatePlainText(const QString &id) {
             if (currentNoteId() == id) outlineTimer_->start();
             emit saveRequested();
         });
+        connect(editor->verticalScrollBar(), &QScrollBar::valueChanged, this, [this, id, editor] {
+            if (currentNoteId() == id) syncOutlineToLine(topVisibleLine(editor));
+        });
     }
     pages_->setCurrentWidget(textEditors_[id]);
     updateStatus();
@@ -821,7 +812,9 @@ void EditorWorkspace::activateEditor(const QString &id) {
             emit saveRequested();
         });
         connect(textEdit->verticalScrollBar(), &QScrollBar::valueChanged, this, [this, id, documentEditor] {
-            if (activeEditorId_ == id && viewMode_ == ViewMode::Split && !syncingPreviewScroll_) {
+            if (activeEditorId_ != id) return;
+            syncOutlineToLine(documentEditor->getTopLine());
+            if (viewMode_ == ViewMode::Split && !syncingPreviewScroll_) {
                 preview_->scrollToLine(documentEditor->getTopLine());
             }
         });
@@ -846,6 +839,7 @@ void EditorWorkspace::activateEditor(const QString &id) {
         if (viewMode_ != ViewMode::Edit) {
             preview_->scrollToLine(viewMode_ == ViewMode::Split ? markdownEditor_->getTopLine() : editorSessions_[id].previewLine);
         }
+        syncOutlineToLine(currentSourceLine());
     });
 }
 
@@ -929,6 +923,7 @@ void EditorWorkspace::setViewMode(ViewMode mode) {
                 vte::TextEditUtils::scrollBlockInPage(editor_, line, vte::TextEditUtils::PagePosition::Top);
             }
             if (mode != ViewMode::Edit) preview_->scrollToLine(line);
+            syncOutlineToLine(currentSourceLine());
         });
     }
     updateStatus();
@@ -1007,6 +1002,60 @@ void EditorWorkspace::applyOutlineFilter() {
     }
     if (!query.isEmpty() && outline_->topLevelItemCount() > 0) outlineHint_->setText(QCoreApplication::translate("MainWindow", "没有匹配的大纲"));
     outlineHint_->setVisible(outline_->topLevelItemCount() == 0 || (!query.isEmpty() && !anyVisible));
+    // Rebuilding the outline drops its current item, so restore it from the body position.
+    outlineSyncLine_ = -1;
+    syncOutlineToLine(currentSourceLine());
+}
+
+int EditorWorkspace::currentSourceLine() const {
+    if (auto *textEditor = textEditors_.value(currentNoteId())) return topVisibleLine(textEditor);
+    if (!editor_) return -1;
+    if (viewMode_ == ViewMode::Preview) return editorSessions_.value(activeEditorId_).previewLine;
+    return markdownEditor_->getTopLine();
+}
+
+void EditorWorkspace::syncOutlineToLine(int line) {
+    if (line < 0 || syncingOutline_ || line == outlineSyncLine_) return;
+    outlineSyncLine_ = line;
+    QTreeWidgetItem *target = nullptr;
+    int targetLine = -1;
+    for (QTreeWidgetItemIterator it(outline_); *it; ++it) {
+        const int itemLine = (*it)->data(0, Qt::UserRole).toInt();
+        if (itemLine <= line && itemLine >= targetLine) {
+            target = *it;
+            targetLine = itemLine;
+        }
+    }
+    while (target && target->isHidden()) target = target->parent();
+    while (target && target->parent() && !target->parent()->isExpanded()) target = target->parent();
+    if (target == outline_->currentItem()) return;
+    const QScopedValueRollback<bool> guard(syncingOutline_, true);
+    outline_->setCurrentItem(target);
+    if (target) outline_->scrollToItem(target, QAbstractItemView::EnsureVisible);
+}
+
+void EditorWorkspace::revealOutlineItem(QTreeWidgetItem *item) {
+    const int line = item->data(0, Qt::UserRole).toInt();
+    // Keep the focus on the clicked entry: the scroll below must not move the highlight.
+    const QScopedValueRollback<bool> guard(syncingOutline_, true);
+    if (auto *textEditor = textEditors_.value(currentNoteId())) {
+        const auto block = textEditor->document()->findBlockByNumber(line);
+        if (!block.isValid()) return;
+        textEditor->setTextCursor(QTextCursor(block));
+        textEditor->setFocus();
+        textEditor->centerCursor();
+        return;
+    }
+    if (!editor_) return;
+    const QScopedValueRollback<bool> scrollGuard(syncingPreviewScroll_, true);
+    if (viewMode_ == ViewMode::Preview) {
+        preview_->scrollToLine(line);
+    } else {
+        editor_->setTextCursor(QTextCursor(editor_->document()->findBlockByNumber(line)));
+        editor_->setFocus();
+        vte::TextEditUtils::scrollBlockInPage(editor_, line, vte::TextEditUtils::PagePosition::Top);
+        if (viewMode_ == ViewMode::Split) preview_->scrollToLine(line);
+    }
 }
 
 void EditorWorkspace::showSourceOutline(const SourceOutline::Result &result) {
