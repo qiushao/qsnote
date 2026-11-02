@@ -18,6 +18,7 @@
 #include <QWebEnginePage>
 #include <QWebEngineSettings>
 #include <QWebEngineUrlRequestInterceptor>
+#include <utility>
 
 namespace {
 QByteArray rendererFingerprint() {
@@ -69,7 +70,8 @@ QVariant evaluate(QWebEnginePage &page, const QString &script) {
 }
 }
 
-ArticleRenderer::ArticleRenderer(const QString &notebookPath, const QString &cacheGroup) {
+ArticleRenderer::ArticleRenderer(const QString &notebookPath, const QString &cacheGroup, QString foreground)
+    : foreground_(std::move(foreground)) {
     const auto notebookKey = QCryptographicHash::hash(QDir(notebookPath).absolutePath().toUtf8(), QCryptographicHash::Sha256).toHex();
     cacheDirectory_ = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
         + '/' + cacheGroup + '/' + QString::fromLatin1(notebookKey) + "/articles";
@@ -119,7 +121,7 @@ bool ArticleRenderer::render(const QString &markdown, const QString &documentId,
     // PlantUML can include external files, so those articles must be rendered again.
     const bool cacheable = !markdown.contains("plantuml", Qt::CaseInsensitive) && !markdown.contains("puml", Qt::CaseInsensitive);
     const auto path = cachePath(documentId);
-    const auto key = QCryptographicHash::hash("article-v1\n" + rendererFingerprint() + markdown.toUtf8(), QCryptographicHash::Sha256).toHex() + '\n';
+    const auto key = QCryptographicHash::hash("article-v2\n" + rendererFingerprint() + foreground_.toUtf8() + markdown.toUtf8(), QCryptographicHash::Sha256).toHex() + '\n';
     QFile cache(path);
     if (cacheable && cache.open(QIODevice::ReadOnly)) {
         const auto data = cache.readAll();
@@ -194,8 +196,10 @@ bool ArticleRenderer::renderUncached(const QString &markdown, QDomDocument &docu
         if (title == "article-export-ready") { finished = true; loop.quit(); }
     });
     timeout.start(60000);
+    // Rasterised formulas keep the article foreground so exported books stay readable in dark mode.
+    const auto mathColor = foreground_.isEmpty() ? QStringLiteral("#24292f") : foreground_;
     browser_->runJavaScript("document.title='rendering';qsnoteExport.finish(" + json(plantUml) + ","
-                            + json({{"css", mathCss}}) + ".css)");
+                            + json({{"css", mathCss}}) + ".css," + json({{"color", mathColor}}) + ".color)");
     loop.exec(QEventLoop::ExcludeUserInputEvents);
     if (!finished) { *error = QCoreApplication::translate("ArticleRenderer", "正文渲染超时：") + evaluate(*browser_, "window.exportStage").toString(); return false; }
     const auto result = evaluate(*browser_, "window.exportResult").toMap();

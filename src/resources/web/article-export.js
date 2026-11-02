@@ -6,7 +6,7 @@ window.qsnoteExport = {
         return [...root.querySelectorAll('pre > code')]
             .filter(code => qsnoteArticle.codeLanguage(code) === 'plantuml').map(code => code.textContent);
     },
-    async finish(plantUml, mathCss) {
+    async finish(plantUml, mathCss, foreground) {
         try {
             const root = document.querySelector('.qsnote-article');
             window.exportStage = qsnoteTranslations.diagram;
@@ -20,7 +20,7 @@ window.qsnoteExport = {
                     (node.id.startsWith('mermaid') ? 'Mermaid' : qsnoteTranslations.diagram) + ' ' + qsnoteTranslations.diagram;
                 if (math) {
                     const host = document.createElement('div');
-                    host.style.cssText = 'display:inline-block;width:max-content;white-space:nowrap;padding:2px;font-size:16px;color:#24292f';
+                    host.style.cssText = `display:inline-block;width:max-content;white-space:nowrap;padding:2px;font-size:16px;color:${foreground || '#24292f'}`;
                     host.innerHTML = node.innerHTML;
                     const style = document.createElement('style');
                     style.textContent = mathCss + '\n.katex-display{margin:0}';

@@ -1,6 +1,7 @@
 #include "EbookExporter.h"
 #include <QCoreApplication>
 #include "ArticleRenderer.h"
+#include "ui/Theme.h"
 #include <QBuffer>
 #include <QDateTime>
 #include <QDebug>
@@ -23,17 +24,31 @@
 #include <private/qzipwriter_p.h>
 
 namespace {
+// 电子书沿用阅读区样式表，配色与预览保持一致：主题底色、正文色以及深色模式下的代码块、
+// 表格、链接配色都来自同一份资源。
 QString bookStyle() {
-    return ArticleRenderer::stylesheet() + QStringLiteral(
-        "body{margin:32px auto;padding:0 24px;max-width:900px;font:16px/1.75 system-ui,sans-serif;color:#24292f;}"
+    QString style = ArticleRenderer::stylesheet();
+    QFile preview(":/web/preview.css");
+    if (preview.open(QIODevice::ReadOnly)) {
+        style += QString::fromUtf8(preview.readAll()).replace("@import url(\"article.css\");", QString());
+    }
+    // 预览由 setReaderStyle 注入这两个变量，导出时在样式表末尾覆盖其缺省值。
+    style += QStringLiteral(":root{--qsnote-surface:%1;--qsnote-foreground:%2;}")
+                     .arg(Theme::color("window").name(), Theme::color("text").name());
+    style += QStringLiteral(
+        ".qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article{color:inherit;background:transparent;}"
+        "body{margin:32px auto;padding:0 24px;max-width:900px;color:var(--qsnote-foreground);background:var(--qsnote-surface);}"
         ".chapter{page-break-before:always;}h1,h2,h3{page-break-after:avoid;}"
-        "nav ol{list-style:none;}"
+        // 目录链接跟随正文色，深浅模式下都清晰
+        "nav ol{list-style:none;}nav a{color:inherit;}"
         "@media print{body{margin:0;max-width:none;padding:0;}pre,table,.diagram{break-inside:avoid;}}");
+    return style;
 }
 
 QString page(const QString &title, const QString &body) {
     return "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!DOCTYPE html>\n"
-           "<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" lang=\"zh-CN\" xml:lang=\"zh-CN\">"
+           "<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" data-theme=\""
+           + QString(Theme::isDark() ? "dark" : "light") + "\" lang=\"zh-CN\" xml:lang=\"zh-CN\">"
            "<head><meta charset=\"utf-8\"/><title>" + title.toHtmlEscaped() + "</title><style>" + bookStyle() + "</style></head><body>" + body + "</body></html>";
 }
 
@@ -236,6 +251,8 @@ bool printPdf(const QString &htmlPath, const QString &pdfPath, const QList<Chapt
     QTimer timeout;
     QWebEnginePage browser;
     browser.settings()->setAttribute(QWebEngineSettings::JavascriptEnabled, false);
+    // 保留预览的底色与代码块配色，PDF 才与阅读区一致
+    browser.settings()->setAttribute(QWebEngineSettings::PrintElementBackgrounds, true);
     browser.settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, false);
     bool success = false;
     QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
@@ -326,7 +343,7 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
     }
     QMap<QString, QByteArray> assets;
     QMap<QString, QString> imagePaths;
-    ArticleRenderer renderer(book.path, "notebooks");
+    ArticleRenderer renderer(book.path, "notebooks", Theme::color("text").name());
     QList<Chapter> navigation;
     QString body;
     const int total = int(chapters.size()) + 1;
