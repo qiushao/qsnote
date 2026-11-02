@@ -68,6 +68,27 @@ window.qsnoteArticle = (() => {
         const root = document.createElement('article');
         root.className = 'qsnote-article';
         root.innerHTML = md.render(text);
+        // GitHub-style alerts: a blockquote whose first line is [!NOTE] etc.
+        // becomes the same alert aside as the "alert-..." container syntax.
+        for (const quote of [...root.querySelectorAll('blockquote')]) {
+            const paragraph = quote.querySelector(':scope > p');
+            const marker = paragraph?.firstChild;
+            const match = marker?.nodeType === 3
+                && /^\s*\[!(note|tip|important|warning|caution)\][ \t]*(\n|$)/i.exec(marker.textContent);
+            if (!match) continue;
+            marker.textContent = marker.textContent.slice(match[0].length);
+            if (!paragraph.textContent.trim()) paragraph.remove();
+            const type = match[1].toLowerCase();
+            const title = document.createElement('p');
+            title.className = 'alert-title';
+            title.textContent = type[0].toUpperCase() + type.slice(1);
+            const aside = document.createElement('aside');
+            aside.className = `alert-${type}`;
+            if (quote.dataset.sourceLine !== undefined) aside.dataset.sourceLine = quote.dataset.sourceLine;
+            aside.append(title);
+            while (quote.firstChild) aside.append(quote.firstChild);
+            quote.replaceWith(aside);
+        }
         // Preserve authored image dimensions even when a site theme sets image sizes.
         root.querySelectorAll('img').forEach(image => {
             for (const dimension of ['width', 'height']) {

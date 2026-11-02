@@ -27,6 +27,13 @@
 .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .task-list-item { list-style: none; }.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article input[type=checkbox] { margin-right: .6em; }
 .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article figure { margin: 1em 0; }.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article figcaption { text-align: center; color: #656d76; }
 .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article eqn { display: block; overflow-x: auto; }.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article aside { padding: 12px; background: #eef4ff; border-left: 4px solid #3b6fd4; }
+/* Alert asides from "alert-..." containers and GitHub-style [!NOTE] blockquotes. */
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article aside .alert-title { font-weight: 600; margin: 0 0 .3em; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article aside.alert-note { background: #ddf4ff; border-left-color: #0969da; }.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article aside.alert-note .alert-title { color: #0969da; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article aside.alert-tip { background: #dafbe1; border-left-color: #1a7f37; }.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article aside.alert-tip .alert-title { color: #1a7f37; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article aside.alert-important { background: #fbefff; border-left-color: #8250df; }.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article aside.alert-important .alert-title { color: #8250df; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article aside.alert-warning { background: #fff8c5; border-left-color: #9a6700; }.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article aside.alert-warning .alert-title { color: #9a6700; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article aside.alert-caution { background: #ffebe9; border-left-color: #cf222e; }.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article aside.alert-caution .alert-title { color: #cf222e; }
 .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article eq .katex-display { display: inline-block; margin: 0; vertical-align: middle; }
 .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .diagram { overflow: auto; margin: 16px 0; text-align: center; }
 .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .render-error { color: #b42318; white-space: pre-wrap; }
