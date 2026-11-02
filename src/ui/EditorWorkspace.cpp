@@ -510,18 +510,18 @@ void EditorWorkspace::buildToolbar() {
     auto *modes = new QWidget(toolbar_);
     modes->setProperty("alignRight", true);
     modes->setObjectName("viewModes");
-    auto *modeLayout = row(modes, 3, 3, 2);
+    auto *modeLayout = row(modes, 0, 0, 8);
     editMode_ = button({}, "editMode", modes);
     editMode_->setIcon(icon("edit"));
-    editMode_->setIconSize(QSize(20, 20));
+    editMode_->setIconSize(QSize(24, 24));
     editMode_->setToolTip(QCoreApplication::translate("MainWindow", "编辑"));
     previewMode_ = button({}, "previewMode", modes);
     previewMode_->setIcon(icon("preview"));
-    previewMode_->setIconSize(QSize(20, 20));
+    previewMode_->setIconSize(QSize(24, 24));
     previewMode_->setToolTip(QCoreApplication::translate("MainWindow", "预览"));
     splitMode_ = button({}, "splitMode", modes);
     splitMode_->setIcon(icon("split"));
-    splitMode_->setIconSize(QSize(20, 20));
+    splitMode_->setIconSize(QSize(24, 24));
     splitMode_->setToolTip(QCoreApplication::translate("MainWindow", "分屏"));
     auto *group = new QButtonGroup(modes);
     for (auto *mode: {editMode_, previewMode_, splitMode_}) {
@@ -533,7 +533,7 @@ void EditorWorkspace::buildToolbar() {
     auto *fullScreen = button({}, "fullScreenPreview", modes);
     fullScreen->setProperty("mode", true);
     fullScreen->setIcon(icon("fullscreen"));
-    fullScreen->setIconSize(QSize(20, 20));
+    fullScreen->setIconSize(QSize(24, 24));
     fullScreen->setToolTip(tr("全屏 (Esc 退出)"));
     fullScreen->setAccessibleName(tr("全屏"));
     modeLayout->addWidget(fullScreen);

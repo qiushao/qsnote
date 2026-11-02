@@ -33,12 +33,9 @@ QPushButton[iconButton="true"]:hover { background: #eeebf6; color: #303030; }
 QPushButton[windowButton="true"] { border: 1px solid transparent; background: transparent; color: #606066; padding: 5px 7px; border-radius: 6px; }
 QPushButton[windowButton="true"]:hover { background: #f1f0f5; color: #242424; }
 QPushButton#windowClose:hover { background: #e5484d; color: #ffffff; }
-QPushButton[tool="true"] { border: 1px solid transparent; background: transparent; color: #525258; padding: 6px 4px; font-size: 14px; border-radius: 5px; }
-QPushButton[tool="true"]:hover { background: #f0edf7; color: #685094; }
-QWidget#viewModes { background: #f0eff4; border-radius: 7px; }
-QPushButton[mode="true"] { background: transparent; border: 1px solid transparent; border-radius: 5px; color: #525258; padding: 4px 10px; }
-QPushButton[mode="true"]:hover { color: #685094; background: #eeebf6; }
-QPushButton[mode="true"]:checked { background: #ffffff; border-color: #e2e2e9; color: #685094; font-weight: 600; }
+QPushButton[tool="true"], QPushButton[mode="true"] { border: 1px solid transparent; background: transparent; color: #525258; padding: 6px 4px; font-size: 14px; border-radius: 5px; }
+QPushButton[tool="true"]:hover, QPushButton[mode="true"]:hover { background: #f0edf7; color: #685094; }
+QPushButton[mode="true"]:checked { background: #eeebf6; color: #685094; }
 QPushButton[iconButton="true"]:focus, QPushButton[windowButton="true"]:focus, QPushButton[tool="true"]:focus, QPushButton[mode="true"]:focus { border-color: #685094; }
 QLineEdit, QComboBox, QDateEdit, QSpinBox, QDoubleSpinBox { border: 1px solid #e2e2e9; border-radius: 7px; background: #ffffff; padding: 6px 10px; font-size: 14px; selection-background-color: #eee9f7; selection-color: #242424; }
 QLineEdit:hover, QComboBox:hover { border-color: #cfccd9; }
