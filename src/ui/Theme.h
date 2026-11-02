@@ -17,6 +17,8 @@ QStringList accentIds();
 QString accentId();
 QColor accentColor(const QString &id, bool dark);
 QColor accentColor();
+// 当前主题的令牌色值，token 为不含 @ 的令牌名，如 "window"、"accentSoft"
+QColor color(const QString &token);
 
 // 将样式表中的 @token 占位符替换为当前主题的色值
 QString process(const QString &stylesheet);

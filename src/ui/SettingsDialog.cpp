@@ -156,7 +156,7 @@ SettingsDialog::SettingsDialog(MarkdownEditor *editor, QWidget *parent) : Overla
     general->addWidget(label(QCoreApplication::translate("MainWindow", "设置保存后生效。语言设置在重启后生效。"), body, true));
 
     auto *appearance = section("appearanceSettingsCard", QCoreApplication::translate("MainWindow", "外观"));
-    const QColor iconDim(Theme::isDark() ? "#9a9aa2" : "#606066");
+    const QColor iconDim = Theme::color("textDim");
     const QColor accentNow = Theme::accentColor();
     appearance->addWidget(label(QCoreApplication::translate("MainWindow", "主题模式"), body, true));
     auto *modes = new QWidget(body);
@@ -203,7 +203,7 @@ SettingsDialog::SettingsDialog(MarkdownEditor *editor, QWidget *parent) : Overla
             {"blue", QCoreApplication::translate("MainWindow", "秋水蓝")},
             {"purple", QCoreApplication::translate("MainWindow", "暮山紫")},
             {"ink", QCoreApplication::translate("MainWindow", "远山墨")}};
-    const QString currentAccent = settings.value("Appearance/accent", "green").toString();
+    const QString currentAccent = settings.value("Appearance/accent", "sunset").toString();
     for (const auto &id: Theme::accentIds()) {
         const QColor color = Theme::accentColor(id, false);
         auto *item = new QWidget(swatches);

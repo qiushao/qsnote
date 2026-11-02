@@ -4,6 +4,7 @@
 #include "MarkdownPreview.h"
 #include "RoundedTreeWidget.h"
 #include "SourceHighlighter.h"
+#include "Theme.h"
 #include "UiStyle.h"
 #include "core/StaticSite.h"
 #include <QApplication>
@@ -384,7 +385,7 @@ void EditorWorkspace::buildToolbar() {
     const auto addSeparator = [&] {
         auto *separator = new QFrame(toolbar_);
         separator->setFrameShape(QFrame::VLine);
-        separator->setStyleSheet("color: #e9e9ee; margin: 6px 4px;");
+        separator->setStyleSheet("color: " + Theme::color("border").name() + "; margin: 6px 4px;");
         separator->setFixedSize(11, 24);
         layout->addWidget(separator);
     };

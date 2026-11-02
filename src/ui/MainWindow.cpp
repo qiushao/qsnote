@@ -87,7 +87,7 @@ public:
         adjusted.text = option.fontMetrics.elidedText(adjusted.text, Qt::ElideRight, qMax(0, option.rect.width() - typeWidth - 20));
         option.widget->style()->drawControl(QStyle::CE_ItemViewItem, &adjusted, painter, option.widget);
         painter->save();
-        painter->setPen(option.state & QStyle::State_Selected ? QColor("#685094") : QColor("#606066"));
+        painter->setPen(option.state & QStyle::State_Selected ? Theme::accentColor() : Theme::color("textDim"));
         auto font = option.font;
         font.setPixelSize(12);
         painter->setFont(font);
@@ -134,14 +134,14 @@ public:
                 if (hit < 0) break;
                 const auto match = visible.mid(hit, query.size());
                 const int matchWidth = metrics.horizontalAdvance(match);
-                painter->fillRect(x, y, matchWidth, metrics.height(), QColor("#ffe9a8"));
+                painter->fillRect(x, y, matchWidth, metrics.height(), Theme::color("accentSoft"));
                 painter->drawText(x, y + metrics.ascent(), match);
                 x += matchWidth;
                 offset = hit + query.size();
             }
         };
-        drawLine(index.data().toString(), rect.top(), option.state & QStyle::State_Selected ? QColor("#685094") : QColor("#242424"), 14);
-        drawLine(index.data(Qt::UserRole + 3).toString(), rect.top() + 22, QColor("#606066"), 13);
+        drawLine(index.data().toString(), rect.top(), option.state & QStyle::State_Selected ? Theme::accentColor() : Theme::color("text"), 14);
+        drawLine(index.data(Qt::UserRole + 3).toString(), rect.top() + 22, Theme::color("textDim"), 13);
         painter->restore();
     }
     [[nodiscard]] QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override {

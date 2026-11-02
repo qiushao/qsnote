@@ -71,7 +71,7 @@ QStringList accentIds() {
 }
 
 QString accentId() {
-    return accentDef(QSettings().value("Appearance/accent", "green").toString()).id;
+    return accentDef(QSettings().value("Appearance/accent", "sunset").toString()).id;
 }
 
 QColor accentColor(const QString &id, bool dark) {
@@ -83,11 +83,27 @@ QColor accentColor() {
     return accentColor(accentId(), isDark());
 }
 
-QString process(const QString &stylesheet) {
-    const bool dark = isDark();
+namespace {
+
+// 中性色混入种子色的比例：整体氛围（窗口、面板、边框）随主题色轻微偏移，
+// 与 Gridea Pro 的做法一致，避免只改强调色导致界面割裂。
+double tintRatio(const QString &token, bool dark) {
+    static const QHash<QString, QPair<double, double>> ratios = {
+            {"@window", {0.07, 0.05}},     {"@surface", {0.06, 0.035}},  {"@panel", {0.09, 0.06}},
+            {"@panelAlt", {0.08, 0.05}},   {"@disabledBg", {0.05, 0.04}},{"@border", {0.14, 0.10}},
+            {"@borderLight", {0.12, 0.08}},{"@inputBorder", {0.13, 0.09}},{"@cardBorder", {0.13, 0.09}},
+            {"@hover", {0.12, 0.07}},      {"@hoverBorder", {0.22, 0.16}},{"@hoverSoft", {0.10, 0.06}},
+            {"@tabHover", {0.10, 0.06}},   {"@scrollbar", {0.18, 0.12}}, {"@scrollbarHover", {0.26, 0.18}},
+            {"@inputHoverBorder", {0.28, 0.20}},{"@checkBorder", {0.24, 0.16}},
+    };
+    const auto ratio = ratios.value(token);
+    return dark ? ratio.first : ratio.second;
+}
+
+// 当前主题的完整令牌表
+QHash<QString, QString> buildTokens(bool dark) {
     const auto &accent = accentDef(accentId());
     const QColor accentColor(QLatin1String(dark ? accent.dark : accent.light));
-    const QColor surface(dark ? "#242428" : "#ffffff");
 
     QHash<QString, QString> tokens;
     if (dark) {
@@ -145,12 +161,19 @@ QString process(const QString &stylesheet) {
         tokens["@tooltipText"] = "#ffffff";
     }
 
+    // 背景、面板、边框等中性色混入少量种子色，整体氛围随主题色一起变化
+    for (auto it = tokens.begin(); it != tokens.end(); ++it) {
+        const double ratio = tintRatio(it.key(), dark);
+        if (ratio > 0) it.value() = mix(QColor(it.value()), accentColor, ratio).name();
+    }
+
     tokens["@accent"] = accentColor.name();
     tokens["@accentStrong"] = dark ? accentColor.name()
                                    : accent.textLight ? QString(QLatin1String(accent.textLight))
                                                       : accentColor.darker(120).name();
     tokens["@accentPressed"] = accentColor.darker(dark ? 115 : 130).name();
     // 强调色的浅洗色按固定比例混入表面色派生，避免为每个主题色手写一套
+    const QColor surface(tokens.value("@surface"));
     tokens["@accentFaint"] = mix(surface, accentColor, dark ? 0.14 : 0.08).name();
     tokens["@accentWash"] = mix(surface, accentColor, dark ? 0.18 : 0.10).name();
     tokens["@accentSoft"] = mix(surface, accentColor, dark ? 0.22 : 0.12).name();
@@ -159,6 +182,17 @@ QString process(const QString &stylesheet) {
     tokens["@onAccent"] = dark ? QString("#0f1114") : accent.onLight ? QString(QLatin1String(accent.onLight))
                                                                      : QString("#ffffff");
 
+    return tokens;
+}
+
+}// namespace
+
+QColor color(const QString &token) {
+    return {buildTokens(isDark()).value("@" + token)};
+}
+
+QString process(const QString &stylesheet) {
+    const auto tokens = buildTokens(isDark());
     auto keys = tokens.keys();
     std::sort(keys.begin(), keys.end(), [](const QString &a, const QString &b) { return a.length() > b.length(); });
     QString result = stylesheet;
