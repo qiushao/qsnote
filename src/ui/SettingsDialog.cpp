@@ -11,13 +11,13 @@
 #include <QFontComboBox>
 #include <QFormLayout>
 #include <QHash>
+#include <QListWidget>
 #include <QPainter>
 #include <QPainterPath>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>
 #include <QSpinBox>
-#include <QTabBar>
 #include <QToolButton>
 
 namespace {
@@ -77,6 +77,7 @@ QPixmap accentSwatchIcon(const QColor &color, bool checked) {
 }// namespace
 
 SettingsDialog::SettingsDialog(MarkdownEditor *editor, QWidget *parent) : OverlayDialog(parent, "settingsDialog", true) {
+    resize(qMin(960, parent->width() * 92 / 100), height());
     auto *layout = column(this);
     auto *bar = new QWidget(this);
     bar->setObjectName("dialogBar");
@@ -88,18 +89,16 @@ SettingsDialog::SettingsDialog(MarkdownEditor *editor, QWidget *parent) : Overla
     auto *close = button(QCoreApplication::translate("MainWindow", "关闭"), "closeSettings", bar);
     barLayout->addWidget(close);
     layout->addWidget(bar);
-    auto *navigation = new QWidget(this);
-    navigation->setObjectName("settingsNavigation");
-    auto *navigationLayout = row(navigation, 16, 10);
-    auto *sections = new QTabBar(navigation);
-    sections->setObjectName("settingsTabs");
-    sections->setExpanding(false);
-    sections->setDrawBase(false);
-    sections->setUsesScrollButtons(true);
-    sections->setElideMode(Qt::ElideNone);
-    navigationLayout->addWidget(sections);
-    layout->addWidget(navigation);
-    auto *scroll = new QScrollArea(this);
+    auto *contentPane = new QWidget(this);
+    auto *contentLayout = row(contentPane, 0, 0, 0);
+    auto *sections = new QListWidget(contentPane);
+    sections->setObjectName("settingsNavigation");
+    sections->setFixedWidth(qBound(112, width() / 5, 192));
+    sections->setWordWrap(true);
+    sections->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    contentLayout->addWidget(sections);
+    layout->addWidget(contentPane, 1);
+    auto *scroll = new QScrollArea(contentPane);
     scroll->setWidgetResizable(true);
     auto *body = new QWidget(scroll);
     body->setObjectName("configBody");
@@ -114,7 +113,8 @@ SettingsDialog::SettingsDialog(MarkdownEditor *editor, QWidget *parent) : Overla
         title->setProperty("heading", true);
         content->addWidget(title);
         cards->addWidget(card);
-        card->setVisible(sections->addTab(caption) == 0);
+        sections->addItem(caption);
+        card->setVisible(sections->count() == 1);
         return content;
     };
     QSettings settings;
@@ -259,8 +259,9 @@ SettingsDialog::SettingsDialog(MarkdownEditor *editor, QWidget *parent) : Overla
     about->addWidget(project);
     cards->addStretch();
     scroll->setWidget(body);
-    layout->addWidget(scroll, 1);
-    connect(sections, &QTabBar::currentChanged, this, [cards, scroll](int index) {
+    contentLayout->addWidget(scroll, 1);
+    sections->setCurrentRow(0);
+    connect(sections, &QListWidget::currentRowChanged, this, [cards, scroll](int index) {
         for (int i = 0; i < cards->count() - 1; ++i) cards->itemAt(i)->widget()->setVisible(i == index);
         scroll->verticalScrollBar()->setValue(0);
     });
