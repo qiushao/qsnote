@@ -508,6 +508,29 @@ void EditorWorkspace::buildToolbar() {
             editor_->setFocus();
         });
     }
+    auto *alertMenu = diagramMenu->addMenu(QCoreApplication::translate("MainWindow", "提示块"));
+    struct Alert {
+        QString title;
+        QString type;
+    };
+    const QList<Alert> alerts = {
+            {QCoreApplication::translate("MainWindow", "注意"), "NOTE"},
+            {QCoreApplication::translate("MainWindow", "提示"), "TIP"},
+            {QCoreApplication::translate("MainWindow", "重要"), "IMPORTANT"},
+            {QCoreApplication::translate("MainWindow", "警告"), "WARNING"},
+            {QCoreApplication::translate("MainWindow", "危险"), "CAUTION"}};
+    for (const auto &alert: alerts) {
+        alertMenu->addAction(alert.title, this, [this, alert] {
+            if (!documentNote(currentNoteId())) return;
+            setPreview(false);
+            auto cursor = editor_->textCursor();
+            cursor.beginEditBlock();
+            cursor.insertText("\n\n> [!" + alert.type + "]\n> ");
+            cursor.endEditBlock();
+            editor_->setTextCursor(cursor);
+            editor_->setFocus();
+        });
+    }
     more->setMenu(diagramMenu);
     layout->addWidget(more);
     syntaxActions_.append(more);

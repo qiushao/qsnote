@@ -702,6 +702,30 @@
             <translation>Digital Timing Diagram</translation>
         </message>
         <message>
+            <source>提示块</source>
+            <translation>Alert</translation>
+        </message>
+        <message>
+            <source>注意</source>
+            <translation>Note</translation>
+        </message>
+        <message>
+            <source>提示</source>
+            <translation>Tip</translation>
+        </message>
+        <message>
+            <source>重要</source>
+            <translation>Important</translation>
+        </message>
+        <message>
+            <source>警告</source>
+            <translation>Warning</translation>
+        </message>
+        <message>
+            <source>危险</source>
+            <translation>Caution</translation>
+        </message>
+        <message>
             <location line="+6" />
             <source>编辑</source>
             <translation>Edit</translation>
