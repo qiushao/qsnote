@@ -86,6 +86,37 @@ window.qsnoteArticle = (() => {
         }
         return root;
     }
+    // The clipboard API needs a secure context, which qrc:// and file:// are not.
+    function copyText(text) {
+        const area = document.createElement('textarea');
+        area.value = text;
+        area.readOnly = true;
+        area.style.cssText = 'position:fixed;top:0;left:-9999px;opacity:0';
+        document.body.append(area);
+        area.select();
+        const copied = document.execCommand('copy');
+        area.remove();
+        if (copied || !navigator.clipboard) return Promise.resolve(copied);
+        return navigator.clipboard.writeText(text).then(() => true, () => false);
+    }
+    function decorateCode(code, language) {
+        const pre = code.parentElement;
+        if (!pre || pre.tagName !== 'PRE' || pre.parentElement?.classList.contains('code-block')) return;
+        const figure = document.createElement('figure');
+        figure.className = 'code-block';
+        if (language) figure.dataset.language = language;
+        const copy = document.createElement('button');
+        copy.className = 'code-copy';
+        copy.type = 'button';
+        copy.textContent = qsnoteTranslations.copy;
+        copy.addEventListener('click', async () => {
+            if (!await copyText(code.textContent)) return;
+            copy.textContent = qsnoteTranslations.copied;
+            setTimeout(() => { copy.textContent = qsnoteTranslations.copy; }, 1500);
+        });
+        pre.replaceWith(figure);
+        figure.append(copy, pre);
+    }
     async function graphs(root, options = {}) {
         let waveIndex = 0;
         for (const code of root.querySelectorAll('pre > code')) {
@@ -133,6 +164,7 @@ window.qsnoteArticle = (() => {
                     }
                 } else {
                     if (Prism.languages[language]) Prism.highlightElement(code);
+                    decorateCode(code, language);
                     continue;
                 }
                 if (options.cancelled?.()) { graph.remove(); return; }

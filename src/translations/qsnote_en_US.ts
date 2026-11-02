@@ -2759,5 +2759,15 @@ It will be removed from the list. Files on disk will be kept, and you can add it
             <source>图表尺寸无效</source>
             <translation>Invalid diagram dimensions</translation>
         </message>
+        <message>
+            <location line="+1" />
+            <source>复制</source>
+            <translation>Copy</translation>
+        </message>
+        <message>
+            <location line="+1" />
+            <source>已复制</source>
+            <translation>Copied</translation>
+        </message>
     </context>
 </TS>

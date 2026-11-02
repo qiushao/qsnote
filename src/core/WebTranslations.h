@@ -24,7 +24,9 @@ inline void installWebTranslations(QWebEnginePage *page) {
         {"imageConversionError", QCoreApplication::translate("Web", "无法转换图片")},
         {"previewImageError", QCoreApplication::translate("Web", "无法读取预览图片")},
         {"missingDiagram", QCoreApplication::translate("Web", "未生成图表")},
-        {"diagramSizeError", QCoreApplication::translate("Web", "图表尺寸无效")}
+        {"diagramSizeError", QCoreApplication::translate("Web", "图表尺寸无效")},
+        {"copy", QCoreApplication::translate("Web", "复制")},
+        {"copied", QCoreApplication::translate("Web", "已复制")}
     };
     QWebEngineScript script;
     script.setName("qsnote-translations");

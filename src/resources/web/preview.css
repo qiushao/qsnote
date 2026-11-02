@@ -19,13 +19,27 @@ main { padding: 16px 20px 60px; margin-inline: auto; }
 [data-theme=dark] .vx-heading-fold-toggle:hover,[data-theme=dark] .vx-heading-fold-toggle:focus-visible { background: #344457; }
 @media (max-width: 500px) { main { padding: 16px; } }
 @media print { main { max-width: none; padding: 0; } pre,table,.diagram { break-inside: avoid; } }
-@media print { .vx-heading-fold-toggle { display: none; } .vx-heading-fold-content[hidden] { display: block; } }
+@media print { .vx-heading-fold-toggle,.code-copy { display: none; } .vx-heading-fold-content[hidden] { display: block; } }
 #content > .qsnote-article { font: inherit; color: inherit; background: transparent; }
 .qsnote-article img { cursor: zoom-in; }
 
-[data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article pre,[data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article code,[data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article th { background: #242c36; color: #e6edf3; }
+[data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article { --qsnote-code-background: #282c34; --qsnote-code-foreground: #abb2bf; --qsnote-inline-code-background: #282c34; --qsnote-inline-code-foreground: #d05a6e; --qsnote-code-header: #21252b; --qsnote-code-label: #9da4b1; }
+[data-theme=sepia] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article { --qsnote-code-background: #f1e8d6; --qsnote-code-foreground: #4a4238; --qsnote-inline-code-background: #ece0c6; --qsnote-inline-code-foreground: #a3231f; --qsnote-code-header: #e4d7bd; --qsnote-code-label: #7a6f5f; }
+[data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article th { background: #242c36; color: #e6edf3; }
 [data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article a { color: #8cb4ff; }
 [data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article blockquote,[data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article figcaption { color: #aab6c4; }
 [data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article td,[data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article th,[data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article h1,[data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article h2,[data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article blockquote { border-color: #485463; }
 [data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article aside { background: #25364e; }
 [data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article img { height: auto; }
+[data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .code-block .code-copy { border-color: #3b4048; background: #21252b; color: #9da4b1; }
+[data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .code-block .code-copy:hover { background: #2c313a; color: #e6edf3; }
+
+/* Light token colors from highlight.css are unreadable on the dark code panel. */
+[data-theme=dark] .token.comment,[data-theme=dark] .token.prolog,[data-theme=dark] .token.doctype,[data-theme=dark] .token.cdata { color: #7f8794; }
+[data-theme=dark] .token.punctuation { color: #abb2bf; }
+[data-theme=dark] .token.property,[data-theme=dark] .token.tag,[data-theme=dark] .token.boolean,[data-theme=dark] .token.number,[data-theme=dark] .token.constant,[data-theme=dark] .token.symbol,[data-theme=dark] .token.deleted { color: #d19a66; }
+[data-theme=dark] .token.selector,[data-theme=dark] .token.attr-name,[data-theme=dark] .token.string,[data-theme=dark] .token.char,[data-theme=dark] .token.builtin,[data-theme=dark] .token.inserted { color: #98c379; }
+[data-theme=dark] .token.operator,[data-theme=dark] .token.entity,[data-theme=dark] .token.url { color: #56b6c2; }
+[data-theme=dark] .token.atrule,[data-theme=dark] .token.attr-value,[data-theme=dark] .token.keyword { color: #c678dd; }
+[data-theme=dark] .token.function,[data-theme=dark] .token.class-name { color: #61aeee; }
+[data-theme=dark] .token.regex,[data-theme=dark] .token.important,[data-theme=dark] .token.variable { color: #e06c75; }
