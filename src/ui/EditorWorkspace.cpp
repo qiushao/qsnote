@@ -1416,6 +1416,7 @@ void EditorWorkspace::removeDocuments(const QSet<QString> &ids) {
 
 void EditorWorkspace::reloadSettings() {
     for (const auto &session: editorSessions_) session.editor->reloadSettings();
+    preview_->applyReaderSettings();
 }
 
 void EditorWorkspace::showStatus(const QString &text) {

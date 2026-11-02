@@ -1,4 +1,5 @@
 #include "MarkdownPreview.h"
+#include "Theme.h"
 #include "UiStyle.h"
 #include "core/PlantUmlRenderer.h"
 #include "core/WebTranslations.h"
@@ -111,8 +112,11 @@ void MarkdownPreview::applyReaderSettings() {
     if (!ready_) return;
     QSettings settings;
     settings.beginGroup("reader");
+    // 阅读区与窗口同色，主题模式和主题色改变时背景一起偏移。
     const QJsonObject options{
-        {"theme", settings.value("theme", "light").toString()},
+        {"theme", Theme::isDark() ? "dark" : "light"},
+        {"surface", Theme::color("window").name()},
+        {"foreground", Theme::color("text").name()},
         {"fontFamily", settings.value("fontFamily").toString()},
         {"fontSize", qBound(8, settings.value("fontSize", 16).toInt(), 72)},
         {"lineHeight", qBound(1.0, settings.value("lineHeight", 1.75).toDouble(), 3.0)},
@@ -132,13 +136,6 @@ void MarkdownPreview::showSettings() {
     layout->setRowWrapPolicy(QFormLayout::WrapLongRows);
     QSettings settings;
     settings.beginGroup("reader");
-    auto *theme = new QComboBox(&dialog);
-    theme->setObjectName("readerTheme");
-    theme->addItem(tr("浅色"), "light");
-    theme->addItem(tr("深色"), "dark");
-    theme->addItem(tr("纸张"), "sepia");
-    theme->setCurrentIndex(qMax(0, theme->findData(settings.value("theme", "light"))));
-    layout->addRow(tr("配色"), theme);
     auto *font = new QComboBox(&dialog);
     font->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     font->setMinimumContentsLength(16);
@@ -169,7 +166,6 @@ void MarkdownPreview::showSettings() {
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     if (dialog.exec() != QDialog::Accepted) return;
-    settings.setValue("theme", theme->currentData());
     settings.setValue("fontFamily", font->currentData());
     settings.setValue("fontSize", size->value());
     settings.setValue("lineHeight", spacing->value());

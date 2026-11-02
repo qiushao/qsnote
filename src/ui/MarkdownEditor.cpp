@@ -1,4 +1,5 @@
 #include "MarkdownEditor.h"
+#include "Theme.h"
 #include "UiStyle.h"
 #include "InplacePreview.h"
 #include <QActionGroup>
@@ -87,6 +88,29 @@ QString storePastedImage(const QString &basePath, const QImage &image) {
     return imageUrl(target);
 }
 
+// 深色底上的语法配色保留色相，只把亮度抬到可读区间。
+QColor readableOnDark(const QColor &color) {
+    constexpr float readableLightness = 0.7f;
+    const auto hsl = color.toHsl();
+    if (hsl.lightnessF() >= readableLightness) return color;
+    // 无色相时 hslHueF() 返回 -1，这里归一化到 fromHslF() 需要的 0~1。
+    const float hue = (hsl.hslHueF() < 0.0f ? 0.0f : hsl.hslHueF()) / 360.0f;
+    return QColor::fromHslF(hue, hsl.saturationF(), readableLightness, hsl.alphaF());
+}
+
+// Markdown 语法配色默认按浅底调好，深色模式下需要整体提亮。
+void adaptSyntaxToDark(vte::Theme &theme) {
+    auto &styles = *theme.markdownSyntaxStyles();
+    for (auto &format: styles) {
+        // 自带底色的样式（标记、表格竖线、分隔线）明暗关系不变，保持原样。
+        if (format.m_backgroundColor || !format.m_textColor) continue;
+        format.m_textColor = readableOnDark(QColor(format.m_textColor)).rgb();
+    }
+    for (const auto style: {vte::Theme::H1, vte::Theme::H2, vte::Theme::H3, vte::Theme::H4, vte::Theme::H5, vte::Theme::H6}) {
+        styles[style].m_textColor = Theme::color("textStrong").rgb();
+    }
+}
+
 QSharedPointer<vte::MarkdownEditorConfig> editorConfig() {
     vte::VTextEditor::addSyntaxCustomSearchPaths({":/demo/data"});
     QSettings settings;
@@ -103,16 +127,18 @@ QSharedPointer<vte::MarkdownEditorConfig> editorConfig() {
     text->m_highlightWhitespace = settings.value("whitespace", false).toBool();
     text->m_lineSpacing = settings.value("lineSpacing", 1.0).toDouble();
     text->m_maxContentWidth = settings.value("contentWidth", 0).toInt();
-    // The library default is shared. Keep font overrides local to this config.
-    text->m_theme = QSharedPointer<vte::Theme>::create(*vte::TextEditorConfig::defaultTheme());
+    // 从主题文件新建，库内的默认主题实例是共享的，直接改会互相影响。
+    text->m_theme = vte::Theme::createThemeFromFile(QStringLiteral(":/vtextedit/editor/data/themes/default.theme"));
     auto config = QSharedPointer<vte::MarkdownEditorConfig>::create(text);
     const auto family = settings.value("fontFamily").toString();
     config->overrideTextFontFamily(family.isEmpty() ? defaultUiFontFamily() : family);
+    if (Theme::isDark()) adaptSyntaxToDark(*text->m_theme);
+    // 编辑区与窗口同色，主题色改变时背景一起偏移。
     auto &font = text->m_theme->editorStyle(vte::Theme::Text);
     font.m_fontPointSize = settings.value("fontSize", 12).toInt();
-    font.m_textColor = qRgb(36, 36, 36);
-    font.m_backgroundColor = qRgb(253, 253, 252);
-    text->m_theme->editorStyle(vte::Theme::CursorLine).m_backgroundColor = qRgb(243, 242, 246);
+    font.m_textColor = Theme::color("text").rgb();
+    font.m_backgroundColor = Theme::color("window").rgb();
+    text->m_theme->editorStyle(vte::Theme::CursorLine).m_backgroundColor = Theme::color("hoverSoft").rgb();
     text->m_theme->editorStyle(vte::Theme::ContentMargin).m_backgroundColor = font.m_backgroundColor;
     text->m_theme->editorStyle(vte::Theme::IndicatorsBorder).m_backgroundColor = font.m_backgroundColor;
     config->m_webCodeBlockHighlighterEnabled = true;

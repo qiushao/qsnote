@@ -43,6 +43,7 @@ public:
     void showSettings();
     void showHeadingNavigation();
     void setHeadingFoldingEnabled(bool enabled);
+    void applyReaderSettings();
     bool matchesDocument(const QString &markdown, const QString &documentId) const {
         return markdown_ == markdown && documentId_ == documentId;
     }
@@ -57,7 +58,6 @@ protected:
     void hideEvent(QHideEvent *event) override;
 
 private:
-    void applyReaderSettings();
     void findInPreview(bool backward = false, bool restart = false);
     PreviewBridge *bridge_;
     QDialog *findDialog_ = nullptr;

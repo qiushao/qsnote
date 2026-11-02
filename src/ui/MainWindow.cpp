@@ -1036,6 +1036,8 @@ void MainWindow::applyUiSettings() {
     }
     setStyleSheet(Theme::process(scaled + style.mid(offset)));
     if (auto *title = findChild<QLabel *>("appTitle")) title->setMaximumWidth(title->sizeHint().width());
+    // 编辑区与阅读区各自持有配色，需要跟着主题一起刷新。
+    if (editorWorkspace_) editorWorkspace_->reloadSettings();
     updatePanels();
 }
 
@@ -1092,7 +1094,6 @@ void MainWindow::showSettings() {
     connect(&dialog, &SettingsDialog::updateCheckRequested, this, &MainWindow::checkForUpdates);
     if (dialog.exec() != QDialog::Accepted) return;
     applyUiSettings();
-    if (!editorWorkspace_->activeEditor()) editorWorkspace_->reloadSettings();
     tray_->setVisible(QSettings().value("General/minimizeToTray", false).toBool() && QSystemTrayIcon::isSystemTrayAvailable());
 }
 

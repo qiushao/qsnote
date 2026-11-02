@@ -1,5 +1,6 @@
 @import url("article.css");
-:root { color-scheme: light; font: 16px/1.75 "PingFang SC", "Microsoft YaHei UI", "Noto Sans CJK SC", system-ui, sans-serif; color: #242424; background: #fdfdfc; }
+/* surface/foreground 由 setReaderStyle 注入应用主题色，缺省值仅用于首帧。 */
+:root { --qsnote-surface: #fdfdfc; --qsnote-foreground: #242424; color-scheme: light; font: 16px/1.75 "PingFang SC", "Microsoft YaHei UI", "Noto Sans CJK SC", system-ui, sans-serif; color: var(--qsnote-foreground); background: var(--qsnote-surface); }
 body { margin: 0; overflow-wrap: anywhere; }
 main { padding: 16px 20px 60px; margin-inline: auto; }
 .vx-heading-fold-toggle { margin-left: .6em; border: 0; border-radius: 3px; background: transparent; color: #656d76; cursor: pointer; font-size: .75em; padding: .15em .4em; }
@@ -12,8 +13,7 @@ main { padding: 16px 20px 60px; margin-inline: auto; }
 .image-viewer { max-width: 95vw; max-height: 95vh; padding: 10px; border: none; }
 .image-viewer img { max-height: 90vh; object-fit: contain; cursor: zoom-out; }
 .image-viewer::backdrop { background: #000b; }
-:root[data-theme=dark] { color-scheme: dark; color: #e6edf3; background: #161b22; }
-:root[data-theme=sepia] { color: #433b30; background: #f6efdf; }
+:root[data-theme=dark] { color-scheme: dark; }
 [data-theme=dark] .vx-heading-fold-toggle { color: #aab6c4; }
 [data-theme=dark] .toolbar button { background: #242c36; color: #e6edf3; border-color: #485463; }
 [data-theme=dark] .vx-heading-fold-toggle:hover,[data-theme=dark] .vx-heading-fold-toggle:focus-visible { background: #344457; }
@@ -24,7 +24,6 @@ main { padding: 16px 20px 60px; margin-inline: auto; }
 .qsnote-article img { cursor: zoom-in; }
 
 [data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article { --qsnote-code-background: #282c34; --qsnote-code-foreground: #abb2bf; --qsnote-inline-code-background: #282c34; --qsnote-inline-code-foreground: #d05a6e; --qsnote-code-header: #21252b; --qsnote-code-label: #9da4b1; }
-[data-theme=sepia] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article { --qsnote-code-background: #f1e8d6; --qsnote-code-foreground: #4a4238; --qsnote-inline-code-background: #ece0c6; --qsnote-inline-code-foreground: #a3231f; --qsnote-code-header: #e4d7bd; --qsnote-code-label: #7a6f5f; }
 [data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article th { background: #242c36; color: #e6edf3; }
 [data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article a { color: #8cb4ff; }
 [data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article blockquote,[data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article figcaption { color: #aab6c4; }

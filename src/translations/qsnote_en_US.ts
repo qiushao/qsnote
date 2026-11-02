@@ -2279,26 +2279,6 @@ It will be removed from the list. Files on disk will be kept, and you can add it
             <translation>Reading Settings (All Notes)</translation>
         </message>
         <message>
-            <location line="+6" />
-            <source>浅色</source>
-            <translation>Light</translation>
-        </message>
-        <message>
-            <location line="+1" />
-            <source>深色</source>
-            <translation>Dark</translation>
-        </message>
-        <message>
-            <location line="+1" />
-            <source>纸张</source>
-            <translation>Paper</translation>
-        </message>
-        <message>
-            <location line="+2" />
-            <source>配色</source>
-            <translation>Color scheme</translation>
-        </message>
-        <message>
             <location line="+3" />
             <source>系统默认</source>
             <translation>System default</translation>
