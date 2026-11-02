@@ -1078,6 +1078,62 @@
             <translation>Settings take effect after saving. Language changes take effect after restarting the app.</translation>
         </message>
         <message>
+            <source>外观</source>
+            <translation>Appearance</translation>
+        </message>
+        <message>
+            <source>主题模式</source>
+            <translation>Theme mode</translation>
+        </message>
+        <message>
+            <source>浅色</source>
+            <translation>Light</translation>
+        </message>
+        <message>
+            <source>深色</source>
+            <translation>Dark</translation>
+        </message>
+        <message>
+            <source>主题色</source>
+            <translation>Accent color</translation>
+        </message>
+        <message>
+            <source>春山翠</source>
+            <translation>Spring Green</translation>
+        </message>
+        <message>
+            <source>霜叶红</source>
+            <translation>Frost Red</translation>
+        </message>
+        <message>
+            <source>晚樱粉</source>
+            <translation>Sakura Pink</translation>
+        </message>
+        <message>
+            <source>日落暖</source>
+            <translation>Sunset Orange</translation>
+        </message>
+        <message>
+            <source>麦浪金</source>
+            <translation>Wheat Amber</translation>
+        </message>
+        <message>
+            <source>雨过青</source>
+            <translation>Rain Cyan</translation>
+        </message>
+        <message>
+            <source>秋水蓝</source>
+            <translation>Autumn Blue</translation>
+        </message>
+        <message>
+            <source>暮山紫</source>
+            <translation>Dusk Purple</translation>
+        </message>
+        <message>
+            <source>远山墨</source>
+            <translation>Ink Black</translation>
+        </message>
+        <message>
             <location line="+2" />
             <source>编辑器设置</source>
             <translation>Editor Settings</translation>

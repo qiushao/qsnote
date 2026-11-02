@@ -8,6 +8,7 @@
 #include "SettingsDialog.h"
 #include "SiteConfigDialog.h"
 #include "SitePreviewDialog.h"
+#include "Theme.h"
 #include "TodoWorkspace.h"
 #include "UiStyle.h"
 #include "core/ArticleRenderer.h"
@@ -54,6 +55,9 @@
 #include <QStackedWidget>
 #include <QStyledItemDelegate>
 #include <QSystemTrayIcon>
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+#include <QStyleHints>
+#endif
 #include <QTimer>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -170,6 +174,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
     setWindowTitle(QCoreApplication::applicationName());
     applyUiSettings();
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [this](Qt::ColorScheme) {
+        if (Theme::mode() == "system") applyUiSettings();
+    });
+#endif
     const auto available = screen()->availableGeometry().size();
     resize(available.width() * 4 / 5, available.height() * 4 / 5);
     buildUi();
@@ -1025,7 +1034,7 @@ void MainWindow::applyUiSettings() {
         scaled += QStringLiteral("font-size: %1px;").arg(qRound(match.captured(1).toInt() * size / 14.0));
         offset = match.capturedEnd();
     }
-    setStyleSheet(scaled + style.mid(offset));
+    setStyleSheet(Theme::process(scaled + style.mid(offset)));
     if (auto *title = findChild<QLabel *>("appTitle")) title->setMaximumWidth(title->sizeHint().width());
     updatePanels();
 }
