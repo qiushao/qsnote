@@ -4,6 +4,7 @@
 #include "core/NotebookStore.h"
 #include "core/SourceOutline.h"
 #include <QHash>
+#include <QList>
 #include <QPixmap>
 #include <QWidget>
 #include <functional>
@@ -106,6 +107,7 @@ private:
     QWidget *toolbar_ = nullptr;
     QPushButton *undo_ = nullptr;
     QPushButton *redo_ = nullptr;
+    QList<QPushButton *> syntaxActions_;
     QTabBar *tabs_ = nullptr;
     QStackedWidget *pages_ = nullptr;
     QStackedWidget *editors_ = nullptr;

@@ -427,6 +427,7 @@ void EditorWorkspace::buildToolbar() {
     }
     heading->setMenu(headingMenu);
     layout->addWidget(heading);
+    syntaxActions_.append(heading);
     addSeparator();
 
     const QList<Tool> tools = {
@@ -458,6 +459,7 @@ void EditorWorkspace::buildToolbar() {
         action->setToolTip(tool.tip);
         action->setFocusPolicy(Qt::NoFocus);
         layout->addWidget(action);
+        syntaxActions_.append(action);
         connect(action, &QPushButton::clicked, this, [this, tool] {
             if (!documentNote(currentNoteId())) return;
             setPreview(false);
@@ -507,6 +509,7 @@ void EditorWorkspace::buildToolbar() {
     }
     more->setMenu(diagramMenu);
     layout->addWidget(more);
+    syntaxActions_.append(more);
     auto *modes = new QWidget(toolbar_);
     modes->setProperty("alignRight", true);
     modes->setObjectName("viewModes");
@@ -774,10 +777,10 @@ void EditorWorkspace::activateEditor(const QString &id) {
         editors_->addWidget(documentEditor);
         editorSessions_.insert(id, session);
         connect(textEdit, &QTextEdit::undoAvailable, this, [this, id](bool available) {
-            if (activeEditorId_ == id) undo_->setEnabled(available);
+            if (activeEditorId_ == id) undo_->setEnabled(available && viewMode_ != ViewMode::Preview);
         });
         connect(textEdit, &QTextEdit::redoAvailable, this, [this, id](bool available) {
-            if (activeEditorId_ == id) redo_->setEnabled(available);
+            if (activeEditorId_ == id) redo_->setEnabled(available && viewMode_ != ViewMode::Preview);
         });
         connect(documentEditor, &MarkdownEditor::settingsChanged, this, [this, documentEditor] {
             for (const auto &session: editorSessions_) {
@@ -898,6 +901,10 @@ void EditorWorkspace::setViewMode(ViewMode mode) {
     const int line = sessionMode == ViewMode::Preview ? editorSessions_[activeEditorId_].previewLine : markdownEditor_->getTopLine();
     const QScopedValueRollback<bool> guard(syncingPreviewScroll_, true);
     viewMode_ = mode;
+    const bool editing = mode != ViewMode::Preview;
+    for (auto *action: syntaxActions_) action->setEnabled(editing);
+    undo_->setEnabled(editing && editor_->document()->isUndoAvailable());
+    redo_->setEnabled(editing && editor_->document()->isRedoAvailable());
     markdownEditor_->setSplitMode(mode == ViewMode::Split);
     editMode_->setChecked(mode == ViewMode::Edit);
     previewMode_->setChecked(mode == ViewMode::Preview);
