@@ -1432,13 +1432,8 @@ void MainWindow::showSiteConfig() {
     auto *book = store_.notebook(currentNotebookId_);
     if (!book || book->type != "site") return;
     SiteConfigDialog dialog(*book, this);
-    connect(&dialog, &SiteConfigDialog::saveRequested, this, [this](bool delayed) {
-        if (delayed) saveTimer_->start();
-        else save();
-    });
     connect(&dialog, &SiteConfigDialog::categoriesChanged, this, &MainWindow::refreshTree);
-    dialog.exec();
-    save();
+    if (dialog.exec() == QDialog::Accepted) save();
 }
 
 bool MainWindow::generateSite(const Notebook &book) {

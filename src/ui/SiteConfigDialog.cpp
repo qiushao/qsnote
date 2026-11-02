@@ -3,9 +3,11 @@
 #include "core/NotebookCategories.h"
 #include <QComboBox>
 #include <QCoreApplication>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
 #include <QFormLayout>
+#include <QHash>
 #include <QImage>
 #include <QInputDialog>
 #include <QJsonArray>
@@ -17,8 +19,9 @@
 #include <QScrollArea>
 #include <QScrollBar>
 
-SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent) : OverlayDialog(parent, "siteConfigDialog", true) {
-    auto *book = &notebook;
+SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent)
+    : OverlayDialog(parent, "siteConfigDialog", true), notebook_(notebook), draft_(notebook) {
+    auto *book = &draft_;
     auto &dialog = *this;
     dialog.resize(qMin(960, parent->width() * 92 / 100), dialog.height());
     auto *layout = column(&dialog);
@@ -80,10 +83,7 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent) : Overla
             if (key == "clientSecret") input->setEchoMode(QLineEdit::Password);
             captionLabel->setBuddy(input);
             fieldLayout->addRow(captionLabel, input);
-            connect(input, &QLineEdit::textEdited, &dialog, [this, book, key](const QString &value) {
-                book->config[key] = value;
-                emit saveRequested(true);
-            });
+            connect(input, &QLineEdit::textEdited, &dialog, [book, key](const QString &value) { book->config[key] = value; });
         } else {
             auto *select = new QComboBox(container);
             select->setObjectName("config_" + key);
@@ -91,10 +91,7 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent) : Overla
             select->setCurrentIndex(qMax(0, select->findData(book->config[key].toString())));
             captionLabel->setBuddy(select);
             fieldLayout->addRow(captionLabel, select);
-            connect(select, &QComboBox::currentIndexChanged, &dialog, [this, book, key, select] {
-                book->config[key] = select->currentData().toString();
-                emit saveRequested(true);
-            });
+            connect(select, &QComboBox::currentIndexChanged, &dialog, [book, key, select] { book->config[key] = select->currentData().toString(); });
         }
         form->addWidget(container);
         return container;
@@ -116,21 +113,15 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent) : Overla
         const auto selected = QFileDialog::getOpenFileName(&dialog, QCoreApplication::translate("MainWindow", "选择头像"), book->path,
                                                            QCoreApplication::translate("MainWindow", "图片 (*.png *.jpg *.jpeg *.webp *.bmp)"));
         if (selected.isEmpty()) return;
-        const QImage image(selected);
-        if (image.isNull()) {
+        if (QImage(selected).isNull()) {
             QMessageBox::warning(&dialog, QCoreApplication::translate("MainWindow", "头像设置失败"), QCoreApplication::translate("MainWindow", "无法读取所选图片。"));
             return;
         }
+        // 图片在保存时才写入站点目录，取消不会改动已有头像。
         const auto relative = QStringLiteral("images/qsnote-avatar.png");
-        const auto target = book->path + "/source/" + relative;
-        QSaveFile file(target);
-        if (!QDir().mkpath(QFileInfo(target).absolutePath()) || !file.open(QIODevice::WriteOnly) || !image.save(&file, "PNG") || !file.commit()) {
-            QMessageBox::warning(&dialog, QCoreApplication::translate("MainWindow", "头像设置失败"), QCoreApplication::translate("MainWindow", "无法保存头像：%1").arg(target));
-            return;
-        }
         avatar->setText(relative);
         book->config["avatar"] = relative;
-        emit saveRequested(true);
+        pendingAvatar_ = selected;
     });
     field("domain", QCoreApplication::translate("MainWindow", "域名"));
     section("siteCommentsCard", QCoreApplication::translate("MainWindow", "评论"));
@@ -206,8 +197,7 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent) : Overla
         categories->clear();
         categories->addItems(NotebookCategories::site(*book));
         categories->setCurrentRow(static_cast<int>(NotebookCategories::site(*book).indexOf(selected)));
-        emit saveRequested(false);
-        emit categoriesChanged();
+        categoriesDirty_ = true;
     };
     const auto editCategory = [book, categories, updateCategories, &dialog](bool rename) {
         const auto previous = rename ? categories->currentItem()->text() : QString();
@@ -250,14 +240,13 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent) : Overla
             input->setPlaceholderText(key == "name" ? QCoreApplication::translate("MainWindow", "名称") : "https://");
             input->setMinimumWidth(0);
             linkLayout->addWidget(input, 1);
-            connect(input, &QLineEdit::textEdited, links, [this, book, links] {
+            connect(input, &QLineEdit::textEdited, links, [book, links] {
                 QJsonArray entries;
                 for (auto *linkRow: links->findChildren<QWidget *>(QString(), Qt::FindDirectChildrenOnly)) {
                     if (linkRow->isHidden()) continue;
                     entries.append(QJsonObject{{"name", linkRow->findChild<QLineEdit *>("name")->text()}, {"url", linkRow->findChild<QLineEdit *>("url")->text()}});
                 }
                 book->config["links"] = entries;
-                emit saveRequested(true);
             });
         }
         auto *remove = button(QCoreApplication::translate("MainWindow", "删除"), "removeLink", container);
@@ -317,10 +306,7 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent) : Overla
         input->setPlaceholderText(hint);
         captionLabel->setBuddy(input);
         form->addWidget(input);
-        connect(input, &QPlainTextEdit::textChanged, &dialog, [this, book, key, input] {
-            book->config[key] = input->toPlainText();
-            emit saveRequested(true);
-        });
+        connect(input, &QPlainTextEdit::textChanged, &dialog, [book, key, input] { book->config[key] = input->toPlainText(); });
     };
     section("siteAnalyticsCard", QCoreApplication::translate("MainWindow", "站长统计"));
     auto *analyticsHint = label(QCoreApplication::translate("MainWindow", "粘贴统计平台提供的完整 HTML / JavaScript 代码，将原样插入所有页面的 </body> 前。留空关闭统计；预览时也会加载。"), card, true);
@@ -341,5 +327,40 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent) : Overla
         for (int i = 0; i < cards->count() - 1; ++i) cards->itemAt(i)->widget()->setVisible(i == index);
         scroll->verticalScrollBar()->setValue(0);
     });
-    connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
+    auto *footer = new QWidget(&dialog);
+    footer->setObjectName("dialogFooter");
+    auto *footerLayout = row(footer, 16, 12);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, footer);
+    buttons->button(QDialogButtonBox::Save)->setText(QCoreApplication::translate("MainWindow", "保存"));
+    setPrimaryButton(buttons->button(QDialogButtonBox::Save));
+    buttons->button(QDialogButtonBox::Cancel)->setText(QCoreApplication::translate("MainWindow", "取消"));
+    footerLayout->addWidget(buttons);
+    layout->addWidget(footer);
+    connect(close, &QPushButton::clicked, &dialog, &QDialog::reject);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+}
+
+void SiteConfigDialog::accept() {
+    const auto avatarPath = draft_.config["avatar"].toString();
+    if (!pendingAvatar_.isEmpty() && !avatarPath.isEmpty()) {
+        const QImage image(pendingAvatar_);
+        const auto target = notebook_.path + "/source/" + avatarPath;
+        QSaveFile file(target);
+        if (image.isNull() || !QDir().mkpath(QFileInfo(target).absolutePath()) || !file.open(QIODevice::WriteOnly) || !image.save(&file, "PNG") || !file.commit()) {
+            QMessageBox::warning(this, QCoreApplication::translate("MainWindow", "头像设置失败"), QCoreApplication::translate("MainWindow", "无法保存头像：%1").arg(target));
+            return;
+        }
+    }
+    notebook_.config = draft_.config;
+    QHash<QString, QString> categories;
+    for (const auto &note: draft_.notes) {
+        if (note.metadata.contains("category")) categories.insert(note.id, note.metadata["category"].toString());
+    }
+    for (auto &note: notebook_.notes) {
+        const auto entry = categories.constFind(note.id);
+        if (entry != categories.constEnd()) note.metadata["category"] = entry.value();
+    }
+    if (categoriesDirty_) emit categoriesChanged();
+    OverlayDialog::accept();
 }

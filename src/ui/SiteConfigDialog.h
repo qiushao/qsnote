@@ -1,16 +1,21 @@
 #pragma once
 
 #include "OverlayDialog.h"
-
-struct Notebook;
+#include "core/NotebookStore.h"
 
 class SiteConfigDialog : public OverlayDialog {
     Q_OBJECT
 public:
-    // Edits the supplied notebook immediately, matching the existing settings workflow.
+    // 编辑笔记本的副本，点击“保存”后才写回笔记本。
     explicit SiteConfigDialog(Notebook &book, QWidget *parent);
+    void accept() override;
 
 signals:
-    void saveRequested(bool delayed);
     void categoriesChanged();
+
+private:
+    Notebook &notebook_;
+    Notebook draft_;
+    QString pendingAvatar_;
+    bool categoriesDirty_ = false;
 };
