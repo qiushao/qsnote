@@ -15,6 +15,7 @@
 #include <QFontDatabase>
 #include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QImage>
 #include <QImageReader>
 #include <QMimeDatabase>
@@ -35,7 +36,9 @@
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWebChannel>
+#include <QWebEngineDownloadRequest>
 #include <QWebEnginePage>
+#include <QWebEngineProfile>
 #include <QWebEngineSettings>
 #include <QWebEngineFindTextResult>
 
@@ -85,6 +88,27 @@ MarkdownPreview::MarkdownPreview(QWidget *parent) : QWebEngineView(parent), brid
     page()->setWebChannel(channel);
     settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, true);
     settings()->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows, false);
+    // The standard "Save image" action emits a download request that the application
+    // must accept, otherwise Qt WebEngine silently cancels it and the item does
+    // nothing. Local images are inlined as data URLs, so no other path saves them.
+    connect(page()->profile(), &QWebEngineProfile::downloadRequested, this, [this](QWebEngineDownloadRequest *download) {
+        if (download->page() != page()) return;
+        const auto mime = download->mimeType();
+        if (!mime.isEmpty() && !mime.startsWith("image/")) return;
+        auto name = download->suggestedFileName();
+        if (name.isEmpty()) name = QStringLiteral("image");
+        const auto suffix = QMimeDatabase().mimeTypeForName(mime).preferredSuffix();
+        if (!suffix.isEmpty() && QFileInfo(name).suffix().isEmpty()) name += '.' + suffix;
+        const auto path = QFileDialog::getSaveFileName(this, tr("保存图片"), name, tr("图片 (*.png *.jpg *.jpeg *.gif *.webp *.bmp *.svg)"));
+        if (path.isEmpty()) {
+            download->cancel();
+            return;
+        }
+        const QFileInfo target(path);
+        download->setDownloadDirectory(target.absolutePath());
+        download->setDownloadFileName(target.fileName());
+        download->accept();
+    });
     connect(bridge_, &PreviewBridge::readyReceived, this, [this] {
         ready_ = true;
         applyReaderSettings();

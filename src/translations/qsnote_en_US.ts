@@ -2433,6 +2433,10 @@ It will be removed from the list. Files on disk will be kept, and you can add it
             <source>PNG 图片 (*.png)</source>
             <translation>PNG image (*.png)</translation>
         </message>
+        <message>
+            <source>图片 (*.png *.jpg *.jpeg *.gif *.webp *.bmp *.svg)</source>
+            <translation>Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp *.svg)</translation>
+        </message>
     </context>
     <context>
         <name>NotebookStore</name>
