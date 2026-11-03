@@ -161,6 +161,8 @@ void MarkdownPreview::applyReaderSettings() {
         {"theme", Theme::isDark() ? "dark" : "light"},
         {"surface", Theme::color("window").name()},
         {"foreground", Theme::color("text").name()},
+        {"scrollbar", Theme::color("scrollbar").name()},
+        {"scrollbarHover", Theme::color("scrollbarHover").name()},
         {"fontFamily", settings.value("fontFamily").toString()},
         {"fontSize", qBound(8, settings.value("fontSize", 16).toInt(), 72)},
         {"lineHeight", qBound(1.0, settings.value("lineHeight", 1.75).toDouble(), 3.0)},

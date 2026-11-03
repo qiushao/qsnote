@@ -40,6 +40,8 @@
             root.dataset.theme = options.theme;
             root.style.setProperty('--qsnote-surface', options.surface);
             root.style.setProperty('--qsnote-foreground', options.foreground);
+            root.style.setProperty('--qsnote-scrollbar', options.scrollbar);
+            root.style.setProperty('--qsnote-scrollbar-hover', options.scrollbarHover);
             root.style.fontFamily = options.fontFamily ? `${JSON.stringify(options.fontFamily)}, sans-serif` : '';
             root.style.fontSize = `${options.fontSize}px`;
             root.style.lineHeight = options.lineHeight;

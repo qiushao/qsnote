@@ -32,9 +32,10 @@ QString bookStyle() {
     if (preview.open(QIODevice::ReadOnly)) {
         style += QString::fromUtf8(preview.readAll()).replace("@import url(\"article.css\");", QString());
     }
-    // 预览由 setReaderStyle 注入这两个变量，导出时在样式表末尾覆盖其缺省值。
-    style += QStringLiteral(":root{--qsnote-surface:%1;--qsnote-foreground:%2;}")
-                     .arg(Theme::color("window").name(), Theme::color("text").name());
+    // 预览由 setReaderStyle 注入这些变量，导出时在样式表末尾覆盖其缺省值。
+    style += QStringLiteral(":root{--qsnote-surface:%1;--qsnote-foreground:%2;--qsnote-scrollbar:%3;--qsnote-scrollbar-hover:%4;}")
+                     .arg(Theme::color("window").name(), Theme::color("text").name(),
+                          Theme::color("scrollbar").name(), Theme::color("scrollbarHover").name());
     style += QStringLiteral(
         ".qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article{color:inherit;background:transparent;}"
         "body{margin:32px auto;padding:0 24px;max-width:900px;color:var(--qsnote-foreground);background:var(--qsnote-surface);}"

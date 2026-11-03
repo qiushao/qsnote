@@ -1,7 +1,12 @@
 @import url("article.css");
-/* surface/foreground 由 setReaderStyle 注入应用主题色，缺省值仅用于首帧。 */
-:root { --qsnote-surface: #fdfdfc; --qsnote-foreground: #242424; color-scheme: light; font: 16px/1.75 "PingFang SC", "Microsoft YaHei UI", "Noto Sans CJK SC", system-ui, sans-serif; color: var(--qsnote-foreground); background: var(--qsnote-surface); }
+/* surface/foreground/scrollbar 由 setReaderStyle 注入应用主题色，缺省值仅用于首帧。 */
+:root { --qsnote-surface: #fdfdfc; --qsnote-foreground: #242424; --qsnote-scrollbar: #d8cccf; --qsnote-scrollbar-hover: #bdafb3; color-scheme: light; font: 16px/1.75 "PingFang SC", "Microsoft YaHei UI", "Noto Sans CJK SC", system-ui, sans-serif; color: var(--qsnote-foreground); background: var(--qsnote-surface); }
 body { margin: 0; overflow-wrap: anywhere; }
+/* 预览区滚动条与应用内 QScrollBar 使用同一套配色和尺寸。 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--qsnote-scrollbar); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--qsnote-scrollbar-hover); }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
 main { padding: 16px 20px 60px; margin-inline: auto; }
 .vx-heading-fold-toggle { margin-left: .6em; border: 0; border-radius: 3px; background: transparent; color: #656d76; cursor: pointer; font-size: .75em; padding: .15em .4em; }
 .vx-heading-fold-toggle::before { content: '▾'; }
