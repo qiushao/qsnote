@@ -302,6 +302,7 @@ EditorWorkspace::EditorWorkspace(NotebookStore &store, std::function<bool()> sav
     outlineFilter_->addAction(icon("search"), QLineEdit::LeadingPosition);
     filterLayout->addWidget(outlineFilter_);
     rightLayout->addWidget(filterRow);
+    rightLayout->addSpacing(10);
     connect(outlineFilter_, &QLineEdit::textChanged, this, &EditorWorkspace::applyOutlineFilter);
     outlineHint_ = label(QCoreApplication::translate("MainWindow", "打开一篇笔记后自动生成大纲"), outlinePanel_, true);
     outlineHint_->setContentsMargins(18, 20, 18, 0);
