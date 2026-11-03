@@ -2417,6 +2417,22 @@ It will be removed from the list. Files on disk will be kept, and you can add it
             <source>折叠所有章节</source>
             <translation>Collapse All Sections</translation>
         </message>
+        <message>
+            <source>复制图片</source>
+            <translation>Copy Image</translation>
+        </message>
+        <message>
+            <source>保存图片…</source>
+            <translation>Save Image…</translation>
+        </message>
+        <message>
+            <source>保存图片</source>
+            <translation>Save Image</translation>
+        </message>
+        <message>
+            <source>PNG 图片 (*.png)</source>
+            <translation>PNG image (*.png)</translation>
+        </message>
     </context>
     <context>
         <name>NotebookStore</name>

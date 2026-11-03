@@ -71,8 +71,50 @@
             collapsedSections.clear();
             folding.setEnabled(enabled);
             decorateHeadings();
+        },
+        diagramIdAt(x, y) {
+            const diagram = document.elementFromPoint(x, y)?.closest?.('.diagram');
+            return diagram && diagram.id ? diagram.id : '';
+        },
+        renderDiagram(requestId, id) {
+            renderDiagramPng(id).then(png => bridge.diagramPng(requestId, png || ''), () => bridge.diagramPng(requestId, ''));
         }
     };
+
+    // Rasterise a rendered diagram to PNG. SVG diagrams are serialised and drawn to a
+    // canvas; PlantUML is already a PNG data URL and is passed through verbatim.
+    async function renderDiagramPng(id) {
+        const diagram = document.getElementById(id);
+        if (!diagram) return '';
+        const picture = diagram.querySelector('img');
+        if (picture && picture.src.startsWith('data:image/png;base64,')) {
+            return picture.src.slice(picture.src.indexOf(',') + 1);
+        }
+        const svg = diagram.querySelector('svg');
+        if (!svg) return '';
+        const box = svg.viewBox.baseVal;
+        const width = Math.ceil(box.width || svg.width.baseVal.value);
+        const height = Math.ceil(box.height || svg.height.baseVal.value);
+        if (!(width > 0 && height > 0)) return '';
+        const clone = svg.cloneNode(true);
+        if (!box.width) clone.setAttribute('viewBox', `0 0 ${width} ${height}`);
+        // WaveDrom installs its stylesheet in the document rather than the SVG.
+        document.querySelectorAll('head style').forEach(style => clone.prepend(style.cloneNode(true)));
+        clone.setAttribute('width', width);
+        clone.setAttribute('height', height);
+        const image = new Image();
+        await new Promise((resolve, reject) => {
+            image.onload = resolve;
+            image.onerror = () => reject(new Error(qsnoteTranslations.previewImageError));
+            image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(clone));
+        });
+        const canvas = document.createElement('canvas');
+        canvas.width = width * 2;
+        canvas.height = height * 2;
+        canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+        const url = canvas.toDataURL('image/png');
+        return url.slice(url.indexOf(',') + 1);
+    }
 
     function points() {
         const result = [{line: 0, y: 0}];

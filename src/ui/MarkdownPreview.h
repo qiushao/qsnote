@@ -21,6 +21,7 @@ public slots:
     void renderPlantUml(const QString &source, int revision, int id);
     QString localImage(const QString &url);
     void openLocalLink(int revision, const QString &url) { emit localLinkRequested(revision, url); }
+    void diagramPng(int requestId, const QString &data) { emit diagramPngReceived(requestId, data); }
 signals:
     void readyReceived();
     void renderedReceived(int revision);
@@ -30,6 +31,7 @@ signals:
     void scrollRequested(int revision, int line, bool center);
     void plantUmlRendered(int revision, int id, const QString &data, const QString &error);
     void localLinkRequested(int revision, const QString &url);
+    void diagramPngReceived(int requestId, const QString &data);
 };
 
 class MarkdownPreview : public QWebEngineView {
@@ -58,7 +60,11 @@ protected:
     void hideEvent(QHideEvent *event) override;
 
 private:
+    enum class Capture { None, Clipboard, File };
     void findInPreview(bool backward = false, bool restart = false);
+    void showContextMenu(const QPoint &globalPos, const QString &diagramId);
+    void saveDiagram(const QString &diagramId);
+    void captureDiagram(const QString &diagramId, Capture mode, const QString &path = {});
     PreviewBridge *bridge_;
     QDialog *findDialog_ = nullptr;
     QLineEdit *findQuery_ = nullptr;
@@ -76,6 +82,9 @@ private:
     bool pendingLineCentered_ = false;
     bool loading_ = false;
     bool ready_ = false;
+    Capture capture_ = Capture::None;
+    QString capturePath_;
+    int captureId_ = 0;
 };
 
 #endif

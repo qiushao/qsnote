@@ -4,7 +4,9 @@
 #include "core/PlantUmlRenderer.h"
 #include "core/WebTranslations.h"
 #include <QDesktopServices>
+#include <QApplication>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QContextMenuEvent>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -12,6 +14,8 @@
 #include <QDoubleSpinBox>
 #include <QFontDatabase>
 #include <QFile>
+#include <QFileDialog>
+#include <QImage>
 #include <QImageReader>
 #include <QMimeDatabase>
 #include <QFormLayout>
@@ -28,6 +32,7 @@
 #include <QSettings>
 #include <QShortcut>
 #include <QSpinBox>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QWebChannel>
 #include <QWebEnginePage>
@@ -102,6 +107,21 @@ MarkdownPreview::MarkdownPreview(QWidget *parent) : QWebEngineView(parent), brid
     connect(bridge_, &PreviewBridge::localLinkRequested, this, [this](int revision, const QString &url) {
         const QUrl target(url);
         if (revision == revision_ && revision == renderedRevision_ && target.isLocalFile()) emit localLinkActivated(target);
+    });
+    connect(bridge_, &PreviewBridge::diagramPngReceived, this, [this](int requestId, const QString &data) {
+        if (requestId != captureId_ || capture_ == Capture::None || data.isEmpty()) return;
+        const auto mode = capture_;
+        const auto path = capturePath_;
+        capture_ = Capture::None;
+        capturePath_.clear();
+        const QByteArray png = QByteArray::fromBase64(data.toLatin1());
+        if (mode == Capture::File) {
+            QFile file(path);
+            if (file.open(QIODevice::WriteOnly)) file.write(png);
+            return;
+        }
+        QImage image;
+        if (image.loadFromData(png, "PNG")) QApplication::clipboard()->setImage(image);
     });
     auto *headings = new QShortcut(QKeySequence("Ctrl+G"), this);
     headings->setContext(Qt::WidgetWithChildrenShortcut);
@@ -324,7 +344,37 @@ void MarkdownPreview::setHeadingFoldingEnabled(bool enabled) {
 }
 
 void MarkdownPreview::contextMenuEvent(QContextMenuEvent *event) {
+    const QPoint globalPos = event->globalPos();
+    const QPoint pos = event->pos();
+    const QPointer<MarkdownPreview> guard(this);
+    // Diagrams render as inline SVG, which the standard menu cannot copy. Hit-test the
+    // page first; runJavaScript is asynchronous, so the menu is shown from its callback.
+    page()->runJavaScript(QStringLiteral("window.qsnotePreview.diagramIdAt(%1,%2)").arg(pos.x()).arg(pos.y()),
+                          [this, guard, globalPos](const QVariant &value) {
+        if (!guard) return;
+        showContextMenu(globalPos, value.toString());
+    });
+}
+
+void MarkdownPreview::showContextMenu(const QPoint &globalPos, const QString &diagramId) {
     QScopedPointer<QMenu> menu(createStandardContextMenu());
+    if (!diagramId.isEmpty()) {
+        QAction *first = menu->actions().isEmpty() ? nullptr : menu->actions().constFirst();
+        auto *copy = new QAction(tr("复制图片"), menu.data());
+        // Defer until after menu->exec(): running the capture (and especially a modal
+        // save dialog) from the action slot while the menu still holds the X11 grab
+        // crashes Qt when the menu processes the next mouse event.
+        connect(copy, &QAction::triggered, this, [this, diagramId] {
+            QTimer::singleShot(0, this, [this, diagramId] { captureDiagram(diagramId, Capture::Clipboard); });
+        });
+        menu->insertAction(first, copy);
+        auto *save = new QAction(tr("保存图片…"), menu.data());
+        connect(save, &QAction::triggered, this, [this, diagramId] {
+            QTimer::singleShot(0, this, [this, diagramId] { saveDiagram(diagramId); });
+        });
+        menu->insertAction(first, save);
+        menu->insertSeparator(first);
+    }
     menu->addSeparator();
     menu->addAction(tr("查找阅读内容…"), this, &MarkdownPreview::showFind);
     auto *headings = menu->addAction(tr("跳转到标题…"), this, &MarkdownPreview::showHeadingNavigation);
@@ -339,7 +389,20 @@ void MarkdownPreview::contextMenuEvent(QContextMenuEvent *event) {
         menu->addAction(tr("展开所有章节"), this, [this] { page()->runJavaScript("window.qsnotePreview.expandAll()"); });
         menu->addAction(tr("折叠所有章节"), this, [this] { page()->runJavaScript("window.qsnotePreview.expandAll(false)"); });
     }
-    menu->exec(event->globalPos());
+    menu->exec(globalPos);
+}
+
+void MarkdownPreview::saveDiagram(const QString &diagramId) {
+    const auto path = QFileDialog::getSaveFileName(this, tr("保存图片"), diagramId + ".png", tr("PNG 图片 (*.png)"));
+    if (path.isEmpty()) return;
+    captureDiagram(diagramId, Capture::File, path);
+}
+
+void MarkdownPreview::captureDiagram(const QString &diagramId, Capture mode, const QString &path) {
+    capture_ = mode;
+    capturePath_ = path;
+    const int requestId = ++captureId_;
+    page()->runJavaScript(QStringLiteral("window.qsnotePreview.renderDiagram(%1,\"%2\")").arg(requestId).arg(diagramId));
 }
 
 void MarkdownPreview::hideEvent(QHideEvent *event) {
