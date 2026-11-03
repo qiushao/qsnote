@@ -8,7 +8,7 @@
 Ubuntu / Debian 安装依赖：
 
 ```bash
-sudo apt install build-essential cmake qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools qt6-svg-dev qt6-5compat-dev qt6-webengine-dev qt6-webchannel-dev libgl1-mesa-dev clang-tidy clang-format dpkg-dev plantuml graphviz default-jre-headless
+sudo apt install build-essential cmake qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools qt6-svg-dev qt6-5compat-dev qt6-webengine-dev qt6-webchannel-dev libgl1-mesa-dev clang-tidy dpkg-dev plantuml graphviz default-jre-headless
 ```
 
 在工程根目录执行：

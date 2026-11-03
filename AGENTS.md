@@ -21,9 +21,9 @@ cmake --build build --parallel              # Build
 For packaging on other platforms, use `./scripts/macos-build.sh 1.2.3` or `./scripts/windows-build.ps1 -Version 1.2.3` after following `BUILD.md` setup instructions.
 
 ## Coding Style & Naming Conventions
-Follow `.clang-format`: four spaces, no tabs, attached braces, and no fixed column limit. Use PascalCase classes and matching filenames, camelCase functions and variables, and trailing underscores for private/protected members. Follow surrounding code.
+Use four spaces, no tabs, attached braces, and no fixed column limit. Use PascalCase classes and matching filenames, camelCase functions and variables, and trailing underscores for private/protected members. Follow surrounding code.
 
-Format changed C++ files with `clang-format -i path/to/file.cpp`; `./scripts/format.sh` formats all C++ files under `src/`. Linux builds enable `.clang-tidy` checks by default and treat warnings as errors. Update `src/translations/qsnote_en_US.ts` when changing UI text.
+Linux builds enable `.clang-tidy` checks by default and treat warnings as errors. Update `src/translations/qsnote_en_US.ts` when changing UI text.
 
 ## Testing Guidelines
 The application currently has no configured automated test suite or coverage threshold. 
