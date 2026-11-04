@@ -1,5 +1,6 @@
 #include "TodoWorkspace.h"
 #include "FlowLayout.h"
+#include "RoundedTreeWidget.h"
 #include "UiStyle.h"
 #include "core/NotebookCategories.h"
 #include <QCheckBox>
@@ -74,7 +75,7 @@ void TodoWorkspace::buildUi() {
     todoStatus_->setAccessibleName(QCoreApplication::translate("MainWindow", "事项状态筛选"));
     todoStatus_->addItems({QCoreApplication::translate("MainWindow", "进行中"), QCoreApplication::translate("MainWindow", "已完成")});
     categoryLayout->addWidget(todoStatus_);
-    tree_ = new QTreeWidget(categoryPanel_);
+    tree_ = new RoundedTreeWidget(categoryPanel_);
     tree_->setObjectName("noteTree");
     tree_->setHeaderHidden(true);
     tree_->setIndentation(14);
@@ -122,7 +123,7 @@ void TodoWorkspace::buildUi() {
     });
     todoHint_ = label(QCoreApplication::translate("MainWindow", "暂无进行中的事项"), this, true);
     listLayout->addWidget(todoHint_);
-    todoList_ = new QTreeWidget(this);
+    todoList_ = new RoundedTreeWidget(this);
     todoList_->setObjectName("todoList");
     todoList_->setHeaderHidden(true);
     todoList_->setRootIsDecorated(false);
