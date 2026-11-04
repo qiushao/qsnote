@@ -31,7 +31,7 @@ test -d qsnote.app/Contents/Frameworks/QtWebEngineCore.framework
 test -f qsnote.app/Contents/Resources/qsnote.icns
 
 for binary in qsnote.app/Contents/MacOS/qsnote qsnote.app/Contents/Frameworks/libVTextEdit*.dylib; do
-    lipo -verify_arch "$arch" "$binary"
+    lipo "$binary" -verify_arch "$arch"
     otool -L "$binary" | awk '
         NR > 1 && $1 ~ /^\// && $1 !~ /^\/(System\/Library|usr\/lib)\// { print; failed = 1 }
         END { exit failed }
