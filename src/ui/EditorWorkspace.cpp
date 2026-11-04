@@ -430,24 +430,18 @@ void EditorWorkspace::buildToolbar() {
     heading->setMenu(headingMenu);
     layout->addWidget(heading);
     syntaxActions_.append(heading);
-    addSeparator();
 
     const QList<Tool> tools = {
             {"bold", QCoreApplication::translate("MainWindow", "加粗"), Type::TypeBold},
             {"mark", QCoreApplication::translate("MainWindow", "高亮"), Type::TypeMark},
-            {},
             {"link", QCoreApplication::translate("MainWindow", "链接"), Type::TypeLink},
             {"image", QCoreApplication::translate("MainWindow", "图片"), Type::TypeImage},
-            {},
             {"list", QCoreApplication::translate("MainWindow", "无序列表"), Type::TypeUnorderedList},
             {"ordered", QCoreApplication::translate("MainWindow", "有序列表"), Type::TypeOrderedList},
             {"task", QCoreApplication::translate("MainWindow", "任务列表"), Type::TypeTodoList, false},
             {"quote", QCoreApplication::translate("MainWindow", "引用"), Type::TypeQuote},
-            {},
             {"code", QCoreApplication::translate("MainWindow", "行内代码"), Type::TypeCode},
             {"codeblock", QCoreApplication::translate("MainWindow", "代码块"), Type::TypeCodeBlock},
-            {"math", QCoreApplication::translate("MainWindow", "行内公式"), Type::TypeMath},
-            {"mathblock", QCoreApplication::translate("MainWindow", "公式块"), Type::TypeMathBlock},
             {"table", QCoreApplication::translate("MainWindow", "表格"), Type::TypeTable}};
     for (const auto &tool: tools) {
         if (tool.icon.isEmpty()) {
@@ -533,6 +527,17 @@ void EditorWorkspace::buildToolbar() {
         });
     }
     more->setMenu(diagramMenu);
+    auto *mathMenu = diagramMenu->addMenu(QCoreApplication::translate("MainWindow", "公式"));
+    mathMenu->addAction(QCoreApplication::translate("MainWindow", "行内公式"), this, [this] {
+        if (!documentNote(currentNoteId())) return;
+        setPreview(false);
+        markdownEditor_->type(Type::TypeMath);
+    });
+    mathMenu->addAction(QCoreApplication::translate("MainWindow", "公式块"), this, [this] {
+        if (!documentNote(currentNoteId())) return;
+        setPreview(false);
+        markdownEditor_->type(Type::TypeMathBlock);
+    });
     layout->addWidget(more);
     syntaxActions_.append(more);
     auto *modes = new QWidget(toolbar_);
