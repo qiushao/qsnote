@@ -20,8 +20,9 @@ struct AccentDef {
     const char *onLight;
 };
 
-// 「四时山水」主题色，取自 Gridea Pro tokens.css
+// 黑白配及取自 Gridea Pro tokens.css 的「四时山水」主题色
 constexpr AccentDef kAccents[] = {
+        {"monochrome", "#0066cc", "#6da6e0", nullptr, nullptr},
         {"green", "#338a66", "#69b793", nullptr, nullptr},
         {"rose", "#b45151", "#e4817e", nullptr, nullptr},
         {"sakura", "#c37292", "#f4a1c1", "#a65778", nullptr},
@@ -37,7 +38,7 @@ const AccentDef &accentDef(const QString &id) {
     for (const auto &def: kAccents) {
         if (id == QLatin1String(def.id)) return def;
     }
-    return kAccents[0];// green
+    return kAccents[1];// green
 }
 
 QColor mix(const QColor &base, const QColor &tint, double t) {
@@ -101,8 +102,8 @@ double tintRatio(const QString &token, bool dark) {
 }
 
 // 当前主题的完整令牌表
-QHash<QString, QString> buildTokens(bool dark) {
-    const auto &accent = accentDef(accentId());
+QHash<QString, QString> buildTokens(bool dark, const QString &id) {
+    const auto &accent = accentDef(id);
     const QColor accentColor(QLatin1String(dark ? accent.dark : accent.light));
 
     QHash<QString, QString> tokens;
@@ -161,10 +162,23 @@ QHash<QString, QString> buildTokens(bool dark) {
         tokens["@tooltipText"] = "#ffffff";
     }
 
-    // 背景、面板、边框等中性色混入少量种子色，整体氛围随主题色一起变化
-    for (auto it = tokens.begin(); it != tokens.end(); ++it) {
-        const double ratio = tintRatio(it.key(), dark);
-        if (ratio > 0) it.value() = mix(QColor(it.value()), accentColor, ratio).name();
+    if (QLatin1String(accent.id) == "monochrome") {
+        // 黑白配使用中性灰阶，蓝色仅用于强调状态。
+        for (auto it = tokens.begin(); it != tokens.end(); ++it) {
+            const int gray = qGray(QColor(it.value()).rgb());
+            it.value() = QColor(gray, gray, gray).name();
+        }
+        if (!dark) {
+            tokens["@window"] = "#ffffff";
+            tokens["@text"] = "#000000";
+            tokens["@textStrong"] = "#000000";
+        }
+    } else {
+        // 背景、面板、边框等中性色混入少量种子色，整体氛围随主题色一起变化
+        for (auto it = tokens.begin(); it != tokens.end(); ++it) {
+            const double ratio = tintRatio(it.key(), dark);
+            if (ratio > 0) it.value() = mix(QColor(it.value()), accentColor, ratio).name();
+        }
     }
 
     tokens["@accent"] = accentColor.name();
@@ -188,11 +202,15 @@ QHash<QString, QString> buildTokens(bool dark) {
 }// namespace
 
 QColor color(const QString &token) {
-    return {buildTokens(isDark()).value("@" + token)};
+    return color(token, accentId(), isDark());
+}
+
+QColor color(const QString &token, const QString &id, bool dark) {
+    return {buildTokens(dark, id).value("@" + token)};
 }
 
 QString process(const QString &stylesheet) {
-    const auto tokens = buildTokens(isDark());
+    const auto tokens = buildTokens(isDark(), accentId());
     auto keys = tokens.keys();
     std::sort(keys.begin(), keys.end(), [](const QString &a, const QString &b) { return a.length() > b.length(); });
     QString result = stylesheet;

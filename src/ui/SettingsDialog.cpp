@@ -57,19 +57,23 @@ QPixmap themeModeIcon(const QString &mode, const QColor &color) {
     return pixmap;
 }
 
-// 主题色色板，选中时叠加白色对勾
-QPixmap accentSwatchIcon(const QColor &color, bool checked) {
+// 背景色大圆内嵌强调色小圆，选中时在小圆内叠加对勾。
+QPixmap accentSwatchIcon(const QColor &background, const QColor &accent, const QColor &border, bool checked) {
     constexpr int size = 56;
-    QPixmap pixmap(size, size);
+    QPixmap pixmap(size * 2, size * 2);
+    pixmap.setDevicePixelRatio(2);
     pixmap.fill(Qt::transparent);
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing);
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(color);
+    painter.setPen(QPen(border, 1));
+    painter.setBrush(background);
     painter.drawEllipse(QRectF(2, 2, size - 4, size - 4));
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(accent);
+    painter.drawEllipse(QRectF(16, 16, 24, 24));
     if (checked) {
-        painter.setPen(QPen(Qt::white, 5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        painter.drawPolyline(QPolygonF{{18, 29}, {25, 36}, {38, 20}});
+        painter.setPen(QPen(background, 2.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.drawPolyline(QPolygonF{{22, 28}, {26, 32}, {34, 23}});
     }
     return pixmap;
 }
@@ -194,6 +198,7 @@ SettingsDialog::SettingsDialog(MarkdownEditor *editor, QWidget *parent) : Overla
     auto *swatchLayout = new FlowLayout(swatches, 0, 12);
     auto *swatchGroup = new QButtonGroup(swatches);
     const QHash<QString, QString> accentNames = {
+            {"monochrome", QCoreApplication::translate("MainWindow", "黑白配")},
             {"green", QCoreApplication::translate("MainWindow", "春山翠")},
             {"rose", QCoreApplication::translate("MainWindow", "霜叶红")},
             {"sakura", QCoreApplication::translate("MainWindow", "晚樱粉")},
@@ -206,6 +211,8 @@ SettingsDialog::SettingsDialog(MarkdownEditor *editor, QWidget *parent) : Overla
     const QString currentAccent = settings.value("Appearance/accent", "sunset").toString();
     for (const auto &id: Theme::accentIds()) {
         const QColor color = Theme::accentColor(id, false);
+        const QColor background = Theme::color("window", id, false);
+        const QColor border = Theme::color("border", id, false);
         auto *item = new QWidget(swatches);
         auto *itemLayout = column(item, 0, 4);
         auto *swatch = new QPushButton(item);
@@ -216,11 +223,11 @@ SettingsDialog::SettingsDialog(MarkdownEditor *editor, QWidget *parent) : Overla
         swatch->setToolTip(accentNames.value(id));
         swatch->setCursor(Qt::PointingHandCursor);
         QIcon icon;
-        icon.addPixmap(accentSwatchIcon(color, false), QIcon::Normal, QIcon::Off);
-        icon.addPixmap(accentSwatchIcon(color, true), QIcon::Normal, QIcon::On);
+        icon.addPixmap(accentSwatchIcon(background, color, border, false), QIcon::Normal, QIcon::Off);
+        icon.addPixmap(accentSwatchIcon(background, color, border, true), QIcon::Normal, QIcon::On);
         swatch->setIcon(icon);
-        swatch->setIconSize({28, 28});
-        swatch->setFixedSize(34, 34);
+        swatch->setIconSize({56, 56});
+        swatch->setFixedSize(68, 68);
         auto *name = label(accentNames.value(id), item);
         name->setAlignment(Qt::AlignCenter);
         if (id == currentAccent) name->setStyleSheet("color: " + color.name());

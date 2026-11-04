@@ -1122,6 +1122,10 @@
             <translation>Accent color</translation>
         </message>
         <message>
+            <source>黑白配</source>
+            <translation>Black &amp; White</translation>
+        </message>
+        <message>
             <source>春山翠</source>
             <translation>Spring Green</translation>
         </message>

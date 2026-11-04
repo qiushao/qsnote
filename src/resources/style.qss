@@ -112,7 +112,7 @@ QWidget[configCard="true"] { background: @surface; border: 1px solid @cardBorder
 QToolButton[modeCard="true"] { border: 1px solid @inputBorder; border-radius: 8px; padding: 14px 8px; background: @surface; color: @text; }
 QToolButton[modeCard="true"]:hover { background: @hover; border-color: @hoverBorder; }
 QToolButton[modeCard="true"]:checked { border: 2px solid @accent; color: @accent; }
-QPushButton#accentSwatch { border: 2px solid transparent; background: transparent; padding: 0; border-radius: 17px; }
+QPushButton#accentSwatch { border: 2px solid transparent; background: transparent; padding: 0; border-radius: 34px; }
 QPushButton#accentSwatch:hover { border-color: @hoverBorder; }
 QWidget[configCard="true"] QLabel[heading="true"] { font-size: 16px; color: @text; margin-top: 0; padding-bottom: 10px; }
 QDialog#siteConfigDialog QWidget[configCard="true"] { border: none; border-radius: 0; }
