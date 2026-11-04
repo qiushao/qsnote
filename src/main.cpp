@@ -1,10 +1,10 @@
 #include "core/ApplicationLanguage.h"
 #include "ui/MainWindow.h"
-#include <QApplication>
 #include <QCommandLineParser>
 #include <QFileOpenEvent>
 #include <QIcon>
 #include <QPointer>
+#include <singleapplication.h>
 
 #ifdef Q_OS_WIN
 #include <QDir>
@@ -14,9 +14,9 @@
 #endif
 
 namespace {
-class Application : public QApplication {
+class Application : public SingleApplication {
 public:
-    using QApplication::QApplication;
+    using SingleApplication::SingleApplication;
 
     void setMainWindow(MainWindow *window) {
         window_ = window;
@@ -24,18 +24,25 @@ public:
         pendingFiles_.clear();
     }
 
+    void openFiles(const QStringList &paths) {
+        if (!window_) {
+            pendingFiles_.append(paths);
+            return;
+        }
+        for (const auto &path: paths) window_->openFile(path);
+        window_->raise();
+        window_->activateWindow();
+    }
+
 protected:
     bool event(QEvent *event) override {
         if (event->type() == QEvent::FileOpen) {
             const auto *openEvent = dynamic_cast<QFileOpenEvent *>(event);
             if (!openEvent->url().isLocalFile()) return false;
-            const auto path = openEvent->url().toLocalFile();
-            if (window_) window_->openFile(path);
-            else
-                pendingFiles_.append(path);
+            openFiles({openEvent->url().toLocalFile()});
             return true;
         }
-        return QApplication::event(event);
+        return SingleApplication::event(event);
     }
 
 private:
@@ -70,10 +77,10 @@ void registerMarkdownFiles() {
 
 int main(int argc, char *argv[]) {
     QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
-    Application app(argc, argv);
     QCoreApplication::setApplicationName("qsnote");
-    QCoreApplication::setApplicationVersion(APP_VERSION);
     QCoreApplication::setOrganizationName("qiushao");
+    Application app(argc, argv, true, Application::Mode::User | Application::Mode::SecondaryNotification);
+    QCoreApplication::setApplicationVersion(APP_VERSION);
     QGuiApplication::setDesktopFileName("qsnote");
     QApplication::setWindowIcon(QIcon(":/icons/qsnote.png"));
 
@@ -87,6 +94,16 @@ int main(int argc, char *argv[]) {
 #ifdef Q_OS_WIN
     registerMarkdownFiles();
 #endif
+
+    if (app.isSecondary()) {
+        app.sendMessage(parser.positionalArguments().join(QLatin1Char('\n')).toUtf8());
+        return 0;
+    }
+
+    QObject::connect(&app, &SingleApplication::receivedMessage,
+                     [&app](quint32, const QByteArray &message) {
+                         app.openFiles(QString::fromUtf8(message).split(QLatin1Char('\n'), Qt::SkipEmptyParts));
+                     });
 
     ApplicationLanguage language;
 
