@@ -56,7 +56,7 @@ QComboBox::down-arrow, QDateEdit::down-arrow { image: url(:/icons/caret.svg); wi
 QComboBox QAbstractItemView { background: @surface; border: 1px solid @inputBorder; selection-background-color: @accentSoft; selection-color: @accent; padding: 5px; outline: none; }
 QWidget#notebookPicker { background: @panel; border: 1px solid transparent; border-radius: 8px; }
 QComboBox#notebooks { background: transparent; border: none; font-weight: 600; }
-QComboBox#groupBy, QComboBox#todoStatus { background: transparent; border-color: transparent; color: @textSecondary; padding-top: 4px; padding-bottom: 4px; }
+QComboBox#groupBy, QComboBox#todoStatus { background: transparent; border-color: transparent; color: @textSecondary; padding-top: 6px; padding-bottom: 6px; }
 QComboBox#groupBy:hover, QComboBox#todoStatus:hover { background: @hoverSoft; }
 QComboBox#groupBy:focus, QComboBox#todoStatus:focus, QComboBox#notebooks:focus { border: 1px solid @accent; }
 QTreeWidget { border: none; background: transparent; outline: none; font-size: 14px; }
