@@ -310,7 +310,7 @@ EditorWorkspace::EditorWorkspace(NotebookStore &store, std::function<bool()> sav
     outline_ = new RoundedTreeWidget(outlinePanel_);
     outline_->setObjectName("outline");
     outline_->setHeaderHidden(true);
-    outline_->setRootIsDecorated(false);
+    outline_->setRootIsDecorated(true);
     outline_->setIndentation(14);
     outline_->setContentsMargins(10, 4, 10, 20);
     outline_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -318,11 +318,11 @@ EditorWorkspace::EditorWorkspace(NotebookStore &store, std::function<bool()> sav
     rightLayout->addWidget(outline_, 1);
     connect(outline_, &QTreeWidget::itemCollapsed, this, [this](QTreeWidgetItem *item) {
         const auto key = item->data(0, Qt::UserRole + 1).toString();
-        if (!key.isEmpty()) collapsedSourceSymbols_[currentNoteId()].insert(key);
+        if (!key.isEmpty()) collapsedOutlineItems_[currentNoteId()].insert(key);
     });
     connect(outline_, &QTreeWidget::itemExpanded, this, [this](QTreeWidgetItem *item) {
         const auto key = item->data(0, Qt::UserRole + 1).toString();
-        if (!key.isEmpty()) collapsedSourceSymbols_[currentNoteId()].remove(key);
+        if (!key.isEmpty()) collapsedOutlineItems_[currentNoteId()].remove(key);
     });
     connect(outline_, &QTreeWidget::itemClicked, this, &EditorWorkspace::revealOutlineItem);
     connect(outline_, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *current) {
@@ -877,7 +877,7 @@ void EditorWorkspace::activateEditor(const QString &id) {
 }
 
 void EditorWorkspace::removeEditor(const QString &id) {
-    collapsedSourceSymbols_.remove(id);
+    collapsedOutlineItems_.remove(id);
     if (imageId_ == id) {
         imageId_.clear();
         imagePixmap_ = {};
@@ -970,7 +970,6 @@ void EditorWorkspace::refreshOutline() {
     if (suspended_) return;
     outline_->clear();
     const auto *note = documentNote(currentNoteId());
-    outline_->setRootIsDecorated(note && note->kind == Note::Kind::Text);
     if (note && note->kind == Note::Kind::Text) {
         const bool matches = note->id == sourceOutlineId_ && note->path == sourceOutlinePath_ && note->content == sourceOutlineContent_;
         if (matches && sourceOutlineWatcher_->isFinished()) {
@@ -992,17 +991,19 @@ void EditorWorkspace::refreshOutline() {
     outlineHint_->setText(note ? QCoreApplication::translate("MainWindow", "本文暂无标题") : QCoreApplication::translate("MainWindow", "打开一篇笔记后自动生成大纲"));
     if (note && note->kind == Note::Kind::Markdown && editorSessions_.contains(note->id)) {
         QList<QPair<int, QTreeWidgetItem *>> parents;
+        QHash<QString, int> headingOccurrences;
         for (const auto &heading: editorSessions_[note->id].headings) {
             while (!parents.isEmpty() && parents.last().first >= heading.level) parents.removeLast();
             auto *item = new QTreeWidgetItem;
             item->setText(0, heading.title);
             item->setData(0, Qt::UserRole, heading.line);
+            const auto key = QString::number(heading.level) + ':' + heading.title;
+            item->setData(0, Qt::UserRole + 1, "heading:" + key + ':' + QString::number(headingOccurrences[key]++));
             if (parents.isEmpty()) outline_->addTopLevelItem(item);
             else
                 parents.last().second->addChild(item);
             parents.append({heading.level, item});
         }
-        outline_->expandAll();
     }
     applyOutlineFilter();
 }
@@ -1017,9 +1018,7 @@ void EditorWorkspace::applyOutlineFilter() {
         }
         return matched == query.size();
     };
-    const auto *note = documentNote(currentNoteId());
-    const bool source = note && note->kind == Note::Kind::Text;
-    const auto collapsed = collapsedSourceSymbols_.value(currentNoteId());
+    const auto collapsed = collapsedOutlineItems_.value(currentNoteId());
     const QSignalBlocker blocker(outline_);
     std::function<bool(QTreeWidgetItem *)> filterItem = [&](QTreeWidgetItem *item) {
         bool childVisible = false;
@@ -1029,7 +1028,7 @@ void EditorWorkspace::applyOutlineFilter() {
         }
         const bool visible = matches(item->text(0)) || childVisible;
         item->setHidden(!visible);
-        item->setExpanded(query.isEmpty() ? !source || !collapsed.contains(item->data(0, Qt::UserRole + 1).toString()) : childVisible);
+        item->setExpanded(query.isEmpty() ? !collapsed.contains(item->data(0, Qt::UserRole + 1).toString()) : childVisible);
         return visible;
     };
     bool anyVisible = false;
@@ -1064,7 +1063,9 @@ void EditorWorkspace::syncOutlineToLine(int line) {
         }
     }
     while (target && target->isHidden()) target = target->parent();
-    while (target && target->parent() && !target->parent()->isExpanded()) target = target->parent();
+    for (auto *parent = target ? target->parent() : nullptr; parent; parent = parent->parent()) {
+        if (parent->isHidden() || !parent->isExpanded()) target = parent;
+    }
     if (target == outline_->currentItem()) return;
     const QScopedValueRollback<bool> guard(syncingOutline_, true);
     outline_->setCurrentItem(target);
@@ -1136,7 +1137,7 @@ void EditorWorkspace::showSourceOutline(const SourceOutline::Result &result) {
         else
             items[parent]->addChild(items[index]);
     }
-    const auto collapsed = collapsedSourceSymbols_.value(currentNoteId());
+    const auto collapsed = collapsedOutlineItems_.value(currentNoteId());
     for (auto *item: items) item->setExpanded(!collapsed.contains(item->data(0, Qt::UserRole + 1).toString()));
     outlineHint_->setText(result.supported ? tr("暂无可识别的源码符号") : tr("此文件类型暂不支持源码大纲"));
     applyOutlineFilter();

@@ -113,7 +113,7 @@ private:
     QStackedWidget *editors_ = nullptr;
     QHash<QString, EditorSession> editorSessions_;
     QHash<QString, QPlainTextEdit *> textEditors_;
-    QHash<QString, QSet<QString>> collapsedSourceSymbols_;
+    QHash<QString, QSet<QString>> collapsedOutlineItems_;
     QScrollArea *imageView_ = nullptr;
     QWidget *image_ = nullptr;
     QPixmap imagePixmap_;
