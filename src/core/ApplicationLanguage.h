@@ -12,6 +12,7 @@ public:
 
 private:
     QTranslator application_;
+    QTranslator webEngine_;
     QTranslator editor_;
     QTranslator qt_;
 };

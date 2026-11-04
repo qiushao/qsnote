@@ -29,6 +29,9 @@ ApplicationLanguage::ApplicationLanguage() {
         install(application_, ":/translations/qsnote_en_US.qm");
     } else {
         install(qt_, ":/translations/qtbase_zh_CN.qm");
+        // Qt WebEngine localizes its own strings (including the standard context menu
+        // of the preview) through this translator; it is not part of qtbase.
+        install(webEngine_, ":/translations/qtwebengine_zh_CN.qm");
         install(editor_, ":/translations/vtextedit_zh_CN.qm");
     }
 }
