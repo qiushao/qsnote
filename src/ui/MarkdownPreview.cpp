@@ -57,6 +57,28 @@ protected:
         return !mainFrame || url.adjusted(QUrl::RemoveFragment) == QUrl("qrc:/web/preview.html");
     }
 };
+
+// The preview only renders a generated page, so Chromium's "Save page" and "View page
+// source" entries are meaningless here. Their texts are provided by the Qt WebEngine
+// translators rather than by this class, so translate the same source strings to find
+// them in the current UI language.
+void removePageItems(QMenu *menu) {
+    const QStringList unwanted{
+            QCoreApplication::translate("RenderViewContextMenuQt", "Save page"),
+            QCoreApplication::translate("RenderViewContextMenuQt", "View page source")};
+    for (QAction *action: menu->actions()) {
+        if (!action->isSeparator() && unwanted.contains(action->text())) menu->removeAction(action);
+    }
+    // Removing entries leaves the separators that grouped them behind.
+    QAction *kept = nullptr;
+    for (QAction *action: menu->actions()) {
+        if (action->isSeparator() && (!kept || kept->isSeparator())) menu->removeAction(action);
+        else
+            kept = action;
+    }
+    const auto remaining = menu->actions();
+    if (!remaining.isEmpty() && remaining.constLast()->isSeparator()) menu->removeAction(remaining.constLast());
+}
 }// namespace
 
 QString PreviewBridge::localImage(const QString &url) { // NOLINT(readability-convert-member-functions-to-static): WebChannel slot.
@@ -384,6 +406,7 @@ void MarkdownPreview::contextMenuEvent(QContextMenuEvent *event) {
 
 void MarkdownPreview::showContextMenu(const QPoint &globalPos, const QString &diagramId) {
     QScopedPointer<QMenu> menu(createStandardContextMenu());
+    removePageItems(menu.data());
     if (!diagramId.isEmpty()) {
         QAction *first = menu->actions().isEmpty() ? nullptr : menu->actions().constFirst();
         auto *copy = new QAction(tr("复制图片"), menu.data());
