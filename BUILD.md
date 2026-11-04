@@ -51,7 +51,7 @@ export Qt6_DIR="$(brew --prefix qt)"
 ./scripts/macos-build.sh 1.2.3
 ```
 
-脚本使用独立的 `build-macos/`，生成应用图标、安装到临时目录，并通过 `macdeployqt` 收集 Qt、WebEngine 和 VTextEdit 动态库。许可证随 `.app` 保存，启动验证通过后输出 `build-macos/qsnote-macos-<架构>.dmg`。Intel 发布文件名固定为 `qsnote-macos-x86_64.dmg`，供现有 Homebrew Cask 下载；应用内版本来自脚本参数。
+脚本使用独立的 `build-macos/`，生成应用图标、安装到临时目录，并通过 `macdeployqt` 收集 Qt、WebEngine 和 VTextEdit 动态库。许可证随 `.app` 保存，架构及动态库依赖检查通过后输出 `build-macos/qsnote-macos-<架构>.dmg`。在 Intel / Apple Silicon Mac 上分别原生构建 x86_64 / arm64，发布文件名为 `qsnote-macos-x86_64.dmg` / `qsnote-macos-arm64.dmg`，供 Homebrew Cask 按架构下载；应用内版本来自脚本参数。
 
 ## Windows
 
@@ -93,22 +93,22 @@ sudo apt install ./qsnote_1.0.0_amd64.deb
 
 文件名替换为实际下载的 DEB。Linux 构建产物依赖对应发行版的 Qt 包。
 
-macOS：仓库的 `Casks/qsnote.rb` 安装最新 Release 的 Intel DMG，同时由 Homebrew 安装 `plantuml` 和 `graphviz`；Java 由 `plantuml` 的依赖带入：
+macOS：仓库的 `Casks/qsnote.rb` 按本机架构安装最新 Release 的 Intel 或 Apple Silicon DMG，同时由 Homebrew 安装 `plantuml` 和 `graphviz`；Java 由 `plantuml` 的依赖带入：
 
 ```bash
 brew tap qiushao/qsnote https://github.com/qiushao/qsnote.git
 brew install --cask qiushao/qsnote/qsnote
 ```
 
-上述命令需在 Cask 合入远端、且发布包含 `qsnote-macos-x86_64.dmg` 的 Release 后使用。目前 Cask 限 Intel、macOS 12+，与发布构建对应；它使用 `version :latest`，更新时运行 `brew upgrade --cask --greedy qiushao/qsnote/qsnote`。直接拖入 DMG 不会触发 Homebrew 安装依赖，此时可手动执行 `brew install plantuml graphviz`。应用从 Finder 启动时也会查找 `/opt/homebrew/bin` 和 `/usr/local/bin`。
+上述命令需在 Cask 合入远端、且发布包含对应架构 DMG 的 Release 后使用。Cask 支持 Intel 和 Apple Silicon、macOS 12+，与发布构建对应；它使用 `version :latest`，更新时运行 `brew upgrade --cask --greedy qiushao/qsnote/qsnote`。直接拖入 DMG 不会触发 Homebrew 安装依赖，此时可手动执行 `brew install plantuml graphviz`。应用从 Finder 启动时也会查找 `/opt/homebrew/bin` 和 `/usr/local/bin`。
 
 ## GitHub Actions
 
-`.github/workflows/` 下提供 Linux、macOS 和 Windows MSVC 2022 三套独立流程，参考 `qshell` 的标签发布方式，并共用上述本地打包脚本。Linux 使用 Ubuntu 24.04 系统 Qt 包；macOS 使用 `macos-15-intel`，Windows 使用 `windows-2022`，两者安装 Qt 6.4.2 及 WebEngine、WebChannel、Positioning、Qt 5 Compatibility 组件。
+`.github/workflows/` 下提供 Linux、macOS 和 Windows MSVC 2022 三套独立流程，参考 `qshell` 的标签发布方式，并共用上述本地打包脚本。Linux 使用 Ubuntu 24.04 系统 Qt 包；macOS 使用构建矩阵，Intel 使用 `macos-15-intel`，ARM64 使用 `macos-15`，Windows 使用 `windows-2022`，两者安装 Qt 6.4.2 及 WebEngine、WebChannel、Positioning、Qt 5 Compatibility 组件。
 
 - 推送到 `master` / `main`、向这些分支提交 PR，或手动运行：构建、打包并上传 Actions artifact。仅修改 `docs/` 或根目录 Markdown 文件时跳过自动构建。
 - 推送 `V*` / `v*` 标签（例如 `V1.2.3`）：去掉标签前缀作为应用版本，并将安装包上传到对应 GitHub Release。
-- Linux 产物为 `.deb`，CPack 自动检测 Qt 共享库依赖，并显式声明图表引擎依赖；macOS 为包含 Qt 运行时的 Intel `.dmg`，通过 Cask 安装图表引擎；Windows 为包含 Qt、PlantUML 和 Graphviz 的 x64 `.zip`，Java 使用系统安装。
+- Linux 产物为 `.deb`，CPack 自动检测 Qt 共享库依赖，并显式声明图表引擎依赖；macOS 为包含 Qt 运行时的 Intel 和 ARM64 两份 `.dmg`，通过 Cask 安装图表引擎；Windows 为包含 Qt、PlantUML 和 Graphviz 的 x64 `.zip`，Java 使用系统安装。
 - 构建任务使用只读权限，只有版本标签触发的发布任务具有 `contents: write` 权限。
 - CI 保留安装包文件、依赖声明及 Homebrew Cask 检查，不再配置、编译或运行已删除的测试用例；构建、打包或检查失败都会阻止该平台发布。
 

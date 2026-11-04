@@ -19,7 +19,16 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-15-intel
+    name: Build (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            arch: x86_64
+          - runner: macos-15
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
 
@@ -47,8 +56,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: qsnote-macos
-          path: build-macos/*.dmg
+          name: qsnote-macos-${{ matrix.arch }}
+          path: build-macos/qsnote-macos-${{ matrix.arch }}.dmg
           if-no-files-found: error
 
   release:
@@ -60,7 +69,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: qsnote-macos
+          pattern: qsnote-macos-*
+          merge-multiple: true
           path: packages
       - uses: softprops/action-gh-release@v3
         with:

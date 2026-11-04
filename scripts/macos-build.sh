@@ -6,6 +6,7 @@ projectDir="$(cd -- "${scriptDir}/.." && pwd)"
 buildDir="${projectDir}/build-macos"
 packageDir="${buildDir}/package"
 version="${1:-1.0.0}"
+arch="$(uname -m)"
 
 if [[ -n "${Qt6_DIR:-}" ]]; then
     export PATH="${Qt6_DIR}/bin:${PATH}"
@@ -13,7 +14,7 @@ fi
 command -v macdeployqt >/dev/null
 
 cmake -S "$projectDir" -B "$buildDir" -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DAPP_VERSION="$version"
+    -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DCMAKE_OSX_ARCHITECTURES="$arch" -DAPP_VERSION="$version"
 cmake --build "$buildDir" --parallel --target qsnote
 
 # Always deploy into a fresh install tree; keep the build bundle reusable.
@@ -30,10 +31,11 @@ test -d qsnote.app/Contents/Frameworks/QtWebEngineCore.framework
 test -f qsnote.app/Contents/Resources/qsnote.icns
 
 for binary in qsnote.app/Contents/MacOS/qsnote qsnote.app/Contents/Frameworks/libVTextEdit*.dylib; do
+    lipo -verify_arch "$arch" "$binary"
     otool -L "$binary" | awk '
         NR > 1 && $1 ~ /^\// && $1 !~ /^\/(System\/Library|usr\/lib)\// { print; failed = 1 }
         END { exit failed }
     '
 done
 
-mv qsnote.dmg "${buildDir}/qsnote-macos-$(uname -m).dmg"
+mv qsnote.dmg "${buildDir}/qsnote-macos-${arch}.dmg"
