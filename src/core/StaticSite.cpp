@@ -51,7 +51,15 @@ bool StaticSite::prepare(Notebook &book, QString *error) {
     for (auto it = pages.cbegin(); it != pages.cend(); ++it) {
         const auto path = book.path + "/source/" + it.key() + "/index.md";
         if (QFileInfo::exists(path)) continue;
-        const auto source = "---\n" + QJsonDocument(QJsonObject{{"title", it.value()}, {"layout", it.key()}, {"comments", false}}).toJson() + "---\n";
+        auto source = "---\n" + QJsonDocument(QJsonObject{{"title", it.value()}, {"layout", it.key()}, {"comments", false}}).toJson() + "---\n";
+        if (it.key() == "about") {
+            QFile file(":/site/about.md");
+            if (!file.open(QIODevice::ReadOnly)) {
+                *error = file.fileName() + ": " + file.errorString();
+                return false;
+            }
+            source = file.readAll();
+        }
         if (!AtomicFile::write(path, source, error)) return false;
     }
     return true;

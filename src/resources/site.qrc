@@ -1,5 +1,6 @@
 <RCC>
   <qresource prefix="/">
+    <file>site/about.md</file>
     <file>site/pure/LICENSE</file>
     <file>site/pure/assets/css/style.css</file>
     <file>site/pure/assets/css/style.min.css</file>

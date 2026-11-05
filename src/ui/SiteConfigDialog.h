@@ -9,6 +9,7 @@ public:
     // 编辑笔记本的副本，点击“保存”后才写回笔记本。
     explicit SiteConfigDialog(Notebook &book, QWidget *parent);
     void accept() override;
+    bool editAboutRequested() const { return editAboutRequested_; }
 
 signals:
     void categoriesChanged();
@@ -18,4 +19,5 @@ private:
     Notebook draft_;
     QString pendingAvatar_;
     bool categoriesDirty_ = false;
+    bool editAboutRequested_ = false;
 };

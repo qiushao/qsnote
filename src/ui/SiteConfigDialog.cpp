@@ -124,6 +124,13 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent)
         pendingAvatar_ = selected;
     });
     field("domain", QCoreApplication::translate("MainWindow", "域名"));
+    auto *editAbout = button(QCoreApplication::translate("MainWindow", "编辑关于页"), "editSiteAbout", card);
+    form->addWidget(editAbout, 0, Qt::AlignLeft);
+    form->addWidget(label(QCoreApplication::translate("MainWindow", "保存当前配置并关闭此窗口，在编辑器中打开关于页。"), card, true));
+    connect(editAbout, &QPushButton::clicked, &dialog, [this] {
+        accept();
+        editAboutRequested_ = result() == QDialog::Accepted;
+    });
     section("siteCommentsCard", QCoreApplication::translate("MainWindow", "评论"));
     auto *comments = field("commentPlatform", QCoreApplication::translate("MainWindow", "评论平台"), {QCoreApplication::translate("MainWindow", "关闭"), "Valine", "Gitalk", "Disqus"}, {"none", "valine", "gitalk", "disqus"})->findChild<QComboBox *>();
     auto commentField = [&](const QString &key, const QString &caption, const QString &platform) {

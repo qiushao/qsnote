@@ -1523,6 +1523,14 @@ It will be removed from the list. Files on disk will be kept, and you can add it
             <translation>Domain</translation>
         </message>
         <message>
+            <source>编辑关于页</source>
+            <translation>Edit About page</translation>
+        </message>
+        <message>
+            <source>保存当前配置并关闭此窗口，在编辑器中打开关于页。</source>
+            <translation>Save the current settings and close this window to open the About page in the editor.</translation>
+        </message>
+        <message>
             <location line="+1" />
             <source>评论</source>
             <translation>Comments</translation>

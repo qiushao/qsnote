@@ -1434,7 +1434,8 @@ void MainWindow::showSiteConfig() {
     if (!book || book->type != "site") return;
     SiteConfigDialog dialog(*book, this);
     connect(&dialog, &SiteConfigDialog::categoriesChanged, this, &MainWindow::refreshTree);
-    if (dialog.exec() == QDialog::Accepted) save();
+    if (dialog.exec() != QDialog::Accepted || !save()) return;
+    if (dialog.editAboutRequested()) editorWorkspace_->openExternalFile(book->path + "/source/about/index.md");
 }
 
 bool MainWindow::generateSite(const Notebook &book) {
