@@ -4,8 +4,9 @@
 
 namespace {
 QStringList collect(const Notebook &book, const QString &fallback) {
-    QStringList names{fallback};
+    QStringList names;
     for (const auto &value: book.config["categories"].toArray()) names << value.toString();
+    if (!names.contains(fallback)) names.prepend(fallback);
     for (const auto &note: book.notes) names << note.metadata["category"].toString();
     names.removeAll({});
     names.removeDuplicates();
@@ -52,6 +53,8 @@ QStringList NotebookCategories::site(const Notebook &book) {
 
 QStringList NotebookCategories::todo(const Notebook &book) {
     auto names = collect(book, QStringLiteral("默认"));
+    names.removeAll(QStringLiteral("默认"));
+    names.prepend(QStringLiteral("默认"));
     names.removeAll(QStringLiteral("全部"));
     return names;
 }

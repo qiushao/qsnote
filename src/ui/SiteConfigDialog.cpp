@@ -188,16 +188,23 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent)
     auto *addCategory = button(QCoreApplication::translate("MainWindow", "新建"), "addSiteCategory", categoryActions);
     auto *renameCategory = button(QCoreApplication::translate("MainWindow", "重命名"), "renameSiteCategory", categoryActions);
     auto *deleteCategory = button(QCoreApplication::translate("MainWindow", "删除"), "deleteSiteCategory", categoryActions);
+    auto *moveCategoryUp = button(QCoreApplication::translate("MainWindow", "上移"), "moveSiteCategoryUp", categoryActions);
+    auto *moveCategoryDown = button(QCoreApplication::translate("MainWindow", "下移"), "moveSiteCategoryDown", categoryActions);
     categoryLayout->addWidget(addCategory);
     categoryLayout->addWidget(renameCategory);
     categoryLayout->addWidget(deleteCategory);
+    categoryLayout->addWidget(moveCategoryUp);
+    categoryLayout->addWidget(moveCategoryDown);
     categoryLayout->addStretch();
     form->addWidget(categoryActions);
-    form->addWidget(label(QCoreApplication::translate("MainWindow", "删除分类后，文章将移入 default；默认分类不可重命名或删除。"), card, true));
-    connect(categories, &QListWidget::currentTextChanged, &dialog, [renameCategory, deleteCategory](const QString &name) {
+    form->addWidget(label(QCoreApplication::translate("MainWindow", "使用上移、下移调整分类顺序，保存后生效。删除分类后，文章将移入 default；默认分类不可重命名或删除。"), card, true));
+    connect(categories, &QListWidget::currentRowChanged, &dialog, [categories, renameCategory, deleteCategory, moveCategoryUp, moveCategoryDown](int index) {
+        const auto name = index < 0 ? QString() : categories->item(index)->text();
         const bool editable = !name.isEmpty() && name != "default";
         renameCategory->setEnabled(editable);
         deleteCategory->setEnabled(editable);
+        moveCategoryUp->setEnabled(index > 0);
+        moveCategoryDown->setEnabled(index >= 0 && index < categories->count() - 1);
     });
     categories->setCurrentRow(0);
     const auto updateCategories = [this, book, categories](const QString &selected) {
@@ -206,6 +213,17 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent)
         categories->setCurrentRow(static_cast<int>(NotebookCategories::site(*book).indexOf(selected)));
         categoriesDirty_ = true;
     };
+    const auto moveCategory = [book, categories, updateCategories](int offset) {
+        const auto index = categories->currentRow();
+        auto names = NotebookCategories::site(*book);
+        if (index < 0 || index + offset < 0 || index + offset >= names.size()) return;
+        const auto selected = names.at(index);
+        names.move(index, index + offset);
+        book->config["categories"] = QJsonArray::fromStringList(names);
+        updateCategories(selected);
+    };
+    connect(moveCategoryUp, &QPushButton::clicked, &dialog, [moveCategory] { moveCategory(-1); });
+    connect(moveCategoryDown, &QPushButton::clicked, &dialog, [moveCategory] { moveCategory(1); });
     const auto editCategory = [book, categories, updateCategories, &dialog](bool rename) {
         const auto previous = rename ? categories->currentItem()->text() : QString();
         bool accepted = false;

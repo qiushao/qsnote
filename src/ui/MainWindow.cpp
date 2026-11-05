@@ -653,6 +653,15 @@ void MainWindow::refreshTree() {
     const auto titles = NotebookStore::chapterTitles(*book);
     QFileIconProvider fileIcons;
     int matches = 0;
+    if (book->type == "site" && query.isEmpty() && groupBy_->currentIndex() == 0) {
+        for (const auto &category: NotebookCategories::site(*book)) {
+            auto *item = new QTreeWidgetItem(tree_, {category + QStringLiteral("（0）")});
+            item->setIcon(0, icon("folder"));
+            item->setData(0, Qt::UserRole, "group:" + category);
+            item->setData(0, Qt::UserRole + 4, category);
+            nodes.insert(category, item);
+        }
+    }
     for (const auto &note: book->notes) {
         if (book->type == "normal" && !QFileInfo::exists(QDir(book->path).filePath(note.path)) && !QFileInfo(QDir(book->path).filePath(note.path)).isSymLink()) continue;
         if (!query.isEmpty() && (note.folder || (!note.title.contains(query, Qt::CaseInsensitive) && !note.content.contains(query, Qt::CaseInsensitive)))) continue;
@@ -706,15 +715,6 @@ void MainWindow::refreshTree() {
             if (note.id == editorWorkspace_->currentNoteId()) tree_->setCurrentItem(item);
         }
         ++matches;
-    }
-    if (book->type == "site" && query.isEmpty() && groupBy_->currentIndex() == 0) {
-        for (const auto &category: NotebookCategories::site(*book)) {
-            if (nodes.contains(category)) continue;
-            auto *item = new QTreeWidgetItem(tree_, {category + QStringLiteral("（0）")});
-            item->setIcon(0, icon("folder"));
-            item->setData(0, Qt::UserRole, "group:" + category);
-            item->setData(0, Qt::UserRole + 4, category);
-        }
     }
     if (book->type != "site" && query.isEmpty()) {
         for (const auto &note: book->notes) {

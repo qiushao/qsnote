@@ -1,4 +1,5 @@
 #include "SiteThemeRenderer.h"
+#include "NotebookCategories.h"
 #include "StaticSite.h"
 #include <QCryptographicHash>
 #include <QDate>
@@ -154,30 +155,41 @@ QString SiteThemeRenderer::collection(const QList<const SitePage *> &posts) cons
     return result;
 }
 
+QStringList SiteThemeRenderer::categoryNames() const {
+    QStringList names;
+    for (const auto &name: NotebookCategories::site(book_)) {
+        if (index_.categories.contains(name)) names.append(name);
+    }
+    names.append(index_.categories.keys());
+    names.removeDuplicates();
+    return names;
+}
+
 QString SiteThemeRenderer::taxonomy(const QString &kind, const QString &selected, const QList<const SitePage *> &subset) const {
     const auto &groups = kind == "categories" ? index_.categories : index_.tags;
+    const auto names = kind == "categories" ? categoryNames() : groups.keys();
     const auto title = kind == "categories" ? "分类" : "标签";
     if (yiliaTheme() || threeTheme() || customTheme()) {
         QString terms;
-        for (auto it = groups.cbegin(); it != groups.cend(); ++it)
-            terms += "<li>" + link(kind + "/" + it.key() + "/", it.key()) + " (" + QString::number(it.value().size()) + ")</li>";
+        for (const auto &name: names)
+            terms += "<li>" + link(kind + "/" + name + "/", name) + " (" + QString::number(groups.value(name).size()) + ")</li>";
         return themeTemplate("page", {{"title", title}, {"body", "<ul>" + terms + "</ul>"}});
     }
     QString body, nav = "<li>" + link(kind + "/", "All") + "</li>";
-    for (auto it = groups.cbegin(); it != groups.cend(); ++it) {
-        const auto url = kind + "/" + it.key() + "/";
-        nav += "<li>" + link(url, it.key()) + "</li>";
-        if (!selected.isEmpty() && it.key() != selected) continue;
-        const auto &posts = selected.isEmpty() ? it.value() : subset;
+    for (const auto &name: names) {
+        const auto url = kind + "/" + name + "/";
+        nav += "<li>" + link(url, name) + "</li>";
+        if (!selected.isEmpty() && name != selected) continue;
+        const auto &posts = selected.isEmpty() ? groups.value(name) : subset;
         if (nextTheme()) {
-            body += kind == "categories" ? R"(<li class="category-list-item">)" + link(url, it.key(), "category-list-link") +
+            body += kind == "categories" ? R"(<li class="category-list-item">)" + link(url, name, "category-list-link") +
                                                    R"(<span class="category-list-count">)" + QString::number(posts.size()) + "</span></li>"
-                                         : link(url, it.key()) + " ";
+                                         : link(url, name) + " ";
         } else if (kind == "categories") {
-            const auto id = "collapse" + escaped(it.key());
-            body += R"(<div class="panel panel-default b-no"><div class="panel-heading" role="tab"><h3 class="panel-title"><a data-toggle="collapse" href="#)" + id + R"(" aria-expanded="true"><i class="icon icon-folder text-active"></i><i class="icon icon-folder-open text"></i> )" + escaped(it.key()) + "</a> <small class=\"text-muted\">(Total " + QString::number(posts.size()) + " articles)</small></h3></div><div id=\"" + id + R"(" class="panel-collapse collapse in" role="tabpanel"><div class="panel-body"><div class="collection">)" + collection(posts) + "</div></div></div></div>";
+            const auto id = "collapse" + escaped(name);
+            body += R"(<div class="panel panel-default b-no"><div class="panel-heading" role="tab"><h3 class="panel-title"><a data-toggle="collapse" href="#)" + id + R"(" aria-expanded="true"><i class="icon icon-folder text-active"></i><i class="icon icon-folder-open text"></i> )" + escaped(name) + "</a> <small class=\"text-muted\">(Total " + QString::number(posts.size()) + " articles)</small></h3></div><div id=\"" + id + R"(" class="panel-collapse collapse in" role="tabpanel"><div class="panel-body"><div class="collection">)" + collection(posts) + "</div></div></div></div>";
         } else {
-            body += "<h3 class=\"panel-title mb-1x\">" + link(url, "# " + it.key()) + " <small class=\"text-muted\">(Total " + QString::number(posts.size()) + " articles)</small></h3><div class=\"row\">";
+            body += "<h3 class=\"panel-title mb-1x\">" + link(url, "# " + name) + " <small class=\"text-muted\">(Total " + QString::number(posts.size()) + " articles)</small></h3><div class=\"row\">";
             for (const auto *post: posts) body += R"(<div class="col-md-6"><article class="panel panel-default hover-shadow hover-grow" itemscope itemtype="http://schema.org/BlogPosting"><div class="panel-body"><div class="article-meta"><time>)" + escaped(post->date.left(10)) + R"(</time></div><h3 class="article-title" itemprop="name">)" + link(post->route, post->title, "article-link") + "</h3></div><div class=\"panel-footer\">" + tagLabels(*post) + "</div></article></div>";
             body += "</div>";
         }
@@ -203,11 +215,12 @@ QString SiteThemeRenderer::sidebarRecent() const {
 
 QString SiteThemeRenderer::sidebarTerms(const QMap<QString, QList<const SitePage *>> &groups, const QString &type, bool cloud) const {
     QString result;
-    for (auto it = groups.cbegin(); it != groups.cend(); ++it) {
-        const auto url = (type == "category" ? "categories" : type + "s") + "/" + it.key() + "/";
-        if (cloud) result += "<a href=\"" + escaped(href(url)) + R"(" style="font-size: 13px;">)" + escaped(it.key()) + "</a> ";
+    const auto names = type == "category" ? categoryNames() : groups.keys();
+    for (const auto &name: names) {
+        const auto url = (type == "category" ? "categories" : type + "s") + "/" + name + "/";
+        if (cloud) result += "<a href=\"" + escaped(href(url)) + R"(" style="font-size: 13px;">)" + escaped(name) + "</a> ";
         else
-            result += "<li class=\"" + type + "-list-item\">" + link(url, it.key(), type + "-list-link") + "<span class=\"" + type + "-list-count\">" + QString::number(it.value().size()) + "</span></li>";
+            result += "<li class=\"" + type + "-list-item\">" + link(url, name, type + "-list-link") + "<span class=\"" + type + "-list-count\">" + QString::number(groups.value(name).size()) + "</span></li>";
     }
     return result;
 }

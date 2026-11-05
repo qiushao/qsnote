@@ -27,6 +27,7 @@ private:
     QString article(const SitePage &page, bool index = false) const;
     QString postNavigation(const SitePage &page) const;
     QString collection(const QList<const SitePage *> &posts) const;
+    QStringList categoryNames() const;
     QString taxonomy(const QString &kind, const QString &selected = {}, const QList<const SitePage *> &subset = {}) const;
     QString tagLabels(const SitePage &page) const;
     QString sidebarRecent() const;

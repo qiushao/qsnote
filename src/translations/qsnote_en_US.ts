@@ -1617,8 +1617,8 @@ It will be removed from the list. Files on disk will be kept, and you can add it
         </message>
         <message>
             <location line="+8" />
-            <source>删除分类后，文章将移入 default；默认分类不可重命名或删除。</source>
-            <translation>Posts in deleted categories are moved to default. The default category cannot be renamed or deleted.</translation>
+            <source>使用上移、下移调整分类顺序，保存后生效。删除分类后，文章将移入 default；默认分类不可重命名或删除。</source>
+            <translation>Use Move Up and Move Down to reorder categories, then save to apply. Posts in deleted categories are moved to default. The default category cannot be renamed or deleted.</translation>
         </message>
         <message>
             <location line="+23" />
