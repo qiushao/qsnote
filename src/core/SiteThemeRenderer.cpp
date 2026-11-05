@@ -63,7 +63,7 @@ QString SiteThemeRenderer::themeTemplate(const QString &name, QMap<QString, QStr
     values["avatar"] = escaped(avatar);
     values["avatarImage"] = avatar.isEmpty() ? QString() : R"(<img class="show" src=")" + escaped(avatar) + "\" alt=\"" + values["author"] + R"(" width="128" height="128">)";
     values["description"] = escaped(book_.config["description"].toString());
-    values["footer"] = escaped(book_.config["footer"].toString("Powered by QSNote"));
+    values["footer"] = book_.config["footer"].toString(R"(Powered by <a href="https://github.com/qiushao/qsnote">QSNote</a>)");
     values["domain"] = escaped(book_.config["domain"].toString(href({})));
     return templates_.render(name, values);
 }

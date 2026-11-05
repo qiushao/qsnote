@@ -1166,7 +1166,7 @@ void MainWindow::createNotebook() {
         return;
     }
     if (book.type == "site") {
-        book.config = {{"title", book.name}, {"theme", "pure"}, {"footer", "Powered by QSNote"}, {"commentPlatform", "none"}};
+        book.config = {{"title", book.name}, {"theme", "pure"}, {"footer", R"(Powered by <a href="https://github.com/qiushao/qsnote">QSNote</a>)"}, {"commentPlatform", "none"}};
     }
     currentNotebookId_ = book.id;
     store_.notebooks.append(book);
