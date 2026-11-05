@@ -1542,13 +1542,41 @@ It will be removed from the list. Files on disk will be kept, and you can add it
         </message>
         <message>
             <location line="+8" />
-            <source>GitHub 用户</source>
-            <translation>GitHub user</translation>
+            <source>评论仓库（所有者/仓库名）</source>
+            <translation>Comments repository (owner/repo)</translation>
         </message>
         <message>
             <location line="+1" />
-            <source>评论仓库</source>
-            <translation>Comments repository</translation>
+            <source>仓库 ID</source>
+            <translation>Repository ID</translation>
+        </message>
+        <message>
+            <source>Discussion 分类</source>
+            <translation>Discussion category</translation>
+        </message>
+        <message>
+            <source>分类 ID</source>
+            <translation>Category ID</translation>
+        </message>
+        <message>
+            <source>环境 ID / 服务地址</source>
+            <translation>Environment ID / service URL</translation>
+        </message>
+        <message>
+            <source>腾讯云地域（可选）</source>
+            <translation>Tencent Cloud region (optional)</translation>
+        </message>
+        <message>
+            <source>请先按 &lt;a href=&quot;https://twikoo.js.org/quick-start.html&quot;&gt;Twikoo 文档&lt;/a&gt; 部署服务。腾讯云填写环境 ID，其他部署填写服务 URL；地域仅腾讯云需要，留空使用默认地域。前端版本为 2.0.17，请保持服务端版本一致。</source>
+            <translation>Deploy the service following the &lt;a href=&quot;https://twikoo.js.org/quick-start.html&quot;&gt;Twikoo documentation&lt;/a&gt;. Enter an environment ID for Tencent Cloud or a service URL for other deployments. Region is only needed for Tencent Cloud; leave it blank to use the default. The frontend version is 2.0.17; use the same server version.</translation>
+        </message>
+        <message>
+            <source>请先在 Disqus 注册站点，在站点设置中找到 Shortname 并填入上方（如 my-learning-notes），不要填写用户名或完整网址。在“基本信息 → 域名”填写含 https:// 的正式站点地址。保存并重新生成站点后，在文章底部查看评论。详见 &lt;a href=&quot;https://help.disqus.com/en/articles/1717112-universal-embed-code&quot;&gt;Disqus 官方文档&lt;/a&gt;。</source>
+            <translation>Register your site with Disqus, then find its Shortname in the site settings and enter it above (e.g. my-learning-notes), rather than a username or full URL. Enter your live site URL, including https://, under Basic Information → Domain. Save and regenerate the site to view comments below each post. See the &lt;a href=&quot;https://help.disqus.com/en/articles/1717112-universal-embed-code&quot;&gt;official Disqus documentation&lt;/a&gt;.</translation>
+        </message>
+        <message>
+            <source>请在 &lt;a href=&quot;https://giscus.app/zh-CN&quot;&gt;giscus.app&lt;/a&gt; 配置公开仓库和 Discussion 分类，将生成代码中的 data-repo、data-repo-id、data-category、data-category-id 填入上方。</source>
+            <translation>Configure a public repository and Discussion category at &lt;a href=&quot;https://giscus.app&quot;&gt;giscus.app&lt;/a&gt;, then enter data-repo, data-repo-id, data-category, and data-category-id from the generated code above.</translation>
         </message>
         <message>
             <location line="+6" />

@@ -80,7 +80,6 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent)
             auto *input = new QLineEdit(book->config[key].toString(), container);
             input->setObjectName("config_" + key);
             input->setMinimumWidth(0);
-            if (key == "clientSecret") input->setEchoMode(QLineEdit::Password);
             captionLabel->setBuddy(input);
             fieldLayout->addRow(captionLabel, input);
             connect(input, &QLineEdit::textEdited, &dialog, [book, key](const QString &value) { book->config[key] = value; });
@@ -132,7 +131,8 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent)
         editAboutRequested_ = result() == QDialog::Accepted;
     });
     section("siteCommentsCard", QCoreApplication::translate("MainWindow", "评论"));
-    auto *comments = field("commentPlatform", QCoreApplication::translate("MainWindow", "评论平台"), {QCoreApplication::translate("MainWindow", "关闭"), "Valine", "Gitalk", "Disqus"}, {"none", "valine", "gitalk", "disqus"})->findChild<QComboBox *>();
+    auto *comments = field("commentPlatform", QCoreApplication::translate("MainWindow", "评论平台"), {QCoreApplication::translate("MainWindow", "关闭"), "Giscus", "Twikoo", "Disqus"}, {"none", "giscus", "twikoo", "disqus"})->findChild<QComboBox *>();
+    book->config["commentPlatform"] = comments->currentData().toString();
     auto commentField = [&](const QString &key, const QString &caption, const QString &platform) {
         auto *container = field(key, caption);
         container->setVisible(comments->currentData().toString() == platform);
@@ -140,13 +140,32 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent)
             container->setVisible(comments->currentData().toString() == platform);
         });
     };
-    commentField("commentOwner", QCoreApplication::translate("MainWindow", "GitHub 用户"), "gitalk");
-    commentField("commentRepo", QCoreApplication::translate("MainWindow", "评论仓库"), "gitalk");
-    commentField("clientId", "Client ID", "gitalk");
-    commentField("clientSecret", "Client Secret", "gitalk");
+    commentField("giscusRepo", QCoreApplication::translate("MainWindow", "评论仓库（所有者/仓库名）"), "giscus");
+    commentField("giscusRepoId", QCoreApplication::translate("MainWindow", "仓库 ID"), "giscus");
+    commentField("giscusCategory", QCoreApplication::translate("MainWindow", "Discussion 分类"), "giscus");
+    commentField("giscusCategoryId", QCoreApplication::translate("MainWindow", "分类 ID"), "giscus");
+    commentField("twikooEnvId", QCoreApplication::translate("MainWindow", "环境 ID / 服务地址"), "twikoo");
+    commentField("twikooRegion", QCoreApplication::translate("MainWindow", "腾讯云地域（可选）"), "twikoo");
     commentField("disqus", "Disqus Shortname", "disqus");
-    commentField("valineAppId", "Valine App ID", "valine");
-    commentField("valineAppKey", "Valine App Key", "valine");
+    dialog.findChild<QLineEdit *>("config_disqus")->setPlaceholderText("my-learning-notes");
+    auto *giscusHint = label(QCoreApplication::translate("MainWindow", "请在 <a href=\"https://giscus.app/zh-CN\">giscus.app</a> 配置公开仓库和 Discussion 分类，将生成代码中的 data-repo、data-repo-id、data-category、data-category-id 填入上方。"), card, true);
+    giscusHint->setOpenExternalLinks(true);
+    form->addWidget(giscusHint);
+    const auto updateGiscusHint = [comments, giscusHint] { giscusHint->setVisible(comments->currentData().toString() == "giscus"); };
+    connect(comments, &QComboBox::currentIndexChanged, &dialog, updateGiscusHint);
+    updateGiscusHint();
+    auto *twikooHint = label(QCoreApplication::translate("MainWindow", "请先按 <a href=\"https://twikoo.js.org/quick-start.html\">Twikoo 文档</a> 部署服务。腾讯云填写环境 ID，其他部署填写服务 URL；地域仅腾讯云需要，留空使用默认地域。前端版本为 2.0.17，请保持服务端版本一致。"), card, true);
+    twikooHint->setOpenExternalLinks(true);
+    form->addWidget(twikooHint);
+    const auto updateTwikooHint = [comments, twikooHint] { twikooHint->setVisible(comments->currentData().toString() == "twikoo"); };
+    connect(comments, &QComboBox::currentIndexChanged, &dialog, updateTwikooHint);
+    updateTwikooHint();
+    auto *disqusHint = label(QCoreApplication::translate("MainWindow", "请先在 Disqus 注册站点，在站点设置中找到 Shortname 并填入上方（如 my-learning-notes），不要填写用户名或完整网址。在“基本信息 → 域名”填写含 https:// 的正式站点地址。保存并重新生成站点后，在文章底部查看评论。详见 <a href=\"https://help.disqus.com/en/articles/1717112-universal-embed-code\">Disqus 官方文档</a>。"), card, true);
+    disqusHint->setOpenExternalLinks(true);
+    form->addWidget(disqusHint);
+    const auto updateDisqusHint = [comments, disqusHint] { disqusHint->setVisible(comments->currentData().toString() == "disqus"); };
+    connect(comments, &QComboBox::currentIndexChanged, &dialog, updateDisqusHint);
+    updateDisqusHint();
     section("siteThemeCard", QCoreApplication::translate("MainWindow", "主题与页脚"));
     auto *theme = field("theme", QCoreApplication::translate("MainWindow", "站点主题"), {"Pure", "NexT", "Yilia", "3-Jekyll", QCoreApplication::translate("MainWindow", "自定义")},
                         {"pure", "next", "yilia", "3-jekyll", "custom"})

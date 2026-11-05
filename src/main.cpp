@@ -1,4 +1,5 @@
 #include "core/ApplicationLanguage.h"
+#include "core/DesktopSession.h"
 #include "ui/MainWindow.h"
 #include <QCommandLineParser>
 #include <QFileOpenEvent>
@@ -76,6 +77,8 @@ void registerMarkdownFiles() {
 }// namespace
 
 int main(int argc, char *argv[]) {
+    // Normalize before Qt initializes D-Bus or starts external applications.
+    DesktopSession::normalizeBusAddress();
     QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
     QCoreApplication::setApplicationName("qsnote");
     QCoreApplication::setOrganizationName("qiushao");

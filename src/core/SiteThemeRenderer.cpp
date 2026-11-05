@@ -1,7 +1,6 @@
 #include "SiteThemeRenderer.h"
 #include "NotebookCategories.h"
 #include "StaticSite.h"
-#include <QCryptographicHash>
 #include <QDate>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -16,22 +15,37 @@ QString json(const QJsonObject &object) {
     return value.replace('<', "\\u003c").replace('>', "\\u003e").replace('&', "\\u0026");
 }
 
-QString comments(const Notebook &book, const SitePage &page) {
+QString comments(const Notebook &book, const SitePage &page, const QString &permalink) {
     if (!page.post || !page.comments) return {};
     const auto &c = book.config;
     const auto platform = c["commentPlatform"].toString();
-    if (platform == "valine") {
-        return R"(<section id="vcomments"></section><script src="https://cdn.jsdelivr.net/npm/valine@1.5.1/dist/Valine.min.js"></script><script>new Valine()" +
-               json({{"el", "#vcomments"}, {"appId", c["valineAppId"]}, {"appKey", c["valineAppKey"]}, {"visitor", false}}) + ");</script>";
+    if (platform == "giscus") {
+        const auto repo = c["giscusRepo"].toString().trimmed();
+        const auto repoId = c["giscusRepoId"].toString().trimmed();
+        const auto category = c["giscusCategory"].toString().trimmed();
+        const auto categoryId = c["giscusCategoryId"].toString().trimmed();
+        if (repo.isEmpty() || repoId.isEmpty() || category.isEmpty() || categoryId.isEmpty()) return {};
+        return R"(<section class="giscus"></section><script src="https://giscus.app/client.js" data-repo=")" + escaped(repo) +
+               R"(" data-repo-id=")" + escaped(repoId) + R"(" data-category=")" + escaped(category) + R"(" data-category-id=")" + escaped(categoryId) +
+               R"(" data-mapping="pathname" data-strict="0" data-reactions-enabled="1" data-emit-metadata="0" data-input-position="bottom" data-theme="preferred_color_scheme" data-lang="zh-CN" crossorigin="anonymous" async></script>)";
     }
-    if (platform == "gitalk") {
-        return "<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/gitalk@1.8.0/dist/gitalk.css\"><section id=\"gitalk-container\"></section>"
-               "<script src=\"https://cdn.jsdelivr.net/npm/gitalk@1.8.0/dist/gitalk.min.js\"></script><script>new Gitalk(" +
-               json({{"clientID", c["clientId"]}, {"clientSecret", c["clientSecret"]}, {"repo", c["commentRepo"]}, {"owner", c["commentOwner"]}, {"admin", QJsonArray{c["commentOwner"]}}, {"id", QString::fromLatin1(QCryptographicHash::hash(page.route.toUtf8(), QCryptographicHash::Md5).toHex())}}) + ").render('gitalk-container');</script>";
+    if (platform == "twikoo") {
+        const auto envId = c["twikooEnvId"].toString().trimmed();
+        if (envId.isEmpty()) return {};
+        QJsonObject options{{"envId", envId}, {"el", "#tcomment"}, {"lang", "zh-CN"}};
+        const auto region = c["twikooRegion"].toString().trimmed();
+        if (!region.isEmpty()) options["region"] = region;
+        return R"(<section id="tcomment"></section><script src="https://cdn.jsdelivr.net/npm/twikoo@2.0.17/dist/twikoo.all.min.js"></script><script>twikoo.init()" + json(options) + ");</script>";
     }
-    if (platform == "disqus" && QRegularExpression("^[A-Za-z0-9-]+$").match(c["disqus"].toString()).hasMatch()) {
-        return "<section id=\"disqus_thread\"></section><script>var disqus_config=function(){this.page.identifier=" +
-               json({{"id", page.route}}) + ".id;};</script><script src=\"https://" + c["disqus"].toString() + ".disqus.com/embed.js\" defer></script>";
+    if (platform == "disqus") {
+        const auto shortname = c["disqus"].toString().trimmed();
+        if (!QRegularExpression("\\A[A-Za-z0-9-]+\\z").match(shortname).hasMatch()) return {};
+        QJsonObject options{{"identifier", page.route}, {"title", page.title}};
+        const QUrl url(permalink);
+        if (url.isValid() && !url.host().isEmpty() && (url.scheme() == "https" || url.scheme() == "http")) options["url"] = permalink;
+        return "<section id=\"disqus_thread\"></section><script>var disqus_config=function(){var page=" + json(options) +
+               ";this.page.identifier=page.identifier;this.page.title=page.title;if(page.url)this.page.url=page.url;};</script>"
+               "<script src=\"https://" + shortname + ".disqus.com/embed.js\" defer></script>";
     }
     return {};
 }
@@ -117,13 +131,13 @@ QString SiteThemeRenderer::permalink(const QString &route) const {
 }
 
 QString SiteThemeRenderer::article(const SitePage &page, bool index) const {
-    if (customTheme()) return themeTemplate("post", {{"title", escaped(page.title)}, {"body", page.html}, {"url", escaped(href(page.route))}, {"permalink", escaped(permalink(page.route))}, {"date", escaped(page.date.left(10))}, {"meta", meta(page)}, {"tags", taxonomyLinks(page, true)}, {"categories", taxonomyLinks(page)}, {"navigation", postNavigation(page)}, {"comments", comments(book_, page)}, {"toc", page.toc.isEmpty() ? QString() : "<ol>" + page.toc + "</ol>"}});
+    if (customTheme()) return themeTemplate("post", {{"title", escaped(page.title)}, {"body", page.html}, {"url", escaped(href(page.route))}, {"permalink", escaped(permalink(page.route))}, {"date", escaped(page.date.left(10))}, {"meta", meta(page)}, {"tags", taxonomyLinks(page, true)}, {"categories", taxonomyLinks(page)}, {"navigation", postNavigation(page)}, {"comments", comments(book_, page, permalink(page.route))}, {"toc", page.toc.isEmpty() ? QString() : "<ol>" + page.toc + "</ol>"}});
     if (!nextTheme() && !yiliaTheme() && !threeTheme()) {
-        auto result = themeTemplate("post", {{"articleId", escaped("post-" + page.route)}, {"title", escaped(page.title)}, {"meta", meta(page)}, {"body", page.html}, {"url", escaped(href(page.route))}, {"permalink", escaped(permalink(page.route))}, {"comments", index ? QString() : comments(book_, page)}});
+        auto result = themeTemplate("post", {{"articleId", escaped("post-" + page.route)}, {"title", escaped(page.title)}, {"meta", meta(page)}, {"body", page.html}, {"url", escaped(href(page.route))}, {"permalink", escaped(permalink(page.route))}, {"comments", index ? QString() : comments(book_, page, permalink(page.route))}});
         if (index) result.replace(R"(<h1 class="article-title" itemprop="name">)" + escaped(page.title) + "</h1>", "<h1 itemprop=\"name\">" + link(page.route, page.title, "article-title") + "</h1>");
         return result;
     }
-    return themeTemplate("post", {{"title", escaped(page.title)}, {"meta", meta(page)}, {"body", page.html}, {"tags", taxonomyLinks(page, true)}, {"categories", taxonomyLinks(page)}, {"navigation", postNavigation(page)}, {"comments", comments(book_, page)}});
+    return themeTemplate("post", {{"title", escaped(page.title)}, {"meta", meta(page)}, {"body", page.html}, {"tags", taxonomyLinks(page, true)}, {"categories", taxonomyLinks(page)}, {"navigation", postNavigation(page)}, {"comments", comments(book_, page, permalink(page.route))}});
 }
 
 QString SiteThemeRenderer::postNavigation(const SitePage &page) const {

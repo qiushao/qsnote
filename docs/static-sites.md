@@ -150,18 +150,24 @@ source/
 
 ## 6. 评论
 
-“站点配置 → 评论”可选关闭、Valine、Gitalk 或 Disqus。评论服务需另外准备账号与配置；QSNote 只把填写的配置嵌入页面，不会创建服务。
+“站点配置 → 评论”可选关闭、Giscus、Twikoo 或 Disqus。评论服务需另外准备账号与配置；QSNote 只把填写的配置嵌入页面，不会创建服务。
 
 | 平台 | 要填写的字段 | 使用示例 |
 | --- | --- | --- |
 | 关闭 | 无 | 本地学习站点保持关闭，离线浏览正文 |
-| Valine | Valine App ID、Valine App Key | 填入已有应用提供的值，预览或发布后打开正式文章底部 |
-| Gitalk | GitHub 用户、评论仓库、Client ID、Client Secret | 使用已配置好的评论仓库和 OAuth 应用信息，检查文章底部登录与评论 |
+| Giscus | 评论仓库（所有者/仓库名）、仓库 ID、Discussion 分类、分类 ID | 从 Giscus 配置页生成的代码中复制对应值，预览或发布后检查文章底部登录与评论 |
+| Twikoo | 环境 ID / 服务地址、腾讯云地域（可选） | 腾讯云填写环境 ID；自建等其他部署填写服务 URL，例如 `https://comments.example.com` |
 | Disqus | Disqus Shortname | 填已创建站点的 shortname，例如 `my-learning-notes`；不是完整域名 |
 
 评论用于文章页；独立页面不会因此自动增加评论。评论脚本需要网络，浏览器或服务端的域名设置也可能限制本机预览，因此应在最终访问域名下核对。手写文章 front matter 中的 `"comments": false` 可关闭该篇评论。
 
-这些字段会进入公开 HTML，包括当前 Gitalk 实现的 Client Secret；不要填写其他用途的私密令牌。不能接受这种暴露方式时，保持评论关闭或选择符合自己部署要求的方案。
+使用 Giscus 时，先为公开的 GitHub 仓库启用 Discussions 并安装 Giscus app，再打开 [Giscus 配置页](https://giscus.app/zh-CN) 选择仓库和分类。将生成代码中的 `data-repo`、`data-repo-id`、`data-category`、`data-category-id` 分别填入上述四项；无需 Client Secret 或访问令牌。QSNote 按页面路径（`pathname`）关联讨论，使用简体中文，评论主题跟随系统明暗设置；四项配置未填全时不加载评论。
+
+使用 Twikoo 时，先按 [Twikoo 文档](https://twikoo.js.org/quick-start.html) 部署服务，再填写环境 ID 或服务 URL。腾讯云地域留空时使用 Twikoo 默认值，需要时填写如 `ap-guangzhou`；其他部署留空。QSNote 使用 2.0.17 完整版前端，请保持服务端版本一致。评论按页面路径关联，使用简体中文；环境 ID / 服务地址留空时不加载评论。
+
+使用 Disqus 时，先注册 Disqus 站点，在站点设置中找到 Shortname 并填入配置（例如 `my-learning-notes`），不要填写用户名或完整网址，参见 [Disqus 官方接入文档](https://help.disqus.com/en/articles/1717112-universal-embed-code)。在“基本信息 → 域名”填写正式站点地址（例如 `https://example.com/blog/`），QSNote 会据此设置文章的正式 URL，并自动传入文章标题；评论标识继续使用文章路径，以保留已有评论关联。未配置有效的 HTTP(S) 站点地址时，由 Disqus 使用当前访问 URL。Shortname 留空或包含无效字符时不加载评论。保存并重新生成站点后，在正式文章页底部核对评论。
+
+Valine 和 Gitalk 已移除，旧配置不再加载这两种评论脚本。打开站点配置时会显示为“关闭”，保存后写回；如需使用 Giscus 或 Twikoo，请重新选择并配置，已有评论不会自动迁移。
 
 ## 7. 统计和自定义代码
 
