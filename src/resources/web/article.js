@@ -13,6 +13,7 @@ window.qsnoteArticle = (() => {
     function markdown(text, strict = false) {
         let metadata = '';
         const md = markdownit({html: true, linkify: true, maxNesting: 500});
+        md.linkify.set({fuzzyLink: false});
         md.use(markdownitTaskLists, {enabled: true})
             .use(markdownitSub).use(markdownitSup).use(markdownitEmoji)
             .use(markdownitFootnote).use(window['markdown-it-imsize.js'])
