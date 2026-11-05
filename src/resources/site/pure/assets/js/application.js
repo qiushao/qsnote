@@ -1,4 +1,21 @@
 $(function() {
+  // Toggle both the widgets and the article Catalogue sidebar.
+  var $sidebarToggle = $('#sidebar-toggle');
+  function setSidebarExpanded(expanded) {
+    $('body').toggleClass('no-sidebar', !expanded);
+    var label = expanded ? '收起侧栏' : '展开侧栏';
+    $sidebarToggle.attr('aria-expanded', String(expanded)).attr('aria-label', label).attr('title', label);
+  }
+  if ($('#collapseToc').length) {
+    $sidebarToggle.attr('aria-controls', 'main-sidebar collapseToc');
+  }
+  $sidebarToggle.prop('hidden', false).on('click', function() {
+    setSidebarExpanded($('body').hasClass('no-sidebar'));
+  });
+  $('#collapseToc').on('show.bs.collapse', function() {
+    setSidebarExpanded(true);
+  });
+
   // bootstrap tooltip
   $('[data-toggle="tooltip"]').tooltip();
 
