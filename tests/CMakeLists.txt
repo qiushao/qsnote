@@ -30,6 +30,19 @@ target_link_libraries(site_category_order_test PRIVATE Qt6::Widgets)
 add_test(NAME site_category_order COMMAND site_category_order_test)
 set_tests_properties(site_category_order PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(site_pure_toc_test
+        SitePureTocTest.cpp
+        ../src/core/NotebookCategories.cpp
+        ../src/core/SiteThemeRenderer.cpp
+        ../src/core/SiteTemplateRenderer.cpp
+        ../src/core/StaticSite.cpp
+        ../src/core/AtomicFile.cpp
+        ../src/resources/site.qrc)
+set_target_properties(site_pure_toc_test PROPERTIES AUTORCC ON)
+target_include_directories(site_pure_toc_test PRIVATE ../src)
+target_link_libraries(site_pure_toc_test PRIVATE Qt6::Core)
+add_test(NAME site_pure_toc COMMAND site_pure_toc_test)
+
 option(QSNOTE_TEST_SOURCE_HIGHLIGHTING "Build source highlighting regression tests" ON)
 if (QSNOTE_TEST_SOURCE_HIGHLIGHTING)
     enable_language(C)

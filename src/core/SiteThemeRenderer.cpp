@@ -146,6 +146,7 @@ QString SiteThemeRenderer::postNavigation(const SitePage &page) const {
     QString result = R"(<nav class="bar bar-footer clearfix" data-stick-bottom><div class="bar-inner"><ul class="pager pull-left">)";
     if (previous) result += R"(<li class="prev"><a href=")" + escaped(href(previous->route)) + "\" title=\"" + escaped(previous->title) + "\"><i class=\"icon icon-angle-left\"></i><span>  上一篇</span></a></li>";
     if (next) result += R"(<li class="next"><a href=")" + escaped(href(next->route)) + "\" title=\"" + escaped(next->title) + "\"><span>下一篇  </span><i class=\"icon icon-angle-right\"></i></a></li>";
+    if (!page.toc.isEmpty()) result += R"(<li class="toggle-toc"><a class="toggle-btn collapsed" data-toggle="collapse" href="#collapseToc" aria-expanded="false" aria-controls="collapseToc" title="Catalogue" role="button"><span>[&nbsp;</span><span>Catalogue</span> <i class="text-collapsed icon icon-anchor"></i><i class="text-in icon icon-close"></i><span>]</span></a></li>)";
     return result + "</ul><div class=\"bar-right\"></div></div></nav>";
 }
 
@@ -289,7 +290,7 @@ QString SiteThemeRenderer::html(const QString &route, const QString &title, cons
         values["menu"] = menu;
         values["toc"] = page && page->post && !page->toc.isEmpty() ? R"(<div class="toc-container tooltip-left" tabindex="0" aria-label="文章目录"><i class="icon-font icon-category"></i><div class="tooltip tooltip-east"><span class="tooltip-item"></span><div class="tooltip-content"><div class="toc-article"><ol class="toc">)" + page->toc + "</ol></div></div></div></div>" : QString();
     } else if (!nextTheme()) {
-        values["noticeWidget"] = route == "about/" ? QString() : themeTemplate("noticeWidget");
+        values["tocSidebar"] = page && page->post && !page->toc.isEmpty() ? R"(<aside class="sidebar sidebar-toc collapse" id="collapseToc" itemscope itemtype="http://schema.org/WPSideBar"><div class="slimContent"><nav id="toc" class="article-toc"><h3 class="toc-title">Catalogue</h3><ol class="toc">)" + page->toc + "</ol></nav></div></aside>" : QString();
         values["categoryWidget"] = route == "about/" || index_.categories.isEmpty() ? QString() : themeTemplate("categoryWidget", values);
         values["tagWidget"] = route == "about/" || index_.tags.isEmpty() ? QString() : themeTemplate("tagWidget", values);
         values["cloudWidget"] = route == "about/" || index_.tags.isEmpty() ? QString() : themeTemplate("cloudWidget", values);

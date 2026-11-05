@@ -32,7 +32,6 @@
     <file>site/pure/templates/cloudWidget.html</file>
     <file>site/pure/templates/friend.html</file>
     <file>site/pure/templates/links.html</file>
-    <file>site/pure/templates/noticeWidget.html</file>
     <file>site/pure/templates/page.html</file>
     <file>site/pure/templates/post.html</file>
     <file>site/pure/templates/recentWidget.html</file>

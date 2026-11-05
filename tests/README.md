@@ -47,3 +47,13 @@ ctest --test-dir build/source-tests --output-on-failure
 4. 切换源码标签页和普通 `.txt` 文件，确认纯文本没有语法颜色，源码内容、撤销历史和保存结果不受高亮影响。
 
 类、函数和成员的补充高亮来自语法结构，不做跨文件类型推断或符号绑定；未带对象限定的成员引用等需要语义分析的位置仍可能使用普通文本颜色。
+
+## Pure 文章目录回归验证
+
+```bash
+cmake -S tests -B build/site-tests -DQSNOTE_TEST_SOURCE_HIGHLIGHTING=OFF
+cmake --build build/site-tests --target site_pure_toc_test --parallel 4
+ctest --test-dir build/site-tests -R site_pure_toc --output-on-failure
+```
+
+复现与验证：使用 Pure 主题生成包含二级、三级标题的文章。修复前文章底部只有上一篇、下一篇，没有 Catalogue；修复后点击 Catalogue 应在右侧显示嵌套大纲，点击条目跳转到对应标题，再次点击 Catalogue 收起。只有一篇文章时仍应显示目录入口；没有标题的文章、首页和独立页面不显示入口。分别在桌面宽度和手机宽度下确认展开、跳转与收起。
