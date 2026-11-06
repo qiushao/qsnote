@@ -18,7 +18,8 @@ QString setting(const Notebook &book, const QString &key, const QString &fallbac
     return value.isEmpty() ? fallback : value;
 }
 
-bool run(const QString &program, const QStringList &arguments, const QString &directory, QString *error, QByteArray *output = nullptr) {
+bool run(const QString &program, const QStringList &arguments, const QString &directory, QString *error,
+         QByteArray *output = nullptr, const std::function<void(const QString &)> &progress = {}) {
     QProcess process;
     process.setWorkingDirectory(directory);
     auto environment = QProcessEnvironment::systemEnvironment();
@@ -33,12 +34,32 @@ bool run(const QString &program, const QStringList &arguments, const QString &di
     QObject::connect(&timeout, &QTimer::timeout, &process, &QProcess::kill);
     QObject::connect(&process, &QProcess::finished, &loop, &QEventLoop::quit);
     QObject::connect(&process, &QProcess::errorOccurred, &loop, &QEventLoop::quit);
+    QByteArray standardError, pending;
+    const auto readProgress = [&] {
+        const auto data = process.readAllStandardError();
+        standardError += data;
+        if (!progress) return;
+        pending += data;
+        QString latest;
+        qsizetype start = 0;
+        for (qsizetype i = 0; i < pending.size(); ++i) {
+            if (pending[i] != '\r' && pending[i] != '\n') continue;
+            const auto line = QString::fromUtf8(pending.mid(start, i - start)).trimmed();
+            if (!line.isEmpty()) latest = line;
+            start = i + 1;
+        }
+        pending.remove(0, start);
+        if (!latest.isEmpty()) progress(latest);
+    };
+    QObject::connect(&process, &QProcess::readyReadStandardError, &loop, readProgress);
     process.start(program, arguments);
     process.closeWriteChannel();
     timeout.start(300000);
     loop.exec();
+    readProgress();
+    if (progress && !pending.trimmed().isEmpty()) progress(QString::fromUtf8(pending).trimmed());
     const auto standardOutput = process.readAllStandardOutput();
-    const auto result = standardOutput + process.readAllStandardError();
+    const auto result = standardOutput + standardError;
     if (output) *output = standardOutput;
     if (process.error() == QProcess::FailedToStart || process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
         *error = QCoreApplication::translate("SitePublisher", "发布命令失败：%1\n%2\n%3").arg(program,
@@ -104,7 +125,7 @@ bool SitePublisher::validate(const Notebook &book, QString *error) {
     return true;
 }
 
-bool SitePublisher::publish(const Notebook &book, QString *error) {
+bool SitePublisher::publish(const Notebook &book, QString *error, const ProgressCallback &progress) {
     if (!validate(book, error)) return false;
     const auto source = QDir(book.path).absoluteFilePath("public");
     if (!QFileInfo(source + "/index.html").isFile() || QFileInfo::exists(source + "/.git")) {
@@ -119,8 +140,12 @@ bool SitePublisher::publish(const Notebook &book, QString *error) {
         QStringList options{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=15"};
         const auto key = setting(book, "sshIdentityFile");
         if (!key.isEmpty()) options << "-i" << key;
+        if (progress) progress(0, 2, QCoreApplication::translate("SitePublisher", "正在连接 SSH 并创建远程目录：%1").arg(target + ":" + path));
         if (!run("ssh", options + QStringList{"-p", port, target, "mkdir -p -- '" + path + "'"}, book.path, error)) return false;
-        return run("scp", options + QStringList{"-B", "-r", "-P", port, source + "/.", target + ":" + path + "/"}, book.path, error);
+        if (progress) progress(1, 2, QCoreApplication::translate("SitePublisher", "正在通过 SCP 上传站点：%1\n等待传输完成，SCP 不提供字节进度。").arg(target + ":" + path));
+        if (!run("scp", options + QStringList{"-B", "-r", "-P", port, source + "/.", target + ":" + path + "/"}, book.path, error)) return false;
+        if (progress) progress(2, 2, QCoreApplication::translate("SitePublisher", "站点上传完成"));
+        return true;
     }
 
     QTemporaryDir checkout;
@@ -128,15 +153,30 @@ bool SitePublisher::publish(const Notebook &book, QString *error) {
         *error = QCoreApplication::translate("SitePublisher", "无法创建发布临时目录。");
         return false;
     }
+    int completed = 0;
+    QString operation;
+    const auto report = [&](int step, const QString &message) {
+        completed = step;
+        operation = message;
+        if (progress) progress(completed, 8, operation);
+    };
     const auto git = [&](const QStringList &arguments, QByteArray *output = nullptr) {
-        return run("git", arguments, checkout.path(), error, output);
+        return run("git", arguments, checkout.path(), error, output, [&](const QString &detail) {
+            if (progress) progress(completed, 8, operation + '\n' + detail.right(500));
+        });
     };
     const auto branch = setting(book, "githubBranch", "gh-pages");
+    report(0, QCoreApplication::translate("SitePublisher", "正在初始化发布仓库…"));
     if (!git({"init", "--quiet"}) || !git({"remote", "add", "origin", setting(book, "githubRepository")})) return false;
     QByteArray refs;
+    report(1, QCoreApplication::translate("SitePublisher", "正在检查远程分支：%1").arg(branch));
     if (!git({"ls-remote", "--heads", "origin", "refs/heads/" + branch}, &refs)) return false;
+    report(2, QCoreApplication::translate("SitePublisher", "正在准备发布分支：%1").arg(branch));
     if (!refs.trimmed().isEmpty()) {
-        if (!git({"fetch", "--depth=1", "origin", "refs/heads/" + branch}) || !git({"checkout", "-B", branch, "FETCH_HEAD"})) return false;
+        if (!git({"fetch", "--progress", "--depth=1", "origin", "refs/heads/" + branch}) || !git({"checkout", "-B", branch, "FETCH_HEAD"})) return false;
+    }
+    report(3, QCoreApplication::translate("SitePublisher", "正在清理旧的站点文件…"));
+    if (!refs.trimmed().isEmpty()) {
         // Only the disposable checkout is cleared; preserve branch history and use a normal push.
         for (const auto &entry: QDir(checkout.path()).entryInfoList(QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot)) {
             if (entry.fileName() == ".git") continue;
@@ -147,6 +187,7 @@ bool SitePublisher::publish(const Notebook &book, QString *error) {
             }
         }
     }
+    report(4, QCoreApplication::translate("SitePublisher", "正在复制生成的站点文件…"));
     if (!StaticSite::copyDirectory(source, checkout.path(), error)) return false;
     QFile nojekyll(checkout.path() + "/.nojekyll");
     if (!nojekyll.open(QIODevice::WriteOnly)) {
@@ -154,8 +195,13 @@ bool SitePublisher::publish(const Notebook &book, QString *error) {
         return false;
     }
     nojekyll.close();
-    return git({"add", "--all", "--force"}) &&
-           git({"-c", "user.name=QSNote", "-c", "user.email=qsnote@localhost", "-c", "commit.gpgsign=false",
-                "commit", "--allow-empty", "-m", "Publish site with QSNote"}) &&
-           git({"push", "origin", "HEAD:refs/heads/" + branch});
+    report(5, QCoreApplication::translate("SitePublisher", "正在暂存站点文件…"));
+    if (!git({"add", "--all", "--force"})) return false;
+    report(6, QCoreApplication::translate("SitePublisher", "正在创建发布提交…"));
+    if (!git({"-c", "user.name=QSNote", "-c", "user.email=qsnote@localhost", "-c", "commit.gpgsign=false",
+              "commit", "--allow-empty", "-m", "Publish site with QSNote"})) return false;
+    report(7, QCoreApplication::translate("SitePublisher", "正在推送站点到远程分支：%1").arg(branch));
+    if (!git({"push", "--progress", "origin", "HEAD:refs/heads/" + branch})) return false;
+    report(8, QCoreApplication::translate("SitePublisher", "推送完成，等待 GitHub Pages 部署"));
+    return true;
 }

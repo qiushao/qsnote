@@ -44,6 +44,7 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QProgressBar>
 #include <QProgressDialog>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -66,6 +67,30 @@
 #include <functional>
 
 namespace {
+void setupSiteProgress(QProgressDialog &dialog) {
+    auto *label = new QLabel(&dialog);
+    label->setTextFormat(Qt::PlainText);
+    label->setWordWrap(true);
+    label->setMinimumWidth(520);
+    dialog.setLabel(label);
+    auto *bar = new QProgressBar(&dialog);
+    bar->setFormat(QCoreApplication::translate("MainWindow", "已完成 %v / %m 步"));
+    dialog.setBar(bar);
+    dialog.setWindowModality(Qt::ApplicationModal);
+    dialog.setCancelButton(nullptr);
+    dialog.setAutoClose(false);
+    dialog.setAutoReset(false);
+    dialog.setMinimumDuration(0);
+    dialog.show();
+}
+
+void updateSiteProgress(QProgressDialog &dialog, int completed, int total, const QString &message) {
+    dialog.setLabelText(message);
+    dialog.setRange(0, total);
+    dialog.setValue(completed);
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+}
+
 QIcon icon(const QString &kind) {
     static const QHash<QString, QString> files = {
         {"left", "panel-left"}, {"leftCollapsed", "panel-left-collapsed"},
@@ -1440,15 +1465,15 @@ void MainWindow::showSiteConfig() {
 
 bool MainWindow::generateSite(const Notebook &book) {
     if (!save()) return false;
-    QProgressDialog progress(tr("正在生成静态站点…"), QString(), 0, 0, this);
+    const auto snapshot = book; // NOLINT(performance-unnecessary-copy-initialization): Progress updates process events.
+    QProgressDialog progress(this);
     progress.setObjectName("siteGenerateDialog");
     progress.setWindowTitle(tr("生成站点"));
-    progress.setWindowModality(Qt::ApplicationModal);
-    progress.setCancelButton(nullptr);
-    progress.setMinimumDuration(0);
-    progress.show();
+    setupSiteProgress(progress);
     QString error;
-    const bool ok = StaticSite::generate(book, &error);
+    const bool ok = StaticSite::generate(snapshot, &error, [&progress](int completed, int total, const QString &message) {
+        updateSiteProgress(progress, completed, total, message);
+    });
     progress.close();
     if (!ok) QMessageBox::warning(this, tr("站点生成失败"), error);
     return ok;
@@ -1495,14 +1520,13 @@ void MainWindow::publishSite(const Notebook &book) {
     }
     if (!generateSite(book)) return;
     const auto snapshot = book; // NOLINT(performance-unnecessary-copy-initialization): Publishing processes events; retain the snapshot.
-    QProgressDialog progress(tr("正在发布站点…"), QString(), 0, 0, this);
+    QProgressDialog progress(this);
     progress.setObjectName("sitePublishDialog");
     progress.setWindowTitle(tr("发布站点"));
-    progress.setWindowModality(Qt::ApplicationModal);
-    progress.setCancelButton(nullptr);
-    progress.setMinimumDuration(0);
-    progress.show();
-    const bool ok = SitePublisher::publish(snapshot, &error);
+    setupSiteProgress(progress);
+    const bool ok = SitePublisher::publish(snapshot, &error, [&progress](int completed, int total, const QString &message) {
+        updateSiteProgress(progress, completed, total, message);
+    });
     progress.close();
     if (!ok) {
         editorWorkspace_->showStatus(tr("站点发布失败"));

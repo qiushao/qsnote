@@ -31,20 +31,25 @@ QStringList strings(const QJsonValue &value) {
 
 class Generator {
 public:
-    Generator(const Notebook &book, QString output, QString *error)
-        : book_(book), output_(std::move(output)), error_(error), renderer_(book.path, "sites"), root_(StaticSite::rootPath(book)) {}
+    Generator(const Notebook &book, QString output, QString *error, const StaticSite::ProgressCallback &progress)
+        : book_(book), output_(std::move(output)), error_(error), renderer_(book.path, "sites"), root_(StaticSite::rootPath(book)), progress_(progress) {}
 
     bool generate() {
+        report(QCoreApplication::translate("SiteGenerator", "正在加载站点主题…"));
         SiteTemplateRenderer templates(book_);
         if (!templates.load(error_)) return false;
+        stage_ = 1;
+        report(QCoreApplication::translate("SiteGenerator", "正在扫描站点源文件…"));
         const auto source = book_.path + "/source";
         if (!QFileInfo(source).isDir()) return fail(QCoreApplication::translate("SiteGenerator", "找不到站点 source 目录"));
         QDirIterator files(source, QDir::Files | QDir::Hidden, QDirIterator::Subdirectories);
         QStringList sources;
         while (files.hasNext()) sources.append(files.next());
         sources.sort();
+        int sourceIndex = 0;
         for (const auto &file: sources) {
             const auto relative = QDir(source).relativeFilePath(file);
+            report(QCoreApplication::translate("SiteGenerator", "正在读取源文件（%1/%2）：%3").arg(++sourceIndex).arg(sources.size()).arg(relative));
             const auto segments = relative.split('/');
             bool excluded = false;
             for (const auto &segment: segments) {
@@ -87,7 +92,14 @@ public:
             links_[QDir::cleanPath(file)] = page.route;
             pages_.append(page);
         }
-        for (auto &page: pages_) if (!render(page)) return false;
+        stage_ = 2;
+        int pageIndex = 0;
+        for (auto &page: pages_) {
+            report(QCoreApplication::translate("SiteGenerator", "正在渲染页面（%1/%2）：%3").arg(++pageIndex).arg(pages_.size()).arg(page.title));
+            if (!render(page)) return false;
+        }
+        stage_ = 3;
+        report(QCoreApplication::translate("SiteGenerator", "正在生成索引和页面…"));
         SiteIndex index;
         auto &posts = index.posts;
         auto &categories = index.categories;
@@ -123,6 +135,8 @@ public:
         }
         if (!write("content.json", QJsonDocument(QJsonObject{{"posts", insightPosts}, {"pages", insightPages}}).toJson(QJsonDocument::Compact))) return false;
         if (!write("css/qsnote-article.css", ArticleRenderer::stylesheet().toUtf8())) return false;
+        stage_ = 4;
+        report(QCoreApplication::translate("SiteGenerator", "正在复制主题资源…"));
         const auto assets = templates.assetsPath();
         QDirIterator resources(assets, QDir::Files, QDirIterator::Subdirectories);
         while (resources.hasNext()) {
@@ -149,6 +163,7 @@ public:
     }
 
 private:
+    void report(const QString &message) const { if (progress_) progress_(stage_, 6, message); }
     bool fail(const QString &message) { *error_ = message; return false; }
     bool validPath(const QString &path) {
         const auto decoded = QUrl::fromPercentEncoding(path.toUtf8());
@@ -158,6 +173,7 @@ private:
         return true;
     }
     bool write(const QString& path, const QByteArray &data) {
+        report(QCoreApplication::translate("SiteGenerator", "正在写入文件：%1").arg(path));
         if (!validPath(path)) return false;
         if (outputs_.contains(path)) return fail(QCoreApplication::translate("SiteGenerator", "站点输出路径冲突：") + path);
         outputs_.insert(path);
@@ -247,17 +263,20 @@ private:
     QList<SitePage> pages_;
     QMap<QString, QString> links_;
     QSet<QString> outputs_;
+    const StaticSite::ProgressCallback &progress_;
+    int stage_ = 0;
 };
 }
 
-bool StaticSite::generate(const Notebook &book, QString *error) {
+bool StaticSite::generate(const Notebook &book, QString *error, const ProgressCallback &progress) {
     QTemporaryDir staging(book.path + "/.qsnote-site-XXXXXX");
     if (!staging.isValid()) {
         *error = QCoreApplication::translate("SiteGenerator", "无法创建站点生成临时目录");
         return false;
     }
     const auto output = staging.path() + "/public";
-    if (!Generator(book, output, error).generate()) return false;
+    if (!Generator(book, output, error, progress).generate()) return false;
+    if (progress) progress(5, 6, QCoreApplication::translate("SiteGenerator", "正在保存站点生成结果…"));
     const auto destination = book.path + "/public";
     const auto backup = staging.path() + "/previous";
     const bool existing = QFileInfo::exists(destination);
@@ -271,5 +290,6 @@ bool StaticSite::generate(const Notebook &book, QString *error) {
         *error = QCoreApplication::translate("SiteGenerator", "无法保存站点生成结果：") + destination + (restored ? QString() : QCoreApplication::translate("SiteGenerator", "；上一份输出保存在：") + backup);
         return false;
     }
+    if (progress) progress(6, 6, QCoreApplication::translate("SiteGenerator", "站点生成完成"));
     return true;
 }

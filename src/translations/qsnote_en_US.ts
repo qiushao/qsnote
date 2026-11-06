@@ -1917,6 +1917,10 @@ It will be removed from the list. Files on disk will be kept, and you can add it
             <source>已导出至 </source>
             <translation>Exported to </translation>
         </message>
+        <message>
+            <source>已完成 %v / %m 步</source>
+            <translation>%v / %m steps completed</translation>
+        </message>
     </context>
     <context>
         <name>MarkdownEditor</name>
@@ -2697,6 +2701,42 @@ It will be removed from the list. Files on disk will be kept, and you can add it
             <source>；上一份输出保存在：</source>
             <translation>; the previous output is saved at: </translation>
         </message>
+        <message>
+            <source>正在加载站点主题…</source>
+            <translation>Loading site theme…</translation>
+        </message>
+        <message>
+            <source>正在扫描站点源文件…</source>
+            <translation>Scanning site source files…</translation>
+        </message>
+        <message>
+            <source>正在读取源文件（%1/%2）：%3</source>
+            <translation>Reading source file (%1/%2): %3</translation>
+        </message>
+        <message>
+            <source>正在渲染页面（%1/%2）：%3</source>
+            <translation>Rendering page (%1/%2): %3</translation>
+        </message>
+        <message>
+            <source>正在生成索引和页面…</source>
+            <translation>Generating indexes and pages…</translation>
+        </message>
+        <message>
+            <source>正在复制主题资源…</source>
+            <translation>Copying theme assets…</translation>
+        </message>
+        <message>
+            <source>正在写入文件：%1</source>
+            <translation>Writing file: %1</translation>
+        </message>
+        <message>
+            <source>正在保存站点生成结果…</source>
+            <translation>Saving generated site…</translation>
+        </message>
+        <message>
+            <source>站点生成完成</source>
+            <translation>Site generation complete</translation>
+        </message>
     </context>
     <context>
         <name>SitePublisher</name>
@@ -2768,6 +2808,56 @@ It will be removed from the list. Files on disk will be kept, and you can add it
             <location line="+17" />
             <source>无法清理发布临时文件：</source>
             <translation>Unable to clean up temporary publish files: </translation>
+        </message>
+        <message>
+            <source>正在连接 SSH 并创建远程目录：%1</source>
+            <translation>Connecting via SSH and creating remote directory: %1</translation>
+        </message>
+        <message>
+            <source>正在通过 SCP 上传站点：%1
+等待传输完成，SCP 不提供字节进度。</source>
+            <translation>Uploading site via SCP: %1
+Waiting for transfer to finish; byte progress is unavailable with SCP.</translation>
+        </message>
+        <message>
+            <source>站点上传完成</source>
+            <translation>Site upload complete</translation>
+        </message>
+        <message>
+            <source>正在初始化发布仓库…</source>
+            <translation>Initializing publishing repository…</translation>
+        </message>
+        <message>
+            <source>正在检查远程分支：%1</source>
+            <translation>Checking remote branch: %1</translation>
+        </message>
+        <message>
+            <source>正在准备发布分支：%1</source>
+            <translation>Preparing publish branch: %1</translation>
+        </message>
+        <message>
+            <source>正在清理旧的站点文件…</source>
+            <translation>Cleaning up previous site files…</translation>
+        </message>
+        <message>
+            <source>正在复制生成的站点文件…</source>
+            <translation>Copying generated site files…</translation>
+        </message>
+        <message>
+            <source>正在暂存站点文件…</source>
+            <translation>Staging site files…</translation>
+        </message>
+        <message>
+            <source>正在创建发布提交…</source>
+            <translation>Creating publish commit…</translation>
+        </message>
+        <message>
+            <source>正在推送站点到远程分支：%1</source>
+            <translation>Pushing site to remote branch: %1</translation>
+        </message>
+        <message>
+            <source>推送完成，等待 GitHub Pages 部署</source>
+            <translation>Push complete; waiting for GitHub Pages deployment</translation>
         </message>
     </context>
     <context>
