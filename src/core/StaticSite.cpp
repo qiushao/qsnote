@@ -75,6 +75,7 @@ QByteArray StaticSite::postSource(const Note &note) {
         if (!tag.trimmed().isEmpty()) tags.append(tag.trimmed());
     }
     QJsonObject metadata{{"title", note.title}, {"layout", "post"}, {"categories", categories}, {"tags", tags}, {"qsnote", true}};
+    if (note.metadata["pinned"].toBool()) metadata["pinned"] = true;
     const auto keywords = note.metadata["keywords"].toString().trimmed();
     if (!keywords.isEmpty()) metadata["keywords"] = keywords;
     const auto date = note.metadata["date"].toString();

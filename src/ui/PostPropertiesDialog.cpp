@@ -41,6 +41,9 @@ PostPropertiesDialog::PostPropertiesDialog(const QString &title, const QJsonObje
     draft_ = new QCheckBox(tr("保存为草稿"), this);
     draft_->setChecked(metadata["draft"].toBool());
     layout->addRow(draft_);
+    pinned_ = new QCheckBox(tr("首页置顶"), this);
+    pinned_->setChecked(metadata["pinned"].toBool());
+    layout->addRow(pinned_);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     setPrimaryButton(buttons->button(QDialogButtonBox::Ok));
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
@@ -59,5 +62,6 @@ QJsonObject PostPropertiesDialog::metadata() const {
     result["date"] = date_->date().toString(Qt::ISODate);
     result["slug"] = slug_->text().trimmed();
     result["draft"] = draft_->isChecked();
+    result["pinned"] = pinned_->isChecked();
     return result;
 }

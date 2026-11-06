@@ -1353,6 +1353,10 @@ It will be removed from the list. Files on disk will be kept, and you can add it
             <translation>Save as draft</translation>
         </message>
         <message>
+            <source>首页置顶</source>
+            <translation>Pin to homepage</translation>
+        </message>
+        <message>
             <location line="-129" />
             <source>文件夹</source>
             <translation>Folder</translation>

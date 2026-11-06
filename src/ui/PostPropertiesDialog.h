@@ -26,4 +26,5 @@ private:
     QDateEdit *date_;
     QLineEdit *slug_;
     QCheckBox *draft_;
+    QCheckBox *pinned_;
 };

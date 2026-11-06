@@ -20,6 +20,7 @@ struct SitePage {
     QStringList tags;
     QString keywords;
     bool post = false;
+    bool pinned = false;
     bool comments = true;
 };
 

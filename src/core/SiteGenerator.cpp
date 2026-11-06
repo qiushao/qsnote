@@ -78,6 +78,7 @@ public:
             }
             if (metadata["draft"].toBool() || metadata["published"] == QJsonValue(false)) continue;
             page.post = relative.startsWith("_posts/");
+            page.pinned = metadata["pinned"].toBool();
             page.comments = metadata["comments"] != QJsonValue(false);
             page.title = metadata["title"].toString(QFileInfo(file).completeBaseName());
             page.categories = strings(metadata["categories"]);
@@ -128,7 +129,9 @@ public:
             }
             search.append(theme.searchEntry(*post));
         }
-        if (!listing(theme, {}, book_.config["title"].toString(book_.name), posts) || !listing(theme, "archives/", "归档", posts)) return false;
+        auto homePosts = posts;
+        std::stable_partition(homePosts.begin(), homePosts.end(), [](const SitePage *post) { return post->pinned; });
+        if (!listing(theme, {}, book_.config["title"].toString(book_.name), homePosts) || !listing(theme, "archives/", "归档", posts)) return false;
         for (auto it = archives.cbegin(); it != archives.cend(); ++it)
             if (!listing(theme, "archives/" + it.key(), it.key(), it.value())) return false;
         for (const auto &group: {qMakePair(QString("categories"), categories), qMakePair(QString("tags"), tags)})
