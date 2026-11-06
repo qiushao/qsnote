@@ -1,0 +1,60 @@
+/* QSNote integration; upstream style.min.css and toc.min.css remain unchanged. */
+.prose-shiro { max-width: none; }
+.shiro-brand { min-width: 0; max-width: 100%; }
+.shiro-title-row { display: inline-flex; align-items: center; gap: .75rem; max-width: 100%; }
+.site-title, .page-title, .shiro-card h2 { overflow-wrap: anywhere; }
+.shiro-seal { flex: none; }
+.shiro-seal svg { width: 44px; height: 44px; }
+.nav-desktop-link[aria-current="page"] { color: var(--color-seal); }
+#mobileMenu > ul { background: var(--color-bg-panel); }
+#mobileMenu a { display: block; padding: .75rem 1.5rem; text-align: center; }
+#mobileMenu li + li { border-top: 1px solid var(--color-border-decorative); }
+.shiro-meta { display: flex; flex-wrap: wrap; justify-content: center; gap: .5rem 1rem; margin-top: .5rem; }
+.shiro-meta a:hover { color: var(--color-seal); }
+.shiro-card + .shiro-card { margin-top: 2rem; padding-top: 2rem; border-top: 1px solid var(--color-border-decorative); }
+.shiro-tags a { border: 1px solid var(--color-border-decorative); border-radius: 999px; padding: .2rem .75rem; font-size: .875rem; }
+.shiro-tags a:hover { color: var(--color-seal); border-color: var(--color-seal); }
+.shiro-post-nav { display: flex; justify-content: space-between; gap: 2rem; }
+.shiro-post-nav > div { max-width: 48%; overflow-wrap: anywhere; }
+.shiro-post-nav > div:last-child { text-align: right; }
+.pagination { display: flex; flex-wrap: wrap; justify-content: center; gap: 1.25rem; margin-top: 2.5rem; }
+.toc-child { padding-left: 1rem; }
+.shiro-archive-item h3 { overflow-wrap: anywhere; }
+/* Retain QSNote's math, diagrams and Prism styles while matching the paper. */
+.prose-shiro .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article {
+    font-family: var(--font-serif); color: var(--color-text-body); background: transparent;
+    --qsnote-code-background: var(--color-code-bg);
+    --qsnote-code-foreground: var(--color-text-body);
+    --qsnote-inline-code-background: var(--color-bg-inset);
+    --qsnote-inline-code-foreground: var(--color-seal);
+    --qsnote-code-header: var(--color-code-gutter);
+    --qsnote-code-label: var(--color-text-chrome);
+}
+.prose-shiro .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article a { color: var(--color-seal); }
+.prose-shiro .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article :is(h1, h2, th, td, blockquote) { border-color: var(--color-border-decorative); }
+.prose-shiro .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article :is(blockquote, figcaption) { color: var(--color-text-chrome); }
+.prose-shiro .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article :is(th, tr:nth-child(2n)) { background: var(--color-bg-inset); }
+#shiroSearch { width: min(38rem, calc(100% - 2rem)); max-height: 80vh; margin: auto; padding: 1.5rem; border: 1px solid var(--color-border-strong); border-radius: .75rem; background: var(--color-paper); color: var(--color-text-body); box-shadow: var(--shadow-paper); }
+#shiroSearch::backdrop { background: rgb(0 0 0 / .4); }
+.shiro-search-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+.shiro-search-header h2 { font-size: 1.5rem; }
+.shiro-search-header button { cursor: pointer; padding: .5rem; }
+#shiroSearch label { font-size: .875rem; color: var(--color-text-chrome); }
+#searchInput { display: block; width: 100%; border: 1px solid var(--color-border-strong); border-radius: .5rem; padding: .75rem; margin: .5rem 0 1rem; background: var(--color-bg-inset); }
+#searchInput:focus-visible { outline: 2px solid var(--color-seal); outline-offset: 2px; }
+#searchStatus, #searchResults p { color: var(--color-text-chrome); font-size: .875rem; }
+#searchResults li { padding: 1rem 0; border-bottom: 1px solid var(--color-border-decorative); overflow-wrap: anywhere; }
+#searchResults a { color: var(--color-seal); font-weight: bold; }
+#searchResults p { margin-top: .5rem; }
+@media (max-width: 639px) {
+    .shiro-seal svg { width: 34px; height: 34px; }
+    .shiro-archive-item { gap: .75rem; }
+}
+
+/* Prism's light palette needs the theme's warm, readable dark syntax colors. */
+html[data-theme="dark"] .prose-shiro .token { color: var(--color-text-body); }
+html[data-theme="dark"] .prose-shiro :is(.token.comment, .token.prolog, .token.doctype, .token.cdata) { color: var(--color-code-comment); }
+html[data-theme="dark"] .prose-shiro :is(.token.string, .token.char, .token.attr-value, .token.builtin) { color: var(--color-code-string); }
+html[data-theme="dark"] .prose-shiro :is(.token.number, .token.boolean, .token.constant) { color: var(--color-code-number); }
+html[data-theme="dark"] .prose-shiro :is(.token.keyword, .token.atrule, .token.tag) { color: var(--color-seal); }
+html[data-theme="dark"] .prose-shiro :is(.token.function, .token.class-name, .token.property, .token.attr-name) { color: var(--color-code-attr); }

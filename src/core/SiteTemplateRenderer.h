@@ -10,6 +10,7 @@ public:
                        Next,
                        Yilia,
                        Three,
+                       Shiro,
                        Custom };
     explicit SiteTemplateRenderer(const Notebook &book);
     bool load(QString *error);

@@ -167,8 +167,8 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent)
     connect(comments, &QComboBox::currentIndexChanged, &dialog, updateDisqusHint);
     updateDisqusHint();
     section("siteThemeCard", QCoreApplication::translate("MainWindow", "主题与页脚"));
-    auto *theme = field("theme", QCoreApplication::translate("MainWindow", "站点主题"), {"Pure", "NexT", "Yilia", "3-Jekyll", QCoreApplication::translate("MainWindow", "自定义")},
-                        {"pure", "next", "yilia", "3-jekyll", "custom"})
+    auto *theme = field("theme", QCoreApplication::translate("MainWindow", "站点主题"), {"Pure", "NexT", "Yilia", "3-Jekyll", "Shiro", QCoreApplication::translate("MainWindow", "自定义")},
+                        {"pure", "next", "yilia", "3-jekyll", "shiro", "custom"})
                           ->findChild<QComboBox *>();
     auto *themeDirectoryField = field("themeDirectory", QCoreApplication::translate("MainWindow", "主题目录"));
     auto *themeDirectory = themeDirectoryField->findChild<QLineEdit *>();

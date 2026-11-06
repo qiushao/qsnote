@@ -17,6 +17,7 @@ private:
     bool nextTheme() const;
     bool yiliaTheme() const;
     bool threeTheme() const;
+    bool shiroTheme() const;
     bool customTheme() const;
     QString href(const QString &route) const;
     QString themeTemplate(const QString &name, QMap<QString, QString> values = {}) const;

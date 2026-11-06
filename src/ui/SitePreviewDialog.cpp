@@ -24,6 +24,7 @@ SitePreviewDialog::SitePreviewDialog(const Notebook &book, QWidget *parent)
     barLayout->addWidget(label(book.config["theme"].toString() == "custom" ? QCoreApplication::translate("MainWindow", "自定义") : book.config["theme"].toString() == "next" ? "NexT"
                                                                                                                            : book.config["theme"].toString() == "yilia"      ? "Yilia"
                                                                                                                            : book.config["theme"].toString() == "3-jekyll"   ? "3-Jekyll"
+                                                                                                                           : book.config["theme"].toString() == "shiro"      ? "Shiro"
                                                                                                                                                                              : "Pure",
                                bar, true));
     barLayout->addStretch();

@@ -74,3 +74,16 @@ npm exec --yes --package=sass@1.80.7 -- sass --no-source-map --style=compressed 
 将生成文件复制到 `3-jekyll/assets/css/main.css`。不改动 Sass 变量或导入顺序。
 CSS SHA-256：`2ed7ba6e517eea794bb4e71edd77e3b891c4ba438b9e61e30630e9229f5b0db9`。
 测试覆盖原生离线生成、配置保存、子路径、分页、评论、主题切换清理，以及桌面三栏、筛选、全文搜索、手机菜单和 Escape 关闭；预览测试输出 `site-preview-3-jekyll*.png`。
+
+## Shiro 的接入方式
+
+- 来源：[Acris/hexo-theme-shiro](https://github.com/Acris/hexo-theme-shiro)，版本 1.6.1，固定提交 `417329cba818706c989655b55d5c1b6616244637`，MIT 许可。`LICENSE` 和 `THIRD-PARTY-NOTICES.md` 随站点输出。
+- `style.min.css`、`toc.min.css` 及明暗切换、手机菜单、目录、阅读进度、返回顶部脚本原样复制上游已编译文件。保留雾色背景、居中纸张、朱红印章、衬线字体栈和响应式目录；字体回退到本机字体，不请求 Google Fonts。
+- HTML 片段由上游 Nunjucks 模板适配，文章、分页、分类、标签、归档、友链、独立页面和评论来自 QSNote。正文保留统一 Markdown、Prism、公式与图表样式，适配层让正文背景和文字跟随 Shiro 明暗模式。
+- `qsnote-shiro.js` 将中文目录片段转换为上游脚本需要的目标 ID，并通过生成器的 `search.json` 提供标题/全文搜索；使用文本节点展示结果。搜索对话框支持键盘焦点恢复，手机菜单沿用上游 Escape 关闭和折叠后的 inert 行为。
+- 不引入 Pagefind、远程统计、LightGallery 或字体加载遮罩；不执行 Hexo 插件或读取 `_config.yml`。构建与生成均不需要 Node.js。更新上游资源的命令见 `shiro/THIRD-PARTY-NOTICES.md`。
+- 站点配置中选择 **Shiro**，保存后重新预览。站点主题标识为 `shiro`。
+
+原 CSS SHA-256：`993ff721b9f1dff4e13fd6f233068a78680ec177f63c8ed46da9b348fba986d6`。
+
+Linux 完成 CMake 构建后运行 `python3 tests/run-site-shiro-check.py`，覆盖配置保存、原生离线生成、空站点/单篇、分页、分类标签、独立页面、子路径、资源指纹和切换主题清理，并使用 Qt WebEngine 验证搜索、明暗模式、中文目录、手机菜单与无 JavaScript 导航。截图写入 `build/site-preview-shiro*.png`。

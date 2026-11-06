@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-CN" class="h-full scroll-smooth shiro-preloader-done">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{headTitle}}</title>
+  <meta name="description" content="{{description}}">
+  {{keywordsMeta}}
+  <link rel="canonical" href="{{permalink}}">
+  <script src="{{root}}js/qsnote-shiro-head.js"></script>
+  <link rel="stylesheet" href="{{root}}css/style.min.css">
+  {{#toc}}<link rel="stylesheet" href="{{root}}css/toc.min.css">{{/toc}}
+  <link rel="stylesheet" href="{{root}}css/qsnote-shiro.css">
+</head>
+<body class="h-full fog-bg text-text-body">
+  <a href="#main-content" class="shiro-skip-link">跳至正文</a>
+  <svg width="0" height="0" class="absolute pointer-events-none" aria-hidden="true">
+    <defs>
+        <filter id="seal-roughness" x="-20%" y="-20%" width="140%" height="140%">
+            <feTurbulence type="turbulence" baseFrequency="0.05" numOctaves="2" result="noise" />
+            <feDisplacementMap in="SourceGraphic" in2="noise" scale="3" />
+        </filter>
+        <filter id="text-erosion">
+            <feTurbulence type="fractalNoise" baseFrequency="0.15" numOctaves="1" result="noise" />
+            <feDisplacementMap in="SourceGraphic" in2="noise" scale="1.5" />
+        </filter>
+    </defs>
+</svg>
+
+  <div id="progressBar" class="progress-bar" aria-hidden="true"></div>
+  <div id="backToTopSentinel" class="back-to-top-sentinel" aria-hidden="true"></div>
+  <div class="min-h-full px-4 pt-14 pb-6 md:pb-5">
+    <div class="paper mx-auto w-full max-w-4xl rounded-xl px-5 sm:px-8 md:px-12 lg:px-14 pt-10 pb-6 md:pt-12 md:pb-8">
+      <header>
+        <div class="flex items-start justify-center"><div class="text-center shiro-brand">
+          <div class="relative inline-block shiro-title-row">
+            <p class="site-title"><a href="{{root}}">{{siteTitle}}</a></p>
+            <div class="shiro-seal"><svg width="52" height="52" viewBox="0 0 100 100" aria-hidden="true"
+    xmlns="http://www.w3.org/2000/svg">
+    <path d="M15,12 Q50,5 85,12 Q95,50 88,88 Q50,95 12,88 Q5,50 15,12 Z"
+        fill="var(--color-seal-fill)" filter="url(#seal-roughness)" opacity="0.92" />
+    <text x="50" y="50" text-anchor="middle" dominant-baseline="central"
+        font-size="42" fill="var(--color-on-seal)" filter="url(#text-erosion)"
+        class="seal-text select-none">白</text>
+</svg>
+</div>
+          </div>
+          {{#description}}<p class="site-subtitle">{{description}}</p>{{/description}}
+          <div class="mt-3 sm:mt-4 flex items-center justify-center gap-2">
+            <button id="themeToggle" type="button" class="focus-elegant header-pill-btn" aria-label="跟随系统" data-label-system="跟随系统" data-label-light="浅色模式" data-label-dark="深色模式" disabled><svg data-icon="system" class="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+    <rect x="2" y="3" width="20" height="14" rx="2" stroke-width="1.5"/>
+    <path d="M8 21h8M12 17v4" stroke-width="1.5" stroke-linecap="round"/>
+</svg>
+<svg data-icon="light" class="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+    <circle cx="12" cy="12" r="4" stroke-width="1.5"/>
+    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke-width="1.5" stroke-linecap="round"/>
+</svg>
+<svg data-icon="dark" class="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+</button>
+            <button id="searchToggle" type="button" class="focus-elegant header-pill-btn" aria-haspopup="dialog" aria-controls="shiroSearch" aria-expanded="false" aria-label="搜索" disabled><svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <circle cx="11" cy="11" r="7"></circle>
+    <path d="M21 21l-4.35-4.35"></path>
+</svg>
+</button>
+          </div>
+        </div></div>
+      </header>
+      <nav class="mt-8 md:mt-10" aria-label="站点导航">
+        <div class="flex items-center justify-center md:hidden">
+          <button id="menuBtn" type="button" class="focus-elegant header-pill-btn" aria-expanded="false" aria-controls="mobileMenu" disabled>菜单 <svg class="size-4 text-text-chrome transition-transform duration-200"id="menuChevron"
+    viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+    <path fill-rule="evenodd"
+        d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 10.94l3.71-3.71a.75.75 0 1 1 1.06 1.06l-4.24 4.24a.75.75 0 0 1-1.06 0L5.21 8.29a.75.75 0 0 1 .02-1.08z"
+        clip-rule="evenodd" />
+</svg>
+</button>
+        </div>
+        <div class="hidden md:block"><ul class="nav-desktop flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-base text-text-body px-4">{{menu}}</ul></div>
+        <div id="mobileMenu" class="menu-panel md:hidden mt-4" data-open="false"><ul class="mx-auto max-w-sm max-h-menu overflow-y-auto rounded-2xl border border-border-strong bg-paper/95 shadow-xs">{{menu}}</ul></div>
+        <script>if(document.documentElement.classList.contains('js')) document.getElementById('mobileMenu').inert=true;</script>
+      </nav>
+      <main id="main-content" class="section-divider" tabindex="-1">{{content}}</main>
+      <footer class="section-divider site-footer">
+        <div class="site-footer-meta text-center text-sm text-text-chrome leading-relaxed">
+          {{#author}}<p>{{author}}</p>{{/author}}
+          <div>{{footer}}</div>
+          <p class="font-eng text-footnote tracking-wide opacity-90">Elegant theme by <a href="https://github.com/Acris/hexo-theme-shiro" class="link-chrome">Shiro</a> · Made by <a href="https://acris.me" class="link-chrome">Acris</a></p>
+          {{#githubSocial}}<p><a href="{{githubSocial}}" class="link-chrome">GitHub</a></p>{{/githubSocial}}
+        </div>
+      </footer>
+    </div>
+    <aside class="mt-4 text-center" aria-hidden="true"><p class="site-note font-title text-xs sm:text-sm text-text-subtle/70 tracking-note select-none" lang="ja">白は、余白の名。</p></aside>
+  </div>
+  <button id="backToTop" type="button" class="back-to-top" data-visible="false" aria-label="返回顶部" hidden><svg class="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path></svg></button>
+  <dialog id="shiroSearch" aria-labelledby="searchTitle" data-index="{{root}}search.json">
+    <form method="dialog" class="shiro-search-header"><h2 id="searchTitle">搜索</h2><button type="submit" class="focus-elegant" aria-label="关闭搜索">关闭</button></form>
+    <label for="searchInput">搜索文章标题或正文</label>
+    <input id="searchInput" type="search" placeholder="输入关键词…" autocomplete="off">
+    <p id="searchStatus" role="status"></p><ul id="searchResults"></ul>
+  </dialog>
+  <script defer src="{{root}}js/qsnote-shiro.js"></script>
+  <script defer src="{{root}}js/theme-toggle.min.js"></script>
+  <script defer src="{{root}}js/mobile-menu.min.js"></script>
+  {{#toc}}<script defer src="{{root}}js/toc.min.js"></script>{{/toc}}
+  <script defer src="{{root}}js/progress.min.js"></script>
+  <script defer src="{{root}}js/back-to-top.min.js"></script>
+</body>
+</html>

@@ -91,5 +91,23 @@
     <file>site/3-jekyll/templates/page.html</file>
     <file>site/3-jekyll/templates/post.html</file>
     <file>site/3-jekyll/templates/shell.html</file>
+    <file>site/shiro/LICENSE</file>
+    <file>site/shiro/THIRD-PARTY-NOTICES.md</file>
+    <file>site/shiro/assets/css/style.min.css</file>
+    <file>site/shiro/assets/css/toc.min.css</file>
+    <file>site/shiro/assets/js/back-to-top.min.js</file>
+    <file>site/shiro/assets/js/mobile-menu.min.js</file>
+    <file>site/shiro/assets/js/progress.min.js</file>
+    <file>site/shiro/assets/js/theme-toggle.min.js</file>
+    <file>site/shiro/assets/js/toc.min.js</file>
+    <file>site/shiro/templates/archive.html</file>
+    <file>site/shiro/templates/card.html</file>
+    <file>site/shiro/templates/list.html</file>
+    <file>site/shiro/templates/page.html</file>
+    <file>site/shiro/templates/post.html</file>
+    <file>site/shiro/templates/shell.html</file>
+    <file>site/shiro/assets/css/qsnote-shiro.css</file>
+    <file>site/shiro/assets/js/qsnote-shiro-head.js</file>
+    <file>site/shiro/assets/js/qsnote-shiro.js</file>
   </qresource>
 </RCC>
