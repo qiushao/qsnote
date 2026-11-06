@@ -91,7 +91,7 @@ QString SiteThemeRenderer::taxonomyLinks(const SitePage &page, bool tags) const 
     QString result;
     if (yiliaTheme()) {
         for (const auto &name: tags ? page.tags : page.categories)
-            result += R"(<li class="article-tag-list-item">)" + link((tags ? "tags/" : "categories/") + name + "/", name, "article-tag-list-link color" + QString::number(name.size() % 5 + 1)) + "</li>";
+            result += R"(<li class="article-tag-list-item">)" + link((tags ? "tags/" + name : "categories/" + NotebookCategories::slug(book_, name)) + "/", name, "article-tag-list-link color" + QString::number(name.size() % 5 + 1)) + "</li>";
         if (result.isEmpty()) return {};
         return "<div class=\"" + QString(tags ? "article-tag" : "article-category") + " tagcloud\"><i class=\"icon " +
                (tags ? "icon-price-tags" : "icon-book") + R"("></i><ul class="article-tag-list">)" + result + "</ul></div>";
@@ -99,7 +99,7 @@ QString SiteThemeRenderer::taxonomyLinks(const SitePage &page, bool tags) const 
     for (const auto &name: tags ? page.tags : page.categories) {
         if (nextTheme() && tags) result += link("tags/" + name + "/", "# " + name);
         else
-            result += link((tags ? "tags/" : "categories/") + name + "/", name, tags ? "article-tag-link-link" : "article-category-link");
+            result += link((tags ? "tags/" + name : "categories/" + NotebookCategories::slug(book_, name)) + "/", name, tags ? "article-tag-link-link" : "article-category-link");
     }
     return result;
 }
@@ -187,12 +187,12 @@ QString SiteThemeRenderer::taxonomy(const QString &kind, const QString &selected
     if (yiliaTheme() || threeTheme() || customTheme()) {
         QString terms;
         for (const auto &name: names)
-            terms += "<li>" + link(kind + "/" + name + "/", name) + " (" + QString::number(groups.value(name).size()) + ")</li>";
+            terms += "<li>" + link(kind + "/" + (kind == "categories" ? NotebookCategories::slug(book_, name) : name) + "/", name) + " (" + QString::number(groups.value(name).size()) + ")</li>";
         return themeTemplate("page", {{"title", title}, {"body", "<ul>" + terms + "</ul>"}});
     }
     QString body, nav = "<li>" + link(kind + "/", "All") + "</li>";
     for (const auto &name: names) {
-        const auto url = kind + "/" + name + "/";
+        const auto url = kind + "/" + (kind == "categories" ? NotebookCategories::slug(book_, name) : name) + "/";
         nav += "<li>" + link(url, name) + "</li>";
         if (!selected.isEmpty() && name != selected) continue;
         const auto &posts = selected.isEmpty() ? groups.value(name) : subset;
@@ -232,7 +232,7 @@ QString SiteThemeRenderer::sidebarTerms(const QMap<QString, QList<const SitePage
     QString result;
     const auto names = type == "category" ? categoryNames() : groups.keys();
     for (const auto &name: names) {
-        const auto url = (type == "category" ? "categories" : type + "s") + "/" + name + "/";
+        const auto url = (type == "category" ? "categories/" + NotebookCategories::slug(book_, name) : type + "s/" + name) + "/";
         if (cloud) result += "<a href=\"" + escaped(href(url)) + R"(" style="font-size: 13px;">)" + escaped(name) + "</a> ";
         else
             result += "<li class=\"" + type + "-list-item\">" + link(url, name, type + "-list-link") + "<span class=\"" + type + "-list-count\">" + QString::number(groups.value(name).size()) + "</span></li>";
@@ -409,8 +409,10 @@ QJsonObject SiteThemeRenderer::contentEntry(const SitePage &page) const {
     QJsonObject entry{{"title", page.title}, {"text", page.text}, {"path", yiliaTheme() ? urlPath(page.route) : page.route}, {"date", page.date}};
     for (const auto &kind: {QString("categories"), QString("tags")}) {
         QJsonArray terms;
-        for (const auto &term: kind == "categories" ? page.categories : page.tags)
-            terms.append(QJsonObject{{"name", term}, {"slug", term}, {"permalink", href(kind + "/" + term + "/")}});
+        for (const auto &term: kind == "categories" ? page.categories : page.tags) {
+            const auto slug = kind == "categories" ? NotebookCategories::slug(book_, term) : term;
+            terms.append(QJsonObject{{"name", term}, {"slug", slug}, {"permalink", href(kind + "/" + slug + "/")}});
+        }
         entry[kind] = terms;
     }
     return entry;

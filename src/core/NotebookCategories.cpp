@@ -1,6 +1,7 @@
 #include "NotebookCategories.h"
 #include <QCoreApplication>
 #include <QJsonArray>
+#include <QRegularExpression>
 
 namespace {
 QStringList collect(const Notebook &book, const QString &fallback) {
@@ -51,6 +52,30 @@ QStringList NotebookCategories::site(const Notebook &book) {
     return collect(book, QStringLiteral("default"));
 }
 
+QString NotebookCategories::slug(const Notebook &book, const QString &name) {
+    const auto category = name.isEmpty() ? QStringLiteral("default") : name;
+    return book.config["categorySlugs"].toObject()[category].toString(category);
+}
+
+bool NotebookCategories::setSlug(Notebook &book, const QString &name, const QString &value, QString *error) {
+    const auto slug = value.trimmed();
+    static const QRegularExpression valid(QStringLiteral("^[\\p{L}\\p{N}_-]+$"));
+    if (!valid.match(slug).hasMatch()) {
+        *error = QCoreApplication::translate("MainWindow", "分类 Slug 只能包含字母、数字、下划线和连字符。");
+        return false;
+    }
+    for (const auto &category: site(book)) {
+        if (category != name && NotebookCategories::slug(book, category) == slug) {
+            *error = QCoreApplication::translate("MainWindow", "分类 Slug 已存在。");
+            return false;
+        }
+    }
+    auto slugs = book.config["categorySlugs"].toObject();
+    slugs[name] = slug;
+    book.config["categorySlugs"] = slugs;
+    return true;
+}
+
 QStringList NotebookCategories::todo(const Notebook &book) {
     auto names = collect(book, QStringLiteral("默认"));
     names.removeAll(QStringLiteral("默认"));
@@ -73,6 +98,12 @@ bool NotebookCategories::rename(Notebook &book, const QString &previous, const Q
     const auto title = name.trimmed();
     if (title == previous) return true;
     if (!available(book, title, error)) return false;
+    if (book.type == "site") {
+        auto slugs = book.config["categorySlugs"].toObject();
+        slugs[title] = slug(book, previous);
+        slugs.remove(previous);
+        book.config["categorySlugs"] = slugs;
+    }
     auto names = categories(book);
     names.replace(names.indexOf(previous), title);
     book.config["categories"] = QJsonArray::fromStringList(names);
@@ -86,6 +117,11 @@ bool NotebookCategories::remove(Notebook &book, const QString &name, QString *er
     if (!editable(book, name, error)) return false;
     auto names = categories(book);
     names.removeAll(name);
+    if (book.type == "site") {
+        auto slugs = book.config["categorySlugs"].toObject();
+        slugs.remove(name);
+        book.config["categorySlugs"] = slugs;
+    }
     book.config["categories"] = QJsonArray::fromStringList(names);
     for (auto &note: book.notes) {
         if (note.metadata["category"].toString() == name) note.metadata["category"] = fallback(book);

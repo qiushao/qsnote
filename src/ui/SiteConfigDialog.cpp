@@ -212,6 +212,8 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent)
     categoryLayout->addWidget(addCategory);
     categoryLayout->addWidget(renameCategory);
     categoryLayout->addWidget(deleteCategory);
+    auto *editCategorySlug = button(QCoreApplication::translate("MainWindow", "编辑 Slug"), "editSiteCategorySlug", categoryActions);
+    categoryLayout->addWidget(editCategorySlug);
     categoryLayout->addWidget(moveCategoryUp);
     categoryLayout->addWidget(moveCategoryDown);
     categoryLayout->addStretch();
@@ -232,6 +234,21 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent)
         categories->setCurrentRow(static_cast<int>(NotebookCategories::site(*book).indexOf(selected)));
         categoriesDirty_ = true;
     };
+    connect(editCategorySlug, &QPushButton::clicked, &dialog, [book, categories, updateCategories, &dialog] {
+        if (!categories->currentItem()) return;
+        const auto name = categories->currentItem()->text();
+        bool accepted = false;
+        const auto slug = QInputDialog::getText(&dialog, QCoreApplication::translate("MainWindow", "编辑 Slug"),
+                                              QCoreApplication::translate("MainWindow", "分类 Slug："), QLineEdit::Normal,
+                                              NotebookCategories::slug(*book, name), &accepted);
+        if (!accepted) return;
+        QString error;
+        if (!NotebookCategories::setSlug(*book, name, slug, &error)) {
+            QMessageBox::warning(&dialog, QCoreApplication::translate("MainWindow", "编辑 Slug"), error);
+            return;
+        }
+        updateCategories(name);
+    });
     const auto moveCategory = [book, categories, updateCategories](int offset) {
         const auto index = categories->currentRow();
         auto names = NotebookCategories::site(*book);

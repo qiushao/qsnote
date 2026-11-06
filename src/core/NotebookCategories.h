@@ -5,6 +5,8 @@
 
 namespace NotebookCategories {
 QStringList site(const Notebook &book);
+QString slug(const Notebook &book, const QString &name);
+bool setSlug(Notebook &book, const QString &name, const QString &value, QString *error);
 QStringList todo(const Notebook &book);
 // Updates metadata in memory. The caller retains its existing save timing.
 bool create(Notebook &book, const QString &name, QString *error);

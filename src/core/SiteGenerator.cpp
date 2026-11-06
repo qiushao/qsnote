@@ -1,5 +1,6 @@
 #include "ArticleRenderer.h"
 #include "FrontMatter.h"
+#include "NotebookCategories.h"
 #include "SiteThemeRenderer.h"
 #include "StaticSite.h"
 #include <QCoreApplication>
@@ -62,7 +63,8 @@ public:
             if (!file.endsWith(".md", Qt::CaseInsensitive) && !file.endsWith(".markdown", Qt::CaseInsensitive)) {
                 const auto target = relative.startsWith("_posts/") ? "assets/posts/" + relative.mid(7) : relative;
                 links_[QDir::cleanPath(file)] = target;
-                if (!write(target, data)) return false;
+                resources_.insert(QDir::cleanPath(file));
+                if (!relative.startsWith("_posts/") && !write(target, data)) return false;
                 continue;
             }
             SitePage page;
@@ -79,12 +81,19 @@ public:
             page.comments = metadata["comments"] != QJsonValue(false);
             page.title = metadata["title"].toString(QFileInfo(file).completeBaseName());
             page.categories = strings(metadata["categories"]);
+            if (page.post && page.categories.isEmpty()) page.categories.append("default");
             page.tags = strings(metadata["tags"]);
             page.keywords = strings(metadata["keywords"]).join(", ").trimmed();
             page.date = metadata["date"].toString(QFileInfo(file).lastModified().toString(Qt::ISODate));
             page.updated = metadata["updated"].toString(QFileInfo(file).lastModified().toString(Qt::ISODate));
-            auto route = metadata["permalink"].toString(metadata["slug"].toString());
+            auto route = page.post ? metadata["slug"].toString().trimmed() : metadata["permalink"].toString(metadata["slug"].toString());
             if (route.isEmpty()) route = page.post ? QFileInfo(file).completeBaseName() : relative.left(relative.lastIndexOf('.'));
+            if (page.post) {
+                const auto category = NotebookCategories::slug(book_, page.categories.first());
+                if (QUrl::fromPercentEncoding(category.toUtf8()).contains('/') || QUrl::fromPercentEncoding(route.toUtf8()).contains('/'))
+                    return fail(QCoreApplication::translate("SiteGenerator", "无效的站点路径：") + category + "/" + route);
+                route = "categories/" + category + "/" + route + "/";
+            }
             if (!page.post && (route == "index" || route.endsWith("/index"))) route.chop(5);
             if (!route.isEmpty() && !route.endsWith('/') && !route.endsWith(".html")) route += '/';
             page.route = route;
@@ -124,7 +133,7 @@ public:
             if (!listing(theme, "archives/" + it.key(), it.key(), it.value())) return false;
         for (const auto &group: {qMakePair(QString("categories"), categories), qMakePair(QString("tags"), tags)})
             for (auto it = group.second.cbegin(); it != group.second.cend(); ++it)
-                if (!listing(theme, group.first + "/" + it.key() + "/", it.key(), it.value())) return false;
+                if (!listing(theme, group.first + "/" + (group.first == "categories" ? NotebookCategories::slug(book_, it.key()) : it.key()) + "/", it.key(), it.value())) return false;
         for (const auto &page: pages_) {
             if (!writeHtml(page.route, theme.renderPage(page))) return false;
         }
@@ -214,28 +223,43 @@ private:
                 while (!toc.isEmpty() && toc.last().level >= level) closeHeading();
                 toc.append({level, "<li class=\"toc-item toc-level-" + QString::number(level) + R"("><a class="toc-link" href="#)" + escaped(urlPath(id)) + R"("><span class="toc-text">)" + escaped(title) + "</span></a>"});
             }
-            if (tag != "a" && tag != "img") continue;
-            const auto attribute = tag == "img" ? "src" : "href";
-            const auto value = node.attribute(attribute);
-            if (tag == "img" && value.startsWith("data:image/png;base64,")) {
-                const auto bytes = QByteArray::fromBase64(value.mid(value.indexOf(',') + 1).toLatin1());
-                const auto path = "assets/qsnote/" + QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()) + ".png";
-                if (!outputs_.contains(path) && !write(path, bytes)) return false;
-                node.setAttribute(attribute, href(path));
-                continue;
+            for (const auto &attribute: {QString("href"), QString("src"), QString("poster"), QString("data")}) {
+                if (!node.hasAttribute(attribute) || (attribute == "data" && tag != "object")) continue;
+                const auto value = node.attribute(attribute);
+                if (tag == "img" && attribute == "src" && value.startsWith("data:image/png;base64,")) {
+                    const auto bytes = QByteArray::fromBase64(value.mid(value.indexOf(',') + 1).toLatin1());
+                    const auto path = (page.post ? page.route : QString("assets/qsnote/")) + QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()) + ".png";
+                    if (!outputs_.contains(path) && !write(path, bytes)) return false;
+                    node.setAttribute(attribute, href(path));
+                    continue;
+                }
+                const QUrl original(value);
+                if (!original.isRelative() || original.path().isEmpty()) continue;
+                const bool absolute = original.path().startsWith('/');
+                const auto path = QDir::cleanPath(absolute ? book_.path + "/source" + original.path()
+                                                          : QFileInfo(page.source).dir().absoluteFilePath(original.path()));
+                QString target;
+                if (resources_.contains(path)) {
+                    auto route = links_[path];
+                    if (page.post || !outputs_.contains(route)) {
+                        QFile file(path);
+                        if (!file.open(QIODevice::ReadOnly)) return fail(path + ": " + file.errorString());
+                        const auto bytes = file.readAll();
+                        if (page.post) route = page.route + QFileInfo(path).fileName();
+                        if (outputs_.contains(route)) {
+                            QFile existing(output_ + "/" + route);
+                            if (!existing.open(QIODevice::ReadOnly) || existing.readAll() != bytes)
+                                return fail(QCoreApplication::translate("SiteGenerator", "站点输出路径冲突：") + route);
+                        } else if (!write(route, bytes)) return false;
+                    }
+                    target = href(route);
+                } else if (absolute) target = href(original.path().mid(1));
+                else if (links_.contains(path)) target = href(links_[path]);
+                if (target.isEmpty()) continue;
+                if (original.hasQuery()) target += '?' + original.query(QUrl::FullyEncoded);
+                if (original.hasFragment()) target += '#' + original.fragment(QUrl::FullyEncoded);
+                node.setAttribute(attribute, target);
             }
-            const QUrl original(value);
-            if (!original.isRelative() || original.path().isEmpty()) continue;
-            QString target;
-            if (original.path().startsWith('/')) target = href(original.path().mid(1));
-            else {
-                const auto path = QDir::cleanPath(QFileInfo(page.source).dir().absoluteFilePath(original.path()));
-                if (links_.contains(path)) target = href(links_[path]);
-            }
-            if (target.isEmpty()) continue;
-            if (original.hasQuery()) target += '?' + original.query(QUrl::FullyEncoded);
-            if (original.hasFragment()) target += '#' + original.fragment(QUrl::FullyEncoded);
-            node.setAttribute(attribute, target);
         }
         while (!toc.isEmpty()) closeHeading();
         page.html = ArticleRenderer::html(document);
@@ -263,6 +287,7 @@ private:
     QList<SitePage> pages_;
     QMap<QString, QString> links_;
     QSet<QString> outputs_;
+    QSet<QString> resources_;
     const StaticSite::ProgressCallback &progress_;
     int stage_ = 0;
 };

@@ -80,10 +80,7 @@ QByteArray StaticSite::postSource(const Note &note) {
     const auto date = note.metadata["date"].toString();
     if (!date.isEmpty()) metadata["date"] = date;
     const auto slug = note.metadata["slug"].toString().trimmed();
-    if (!slug.isEmpty()) {
-        metadata["slug"] = slug;
-        metadata["permalink"] = slug.endsWith('/') || slug.endsWith(".html") ? slug : slug + "/";
-    }
+    if (!slug.isEmpty()) metadata["slug"] = slug;
     return "---\n" + QJsonDocument(metadata).toJson() + "---\n" + note.content.toUtf8();
 }
 
