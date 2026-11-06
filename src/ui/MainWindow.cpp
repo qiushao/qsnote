@@ -1524,7 +1524,9 @@ void MainWindow::publishSite(const Notebook &book) {
     progress.setObjectName("sitePublishDialog");
     progress.setWindowTitle(tr("发布站点"));
     setupSiteProgress(progress);
-    const bool ok = SitePublisher::publish(snapshot, &error, [&progress](int completed, int total, const QString &message) {
+    QString publishMessage;
+    const bool ok = SitePublisher::publish(snapshot, &error, [&progress, &publishMessage](int completed, int total, const QString &message) {
+        publishMessage = message;
         updateSiteProgress(progress, completed, total, message);
     });
     progress.close();
@@ -1534,6 +1536,6 @@ void MainWindow::publishSite(const Notebook &book) {
         return;
     }
     editorWorkspace_->showStatus(snapshot.config["publishMethod"].toString() == "github"
-                                         ? tr("已推送至 GitHub Pages 发布分支，等待 GitHub 部署完成")
+                                         ? publishMessage
                                          : tr("站点已通过 SSH SCP 上传"));
 }

@@ -1,15 +1,14 @@
 #include "SitePublisher.h"
 #include <QCoreApplication>
-#include "StaticSite.h"
+#include <QCryptographicHash>
 #include <QDir>
 #include <QEventLoop>
-#include <QFile>
 #include <QFileInfo>
+#include <QLockFile>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QStandardPaths>
-#include <QTemporaryDir>
 #include <QTimer>
 
 namespace {
@@ -148,9 +147,18 @@ bool SitePublisher::publish(const Notebook &book, QString *error, const Progress
         return true;
     }
 
-    QTemporaryDir checkout;
-    if (!checkout.isValid()) {
-        *error = QCoreApplication::translate("SitePublisher", "无法创建发布临时目录。");
+    const auto repository = setting(book, "githubRepository");
+    const auto branch = setting(book, "githubBranch", "gh-pages");
+    const auto cacheKey = QCryptographicHash::hash((source + '\n' + repository + '\n' + branch).toUtf8(), QCryptographicHash::Sha256).toHex();
+    const auto cache = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/site-publish/" + QString::fromLatin1(cacheKey);
+    if (!QDir().mkpath(cache)) {
+        *error = QCoreApplication::translate("SitePublisher", "无法创建发布缓存目录。");
+        return false;
+    }
+    QLockFile lock(cache + "/publish.lock");
+    lock.setStaleLockTime(0);
+    if (!lock.tryLock()) {
+        *error = QCoreApplication::translate("SitePublisher", "发布缓存正被使用，请稍后重试。");
         return false;
     }
     int completed = 0;
@@ -158,50 +166,56 @@ bool SitePublisher::publish(const Notebook &book, QString *error, const Progress
     const auto report = [&](int step, const QString &message) {
         completed = step;
         operation = message;
-        if (progress) progress(completed, 8, operation);
+        if (progress) progress(completed, 6, operation);
     };
+    // Keep Git objects and the index in the cache, and stage public directly without copying it.
     const auto git = [&](const QStringList &arguments, QByteArray *output = nullptr) {
-        return run("git", arguments, checkout.path(), error, output, [&](const QString &detail) {
-            if (progress) progress(completed, 8, operation + '\n' + detail.right(500));
+        return run("git", QStringList{"--git-dir=" + cache + "/repo.git", "--work-tree=" + source} + arguments,
+                   source, error, output, [&](const QString &detail) {
+            if (progress) progress(completed, 6, operation + '\n' + detail.right(500));
         });
     };
-    const auto branch = setting(book, "githubBranch", "gh-pages");
     report(0, QCoreApplication::translate("SitePublisher", "正在初始化发布仓库…"));
-    if (!git({"init", "--quiet"}) || !git({"remote", "add", "origin", setting(book, "githubRepository")})) return false;
-    QByteArray refs;
+    if (!QFileInfo::exists(cache + "/repo.git/HEAD") &&
+        !run("git", {"init", "--bare", "--quiet", cache + "/repo.git"}, source, error)) return false;
+    if (!git({"config", "remote.origin.url", repository})) return false;
+    QByteArray refs, cachedCommit;
     report(1, QCoreApplication::translate("SitePublisher", "正在检查远程分支：%1").arg(branch));
-    if (!git({"ls-remote", "--heads", "origin", "refs/heads/" + branch}, &refs)) return false;
+    if (!git({"ls-remote", "--heads", "origin", "refs/heads/" + branch}, &refs) ||
+        !git({"for-each-ref", "--format=%(objectname)", "refs/heads/published"}, &cachedCommit)) return false;
+    auto parent = refs.trimmed().split('\t').first();
     report(2, QCoreApplication::translate("SitePublisher", "正在准备发布分支：%1").arg(branch));
-    if (!refs.trimmed().isEmpty()) {
-        if (!git({"fetch", "--progress", "--depth=1", "origin", "refs/heads/" + branch}) || !git({"checkout", "-B", branch, "FETCH_HEAD"})) return false;
+    if (!parent.isEmpty() && parent != cachedCommit.trimmed()) {
+        if (!git({"fetch", "--no-tags", "--progress", "--depth=1", "origin", "refs/heads/" + branch}) ||
+            !git({"rev-parse", "FETCH_HEAD"}, &parent)) return false;
+        parent = parent.trimmed();
+        if (!git({"update-ref", "refs/heads/published", QString::fromLatin1(parent)})) return false;
     }
-    report(3, QCoreApplication::translate("SitePublisher", "正在清理旧的站点文件…"));
-    if (!refs.trimmed().isEmpty()) {
-        // Only the disposable checkout is cleared; preserve branch history and use a normal push.
-        for (const auto &entry: QDir(checkout.path()).entryInfoList(QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot)) {
-            if (entry.fileName() == ".git") continue;
-            const bool removed = entry.isDir() && !entry.isSymLink() ? QDir(entry.filePath()).removeRecursively() : QFile::remove(entry.filePath());
-            if (!removed) {
-                *error = QCoreApplication::translate("SitePublisher", "无法清理发布临时文件：") + entry.filePath();
-                return false;
-            }
+    report(3, QCoreApplication::translate("SitePublisher", "正在暂存站点文件…"));
+    if (!git({"add", "--all", "--force"})) return false;
+    // Add an empty .nojekyll to the index without modifying the generated site.
+    QByteArray emptyBlob, tree;
+    if (!git({"hash-object", "-w", "--stdin"}, &emptyBlob) ||
+        !git({"update-index", "--add", "--cacheinfo", "100644", QString::fromLatin1(emptyBlob.trimmed()), ".nojekyll"}) ||
+        !git({"write-tree"}, &tree)) return false;
+    if (!parent.isEmpty()) {
+        QByteArray previousTree;
+        if (!git({"rev-parse", QString::fromLatin1(parent) + "^{tree}"}, &previousTree)) return false;
+        if (tree.trimmed() == previousTree.trimmed()) {
+            report(6, QCoreApplication::translate("SitePublisher", "站点内容未变化，无需推送。"));
+            return true;
         }
     }
-    report(4, QCoreApplication::translate("SitePublisher", "正在复制生成的站点文件…"));
-    if (!StaticSite::copyDirectory(source, checkout.path(), error)) return false;
-    QFile nojekyll(checkout.path() + "/.nojekyll");
-    if (!nojekyll.open(QIODevice::WriteOnly)) {
-        *error = nojekyll.errorString();
-        return false;
-    }
-    nojekyll.close();
-    report(5, QCoreApplication::translate("SitePublisher", "正在暂存站点文件…"));
-    if (!git({"add", "--all", "--force"})) return false;
-    report(6, QCoreApplication::translate("SitePublisher", "正在创建发布提交…"));
-    if (!git({"-c", "user.name=QSNote", "-c", "user.email=qsnote@localhost", "-c", "commit.gpgsign=false",
-              "commit", "--allow-empty", "-m", "Publish site with QSNote"})) return false;
-    report(7, QCoreApplication::translate("SitePublisher", "正在推送站点到远程分支：%1").arg(branch));
-    if (!git({"push", "--progress", "origin", "HEAD:refs/heads/" + branch})) return false;
-    report(8, QCoreApplication::translate("SitePublisher", "推送完成，等待 GitHub Pages 部署"));
+    report(4, QCoreApplication::translate("SitePublisher", "正在创建发布提交…"));
+    QStringList commitArguments{"-c", "user.name=QSNote", "-c", "user.email=qsnote@localhost", "-c", "commit.gpgsign=false",
+                                "commit-tree", QString::fromLatin1(tree.trimmed()), "-m", "Publish site with QSNote"};
+    if (!parent.isEmpty()) commitArguments << "-p" << QString::fromLatin1(parent);
+    QByteArray commit;
+    if (!git(commitArguments, &commit)) return false;
+    // Retain the commit even if push fails; the next attempt still checks the actual remote tip.
+    if (!git({"update-ref", "refs/heads/published", QString::fromLatin1(commit.trimmed())})) return false;
+    report(5, QCoreApplication::translate("SitePublisher", "正在推送站点到远程分支：%1").arg(branch));
+    if (!git({"push", "--progress", "origin", "refs/heads/published:refs/heads/" + branch})) return false;
+    report(6, QCoreApplication::translate("SitePublisher", "推送完成，等待 GitHub Pages 部署"));
     return true;
 }

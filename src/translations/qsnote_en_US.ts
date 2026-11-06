@@ -2744,6 +2744,14 @@ It will be removed from the list. Files on disk will be kept, and you can add it
     <context>
         <name>SitePublisher</name>
         <message>
+            <source>发布缓存正被使用，请稍后重试。</source>
+            <translation>The publishing cache is in use. Please try again later.</translation>
+        </message>
+        <message>
+            <source>站点内容未变化，无需推送。</source>
+            <translation>Site content is unchanged; no push is needed.</translation>
+        </message>
+        <message>
             <location filename="../core/SitePublisher.cpp" line="+44" />
             <source>发布命令失败：%1
 %2
@@ -2804,13 +2812,8 @@ It will be removed from the list. Files on disk will be kept, and you can add it
         </message>
         <message>
             <location line="+17" />
-            <source>无法创建发布临时目录。</source>
-            <translation>Unable to create a temporary publish directory.</translation>
-        </message>
-        <message>
-            <location line="+17" />
-            <source>无法清理发布临时文件：</source>
-            <translation>Unable to clean up temporary publish files: </translation>
+            <source>无法创建发布缓存目录。</source>
+            <translation>Unable to create the publishing cache directory.</translation>
         </message>
         <message>
             <source>正在连接 SSH 并创建远程目录：%1</source>
@@ -2837,14 +2840,6 @@ Waiting for transfer to finish; byte progress is unavailable with SCP.</translat
         <message>
             <source>正在准备发布分支：%1</source>
             <translation>Preparing publish branch: %1</translation>
-        </message>
-        <message>
-            <source>正在清理旧的站点文件…</source>
-            <translation>Cleaning up previous site files…</translation>
-        </message>
-        <message>
-            <source>正在复制生成的站点文件…</source>
-            <translation>Copying generated site files…</translation>
         </message>
         <message>
             <source>正在暂存站点文件…</source>
