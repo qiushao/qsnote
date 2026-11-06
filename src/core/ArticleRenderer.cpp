@@ -18,9 +18,36 @@
 #include <QWebEnginePage>
 #include <QWebEngineSettings>
 #include <QWebEngineUrlRequestInterceptor>
+#include <QXmlStreamReader>
+#include <QXmlStreamWriter>
 #include <utility>
 
 namespace {
+bool parseArticle(const QString &markup, QDomDocument &document) {
+    // Qt 6.4 drops spacing-only text nodes, including newlines between highlighted tokens.
+    // Protect them as CDATA during parsing, then restore text nodes for HTML output.
+    QXmlStreamReader reader(markup);
+    reader.setNamespaceProcessing(false);
+    QString protectedMarkup;
+    QXmlStreamWriter writer(&protectedMarkup);
+    while (!reader.atEnd()) {
+        reader.readNext();
+        if (reader.isStartDocument() || reader.isEndDocument()) continue;
+        if (reader.isWhitespace()) writer.writeCDATA(reader.text().toString());
+        else writer.writeCurrentToken(reader);
+    }
+    if (reader.hasError() || !document.setContent(protectedMarkup, false)) return false;
+    for (auto element: ArticleRenderer::elements(document)) {
+        auto node = element.firstChild();
+        while (!node.isNull()) {
+            const auto next = node.nextSibling();
+            if (node.isCDATASection()) element.replaceChild(document.createTextNode(node.nodeValue()), node);
+            node = next;
+        }
+    }
+    return true;
+}
+
 QByteArray rendererFingerprint() {
     // Include bundled scripts, styles and fonts so application upgrades invalidate old renders.
     static const auto resources = [] {
@@ -121,11 +148,11 @@ bool ArticleRenderer::render(const QString &markdown, const QString &documentId,
     // PlantUML can include external files, so those articles must be rendered again.
     const bool cacheable = !markdown.contains("plantuml", Qt::CaseInsensitive) && !markdown.contains("puml", Qt::CaseInsensitive);
     const auto path = cachePath(documentId);
-    const auto key = QCryptographicHash::hash("article-v2\n" + rendererFingerprint() + foreground_.toUtf8() + markdown.toUtf8(), QCryptographicHash::Sha256).toHex() + '\n';
+    const auto key = QCryptographicHash::hash("article-v3\n" + rendererFingerprint() + foreground_.toUtf8() + markdown.toUtf8(), QCryptographicHash::Sha256).toHex() + '\n';
     QFile cache(path);
     if (cacheable && cache.open(QIODevice::ReadOnly)) {
         const auto data = cache.readAll();
-        const bool cached = data.startsWith(key) && document.setContent(data.mid(key.size()), false)
+        const bool cached = data.startsWith(key) && parseArticle(QString::fromUtf8(data.mid(key.size())), document)
             && document.documentElement().tagName() == "article";
         cache.close();
         if (cached) return true;
@@ -204,6 +231,6 @@ bool ArticleRenderer::renderUncached(const QString &markdown, QDomDocument &docu
     if (!finished) { *error = QCoreApplication::translate("ArticleRenderer", "正文渲染超时：") + evaluate(*browser_, "window.exportStage").toString(); return false; }
     const auto result = evaluate(*browser_, "window.exportResult").toMap();
     if (result.contains("error")) { *error = result.value("error").toString(); return false; }
-    if (!document.setContent(result.value("html").toString(), false)) { *error = QCoreApplication::translate("ArticleRenderer", "无法读取正文渲染结果。"); return false; }
+    if (!parseArticle(result.value("html").toString(), document)) { *error = QCoreApplication::translate("ArticleRenderer", "无法读取正文渲染结果。"); return false; }
     return true;
 }
