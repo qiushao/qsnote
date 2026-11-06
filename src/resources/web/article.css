@@ -12,6 +12,12 @@
    tint with crimson text, blocks a soft panel with tone-down foreground. */
 .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article { --qsnote-code-background: #fafafa; --qsnote-code-foreground: #383a42; --qsnote-inline-code-background: #fcfaf2; --qsnote-inline-code-foreground: #cb1b45; --qsnote-code-header: #ececee; --qsnote-code-label: #8b8f99; }
 .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article pre { padding: 16px; overflow: auto; background: var(--qsnote-code-background); color: var(--qsnote-code-foreground); border-radius: 6px; line-height: 1.6; }
+/* Match editor preview scrollbars even when a site theme styles them globally. */
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article pre::-webkit-scrollbar { width: 8px; height: 8px; background: transparent; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article pre::-webkit-scrollbar-thumb { background: var(--qsnote-scrollbar, #d8cccf); border: 0; border-radius: 4px; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article pre::-webkit-scrollbar-thumb:hover { background: var(--qsnote-scrollbar-hover, #bdafb3); }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article pre::-webkit-scrollbar-track,.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article pre::-webkit-scrollbar-track-piece,.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article pre::-webkit-scrollbar-corner { background: transparent; border: 0; box-shadow: none; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article pre::-webkit-scrollbar-button { display: none; }
 .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; background: var(--qsnote-inline-code-background); color: var(--qsnote-inline-code-foreground); padding: 2px 4px; border-radius: 3px; }.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article pre code { overflow-wrap: normal; background: none; color: inherit; padding: 0; border-radius: 0; }
 /* Code block chrome from article.js: window dots, language badge and rounded
    shadowed panel, mirroring the reference blog's figure.highlight. */
