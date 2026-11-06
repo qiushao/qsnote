@@ -6,6 +6,7 @@
 #include "SourceHighlighter.h"
 #include "Theme.h"
 #include "UiStyle.h"
+#include "core/FrontMatter.h"
 #include "core/StaticSite.h"
 #include <QApplication>
 #include <QButtonGroup>
@@ -806,6 +807,18 @@ void EditorWorkspace::activateEditor(const QString &id) {
         session.editor = documentEditor;
         editors_->addWidget(documentEditor);
         editorSessions_.insert(id, session);
+        connect(documentEditor, &MarkdownEditor::imageDirectoryRequested, this, [this, id](QString *directory) {
+            const auto *book = store_.owner(id);
+            const auto *note = documentNote(id);
+            if (!book || book->type != "site" || !note) return;
+            auto source = QString::fromUtf8(StaticSite::postSource(*note));
+            QJsonObject metadata;
+            QString error;
+            if (!FrontMatter::parse(source, metadata, &error)) metadata = note->metadata;
+            auto slug = NotebookStore::sanitized(metadata["slug"].toString());
+            if (slug.isEmpty()) slug = QFileInfo(note->path).completeBaseName();
+            *directory = QDir(*directory).filePath(slug);
+        });
         connect(textEdit, &QTextEdit::undoAvailable, this, [this, id](bool available) {
             if (activeEditorId_ == id) undo_->setEnabled(available && viewMode_ != ViewMode::Preview);
         });

@@ -22,6 +22,7 @@ public:
 
 signals:
     void settingsChanged();
+    void imageDirectoryRequested(QString *directory);
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -29,6 +30,7 @@ protected:
 private:
     MarkdownEditor(const QSharedPointer<vte::MarkdownEditorConfig> &config, QWidget *parent);
     void insertImage(quint64 requestId = 0, const QString &selectedText = {});
+    QString imageDirectory();
     void saveSetting(const QString &key, const QVariant &value);
     QSharedPointer<vte::MarkdownEditorConfig> config_;
     InplacePreview *inplacePreview_ = nullptr;

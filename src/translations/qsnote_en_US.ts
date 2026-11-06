@@ -2236,11 +2236,6 @@ It will be removed from the list. Files on disk will be kept, and you can add it
         </message>
         <message>
             <location line="+1" />
-            <source>缩短显示过长的链接地址</source>
-            <translation>Shorten long link URLs</translation>
-        </message>
-        <message>
-            <location line="+1" />
             <location line="+72" />
             <source>自动对齐表格源码</source>
             <translation>Automatically align table source</translation>

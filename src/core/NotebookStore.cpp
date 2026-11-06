@@ -23,15 +23,16 @@
 namespace {
 QString storageDir() { return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation); }
 
-bool copyInsertedImages(QString &content, const QString &oldDirectory, const QString &newDirectory, QString *error) {
+bool copyInsertedImages(QString &content, const QString &oldDirectory, const QString &newDirectory, QSet<QString> *movedImages, QString *error) {
     if (oldDirectory == newDirectory) return true;
     const auto images = vte::MarkdownUtils::fetchImageLinks(content, oldDirectory, vte::MarkdownLink::LocalRelativeInternal);
     for (const auto &image: images) {
         const QFileInfo sourceInfo(image.m_path);
-        // Images inserted by the editor live directly in resources/images. Use
-        // parser spans so code examples and unrelated links remain untouched.
+        // Include per-article subdirectories; parser spans leave code examples
+        // and unrelated links untouched.
+        const auto relative = QDir(oldDirectory).relativeFilePath(sourceInfo.absoluteFilePath());
         if (!image.hasUrlSpan() || !image.m_exists
-            || sourceInfo.absolutePath() != QDir(oldDirectory).filePath("resources/images")) continue;
+            || !relative.startsWith("resources/images/")) continue;
         QFile source(image.m_path);
         if (!source.open(QIODevice::ReadOnly)) {
             *error = source.fileName() + ": " + source.errorString();
@@ -42,17 +43,18 @@ bool copyInsertedImages(QString &content, const QString &oldDirectory, const QSt
             *error = source.fileName() + ": " + source.errorString();
             return false;
         }
-        const QDir destination(QDir(newDirectory).filePath("resources/images"));
+        const QDir destination(QFileInfo(QDir(newDirectory).filePath(relative)).absolutePath());
         auto name = sourceInfo.fileName();
         for (int index = 1; QFileInfo::exists(destination.filePath(name)); ++index) {
             QFile existing(destination.filePath(name));
             if (existing.open(QIODevice::ReadOnly) && existing.readAll() == bytes) break;
             name = sourceInfo.completeBaseName() + '-' + QString::number(index) + '.' + sourceInfo.suffix();
         }
-        // Keep the source: other notes in the old directory may still use it.
+        // Remove site sources only after the moved notes and index are saved.
         if (!QFileInfo::exists(destination.filePath(name)) && !AtomicFile::write(destination.filePath(name), bytes, error)) return false;
+        if (movedImages) movedImages->insert(sourceInfo.absoluteFilePath());
         if (name != sourceInfo.fileName()) {
-            const auto url = "resources/images/" + QString::fromLatin1(QUrl::toPercentEncoding(name));
+            const auto url = QString::fromLatin1(QUrl::toPercentEncoding(QDir(newDirectory).relativeFilePath(destination.filePath(name)), "/"));
             content.replace(image.m_urlStart, image.m_urlEnd - image.m_urlStart, url);
         }
     }
@@ -380,6 +382,7 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
     };
     std::stable_sort(order.begin(), order.end(), [&](const Note *first, const Note *second) { return depth(*first) < depth(*second); });
     QSet<QString> used;
+    QSet<QString> movedImages;
     for (auto *note: order) {
         const QString oldPath = note->path;
         if (book.type == "normal" && !oldPath.isEmpty() && !QFileInfo::exists(root.filePath(oldPath)) && !QFileInfo(root.filePath(oldPath)).isSymLink()) {
@@ -412,7 +415,7 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
             const QString oldAbsolute = root.absoluteFilePath(oldPath);
             const QString newAbsolute = root.absoluteFilePath(expected);
             auto content = note->content;
-            if (!note->folder && note->kind == Note::Kind::Markdown && !copyInsertedImages(content, QFileInfo(oldAbsolute).absolutePath(), QFileInfo(newAbsolute).absolutePath(), error)) return false;
+            if (!note->folder && note->kind == Note::Kind::Markdown && !copyInsertedImages(content, QFileInfo(oldAbsolute).absolutePath(), QFileInfo(newAbsolute).absolutePath(), book.type == "site" ? &movedImages : nullptr, error)) return false;
             if ((QFileInfo::exists(oldAbsolute) || QFileInfo(oldAbsolute).isSymLink()) && (!QDir().mkpath(QFileInfo(newAbsolute).absolutePath()) || !QDir().rename(oldAbsolute, newAbsolute))) {
                 *error = QCoreApplication::translate("NotebookStore", "无法将 %1 移动到 %2").arg(oldAbsolute, newAbsolute);
                 return false;
@@ -477,7 +480,25 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
     }
     // 索引同时记录笔记本元信息，关闭笔记本后仍可凭目录完整恢复。
     const QJsonObject index{{"id", book.id}, {"name", book.name}, {"type", book.type}, {"config", book.config}, {"notes", entries}};
-    return AtomicFile::write(root.absoluteFilePath(indexFileName()), QJsonDocument(index).toJson(), error);
+    if (!AtomicFile::write(root.absoluteFilePath(indexFileName()), QJsonDocument(index).toJson(), error)) return false;
+    // A resource explicitly shared by another article must remain available there.
+    for (const auto &note: book.notes) {
+        if (movedImages.isEmpty()) break;
+        if (note.folder || note.kind != Note::Kind::Markdown) continue;
+        const auto directory = QFileInfo(root.filePath(note.path)).absolutePath();
+        const auto images = vte::MarkdownUtils::fetchImageLinks(note.content, directory, vte::MarkdownLink::LocalRelativeInternal | vte::MarkdownLink::LocalRelativeExternal | vte::MarkdownLink::LocalAbsolute);
+        for (const auto &image: images) movedImages.remove(QFileInfo(image.m_path).absoluteFilePath());
+    }
+    for (const auto &path: movedImages) {
+        QFile image(path);
+        if (!image.remove()) {
+            *error = path + ": " + image.errorString();
+            return false;
+        }
+        auto parent = QFileInfo(path).absolutePath();
+        while (parent.startsWith(book.path + '/') && QDir().rmdir(parent)) parent = QFileInfo(parent).absolutePath();
+    }
+    return true;
 }
 
 bool NotebookStore::save(QString *error) {
