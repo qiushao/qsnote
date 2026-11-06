@@ -51,7 +51,15 @@ bool run(const QString &program, const QStringList &arguments, const QString &di
         if (!latest.isEmpty()) progress(latest);
     };
     QObject::connect(&process, &QProcess::readyReadStandardError, &loop, readProgress);
-    process.start(program, arguments);
+#ifdef Q_OS_WIN
+    if (program == "cmd.exe") {
+        process.setNativeArguments(arguments.join(' '));
+        process.start(program);
+    } else
+#endif
+    {
+        process.start(program, arguments);
+    }
     process.closeWriteChannel();
     timeout.start(300000);
     loop.exec();
@@ -111,6 +119,16 @@ bool SitePublisher::validate(const Notebook &book, QString *error) {
             return false;
         }
         programs = {"ssh", "scp"};
+    } else if (method == "custom") {
+        if (setting(book, "publishCommand").isEmpty()) {
+            *error = QCoreApplication::translate("SitePublisher", "请在站点配置中填写自定义发布命令。");
+            return false;
+        }
+#ifdef Q_OS_WIN
+        programs = {"cmd.exe"};
+#else
+        programs = {"/bin/sh"};
+#endif
     } else {
         *error = QCoreApplication::translate("SitePublisher", "请先在站点配置中选择发布方式并填写对应设置。");
         return false;
@@ -130,6 +148,21 @@ bool SitePublisher::publish(const Notebook &book, QString *error, const Progress
     if (!QFileInfo(source + "/index.html").isFile() || QFileInfo::exists(source + "/.git")) {
         *error = QCoreApplication::translate("SitePublisher", "站点生成结果无效，请重新生成站点，且不要在 public 中放置 .git。");
         return false;
+    }
+    if (setting(book, "publishMethod") == "custom") {
+        const auto command = setting(book, "publishCommand");
+        const auto message = QCoreApplication::translate("SitePublisher", "正在执行自定义发布命令…");
+        if (progress) progress(0, 1, message);
+        const auto commandProgress = [&](const QString &detail) {
+            if (progress) progress(0, 1, message + '\n' + detail.right(500));
+        };
+#ifdef Q_OS_WIN
+        if (!run("cmd.exe", {"/d", "/s", "/c", '"' + command + '"'}, book.path, error, nullptr, commandProgress)) return false;
+#else
+        if (!run("/bin/sh", {"-c", command}, book.path, error, nullptr, commandProgress)) return false;
+#endif
+        if (progress) progress(1, 1, QCoreApplication::translate("SitePublisher", "自定义发布命令执行完成"));
+        return true;
     }
     if (setting(book, "publishMethod") == "scp") {
         const auto host = setting(book, "sshHost");

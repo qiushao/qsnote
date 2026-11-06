@@ -1535,7 +1535,7 @@ void MainWindow::publishSite(const Notebook &book) {
         QMessageBox::warning(this, tr("站点发布失败"), error);
         return;
     }
-    editorWorkspace_->showStatus(snapshot.config["publishMethod"].toString() == "github"
-                                         ? publishMessage
-                                         : tr("站点已通过 SSH SCP 上传"));
+    editorWorkspace_->showStatus(snapshot.config["publishMethod"].toString() == "scp"
+                                         ? tr("站点已通过 SSH SCP 上传")
+                                         : publishMessage);
 }

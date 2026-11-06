@@ -326,7 +326,7 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent)
     form->addWidget(addLink, 0, Qt::AlignLeft);
     connect(addLink, &QPushButton::clicked, &dialog, [appendLink] { appendLink({}); });
     section("sitePublishCard", QCoreApplication::translate("MainWindow", "生成与发布"));
-    auto *method = field("publishMethod", QCoreApplication::translate("MainWindow", "发布方式"), {QCoreApplication::translate("MainWindow", "请选择"), "GitHub Pages", "SSH SCP"}, {"", "github", "scp"})->findChild<QComboBox *>();
+    auto *method = field("publishMethod", QCoreApplication::translate("MainWindow", "发布方式"), {QCoreApplication::translate("MainWindow", "请选择"), "GitHub Pages", "SSH SCP", QCoreApplication::translate("MainWindow", "自定义命令")}, {"", "github", "scp", "custom"})->findChild<QComboBox *>();
     auto publishField = [&](const QString &key, const QString &caption, const QString &platform, const QString &placeholder) {
         auto *container = field(key, caption);
         container->findChild<QLineEdit *>()->setPlaceholderText(placeholder);
@@ -342,6 +342,7 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent)
     publishField("sshUser", QCoreApplication::translate("MainWindow", "SSH 用户名"), "scp", QCoreApplication::translate("MainWindow", "部署用户"));
     publishField("sshDirectory", QCoreApplication::translate("MainWindow", "远程目录"), "scp", QCoreApplication::translate("MainWindow", "/var/www/site（绝对路径，不含空格）"));
     publishField("sshIdentityFile", QCoreApplication::translate("MainWindow", "私钥文件"), "scp", QCoreApplication::translate("MainWindow", "可选，填写本地完整路径；留空使用 SSH 默认配置"));
+    publishField("publishCommand", QCoreApplication::translate("MainWindow", "发布命令"), "custom", QCoreApplication::translate("MainWindow", "例如 rsync -av public/ user@example.com:/var/www/site/"));
     auto *publishHint = label({}, card, true);
     const auto updatePublishHint = [method, publishHint] {
         const auto platform = method->currentData().toString();
@@ -349,6 +350,8 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent)
                                      ? QCoreApplication::translate("MainWindow", "使用本机 Git 凭据或 SSH 密钥。发布分支根目录将更新为站点内容；请在 GitHub 仓库 Settings → Pages 中选择该分支的 / (root)。域名请填写实际访问地址，项目站点需包含仓库子路径。")
                              : platform == "scp"
                                      ? QCoreApplication::translate("MainWindow", "使用 SSH 密钥或 ssh-agent；请先在终端连接主机并确认指纹。上传会覆盖同名文件，保留远端其他文件。")
+                             : platform == "custom"
+                                     ? QCoreApplication::translate("MainWindow", "生成站点后，在站点根目录执行命令，生成结果位于 public/。Linux/macOS 使用 /bin/sh，Windows 使用 cmd.exe；支持管道和重定向。命令须无需交互输入，5 分钟超时；退出码为 0 表示成功。")
                                      : QCoreApplication::translate("MainWindow", "选择发布方式后填写对应设置。预览无需发布设置。"));
     };
     connect(method, &QComboBox::currentIndexChanged, publishHint, updatePublishHint);

@@ -1692,6 +1692,22 @@ It will be removed from the list. Files on disk will be kept, and you can add it
             <translation>Publish method</translation>
         </message>
         <message>
+            <source>自定义命令</source>
+            <translation>Custom command</translation>
+        </message>
+        <message>
+            <source>发布命令</source>
+            <translation>Publish command</translation>
+        </message>
+        <message>
+            <source>例如 rsync -av public/ user@example.com:/var/www/site/</source>
+            <translation>For example: rsync -av public/ user@example.com:/var/www/site/</translation>
+        </message>
+        <message>
+            <source>生成站点后，在站点根目录执行命令，生成结果位于 public/。Linux/macOS 使用 /bin/sh，Windows 使用 cmd.exe；支持管道和重定向。命令须无需交互输入，5 分钟超时；退出码为 0 表示成功。</source>
+            <translation>After generating the site, run the command from the site root. Generated files are in public/. Uses /bin/sh on Linux/macOS and cmd.exe on Windows, with pipes and redirection supported. Commands must not require interactive input and time out after 5 minutes. Exit code 0 indicates success.</translation>
+        </message>
+        <message>
             <location line="+0" />
             <source>请选择</source>
             <translation>Select a method</translation>
@@ -2743,6 +2759,18 @@ It will be removed from the list. Files on disk will be kept, and you can add it
     </context>
     <context>
         <name>SitePublisher</name>
+        <message>
+            <source>请在站点配置中填写自定义发布命令。</source>
+            <translation>Enter a custom publish command in Site Settings.</translation>
+        </message>
+        <message>
+            <source>正在执行自定义发布命令…</source>
+            <translation>Running custom publish command…</translation>
+        </message>
+        <message>
+            <source>自定义发布命令执行完成</source>
+            <translation>Custom publish command completed</translation>
+        </message>
         <message>
             <source>发布缓存正被使用，请稍后重试。</source>
             <translation>The publishing cache is in use. Please try again later.</translation>
