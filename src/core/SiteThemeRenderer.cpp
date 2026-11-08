@@ -294,7 +294,7 @@ QString SiteThemeRenderer::html(const QString &route, const QString &title, cons
     if (plumeTheme()) {
         const bool document = page && page->document;
         const auto markup = themeTemplate("shell", {{"headTitle", escaped(title + " | " + book_.config["title"].toString(book_.name))},
-            {"title", escaped(title)}, {"content", body}, {"menu", plumeNavigation(route)}, {"layout", document ? "document" : "blog"},
+            {"title", escaped(title)}, {"content", body}, {"menu", plumeNavigation(route)}, {"layout", document ? "document" : page ? "blog blog-page" : route.isEmpty() || route.startsWith("page/") ? "blog blog-home" : "blog"},
             {"sidebar", document ? plumeSidebar(page->collectionId, route) : themeTemplate("profile")},
             {"mobileProfile", document ? QString() : themeTemplate("profile")},
             {"toc", page && !page->toc.isEmpty() ? "<details open><summary>本页目录</summary><ol>" + page->toc + "</ol></details>" : QString()},

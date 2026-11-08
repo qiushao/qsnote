@@ -1,6 +1,6 @@
 /* QSNote's static HTML adaptation of Plume's navbar, document and sidebar layouts. */
 * { box-sizing: border-box; }
-html { scroll-padding-top: 92px; color-scheme: light; }
+html { scroll-padding-top: 92px; color-scheme: light; overflow-y: scroll; }
 html[data-theme="dark"] { color-scheme: dark; }
 body { margin: 0; min-width: 320px; font-family: var(--vp-font-family-base); font-size: 16px; font-weight: 400; line-height: 24px; -webkit-font-smoothing: antialiased; color: var(--vp-c-text-1); background: var(--vp-c-bg); }
 body.blog { background: var(--vp-c-bg-alt); }
@@ -18,14 +18,11 @@ img { display: block; max-width: 100%; height: auto; }
 :focus-visible { outline: 2px solid var(--vp-c-brand-1); outline-offset: 3px; }
 .skip-link { position: fixed; top: -100px; left: 12px; z-index: 100; background: var(--vp-c-bg); padding: 8px; }
 .skip-link:focus { top: 8px; }
-.vp-navbar { display: flex; align-items: center; gap: 0; position: sticky; top: 0; z-index: 20; height: 64px; padding: 0 32px; background: var(--vp-c-bg); border-bottom: 1px solid var(--vp-c-divider); }
-.vp-navbar-title { display: flex; align-items: center; flex-shrink: 0; gap: 8px; font-size: 16px; font-weight: 600; color: var(--vp-c-text-1); }
-.vp-navbar-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vp-navbar-title img { width: 24px; height: 24px; object-fit: contain; }
-#search-toggle { display: flex; align-items: center; gap: 8px; height: 40px; margin-left: 32px; padding: 0 12px; border: 1px solid transparent; border-radius: 8px; background: var(--vp-c-bg-alt); color: var(--vp-c-text-2); font-size: 13px; }
+.vp-navbar { display: flex; align-items: center; justify-content: center; gap: 0; position: sticky; top: 0; z-index: 20; height: 64px; padding: 0 32px; background: var(--vp-c-bg); border-bottom: 1px solid var(--vp-c-divider); }
+#search-toggle { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; border: 1px solid transparent; border-radius: 8px; background: var(--vp-c-bg-alt); color: var(--vp-c-text-2); font-size: 13px; }
 #search-toggle:hover { border-color: var(--vp-c-brand-1); }
 #search-toggle kbd { padding: 0 5px; border: 1px solid var(--vp-c-divider); border-radius: 4px; font: 12px/22px var(--vp-font-family-base); color: var(--vp-c-text-1); }
-.vp-menu { margin-left: auto; padding-left: 24px; }
+.vp-menu { padding-left: 24px; }
 .vp-menu > summary { display: none; }
 .vp-menu > nav { display: flex; align-items: center; gap: 24px; font-size: 14px; font-weight: 500; }
 .vp-menu a { display: inline-flex; align-items: center; gap: 6px; }
@@ -49,7 +46,7 @@ img { display: block; max-width: 100%; height: auto; }
 [data-theme="dark"] .switch-check .vpi-moon { opacity: 1; }
 .github-link { display: flex; align-items: center; margin-left: 16px; padding-left: 16px; border-left: 1px solid var(--vp-c-divider); color: var(--vp-c-text-2); }
 .github-link svg,.vp-social-link svg { width: 20px; height: 20px; }
-.vp-layout { display: grid; grid-template-columns: 240px minmax(0,760px) 200px; gap: 32px; max-width: 1440px; margin: auto; padding: 32px; align-items: start; }
+.vp-layout { display: grid; grid-template-columns: 240px minmax(0,900px) 240px; gap: 24px; max-width: 1476px; margin: auto; padding: 32px 24px; align-items: start; }
 .vp-left,.vp-outline { position: sticky; top: 96px; max-height: calc(100vh - 120px); overflow: auto; font-size: 14px; }
 .vp-outline { border-left: 1px solid var(--vp-c-divider); padding-left: 16px; }
 .vp-outline:empty { border: 0; }
@@ -57,10 +54,10 @@ img { display: block; max-width: 100%; height: auto; }
 .vp-outline > details > ol { padding-left: 0; }
 .vp-outline a { color: var(--vp-c-text-2); display: block; padding: 3px 0; }
 .vp-outline a.active { color: var(--vp-c-brand-1); }
-.blog .vp-layout { grid-template-columns: minmax(0,1fr) 270px; gap: 24px; max-width: 1152px; padding: 32px 24px; min-height: calc(100vh - 177px); }
-.blog main { grid-column: 1; grid-row: 1; min-width: 0; }
-.blog .vp-left { grid-column: 2; grid-row: 1; max-height: none; overflow: visible; }
-.blog .vp-outline { grid-column: 2; grid-row: 2; }
+.blog .vp-layout { grid-template-columns: 270px minmax(0,1fr); gap: 24px; max-width: 1152px; padding: 32px 24px; min-height: calc(100vh - 177px); }
+.blog main { grid-column: 2; grid-row: 1; min-width: 0; }
+.blog .vp-left { grid-column: 1; grid-row: 1; max-height: none; overflow: visible; }
+.blog .vp-outline { grid-column: 1; grid-row: 2; }
 .blog .vp-outline:empty { display: none; }
 .vp-profile { text-align: center; }
 .vp-profile img { width: 60%; height: auto; }
@@ -136,13 +133,20 @@ dialog form { float: right; }
 #search-results { padding: 0; list-style: none; }
 #search-results a { display: block; padding: 10px; }
 #search-results small { display: block; color: var(--vp-c-text-2); }
+@media (min-width: 768px) {
+  .blog-page .vp-layout,.blog-home .vp-layout { grid-template-columns: 200px minmax(0,1fr) 200px; justify-content: center; max-width: 1440px; }
+  .blog-page .vp-outline { grid-column: 3; grid-row: 1; width: 200px; }
+}
+@media (min-width: 1200px) {
+  .blog-page .vp-layout,.blog-home .vp-layout { grid-template-columns: 240px minmax(0,900px) 240px; max-width: 1476px; }
+  .blog-page .vp-outline { width: 240px; }
+}
 @media (max-width: 1199px) { .document .vp-layout { grid-template-columns: 220px minmax(0,1fr); } .document .vp-outline { position: static; grid-column: 2; grid-row: 1; } .document main { grid-column: 2; } .document .vp-left { grid-row: 1 / span 2; } }
 @media (min-width: 960px) and (max-width: 1279px) { #search-toggle :is(.search-label,kbd) { display: none; } #search-toggle { padding: 0; width: 32px; justify-content: center; background: transparent; } .vp-menu > nav { gap: 16px; } }
 @media (max-width: 959px) {
   .vp-navbar { padding: 0 24px; }
-  .vp-navbar-title { flex-shrink: 1; min-width: 0; margin-right: 12px; }
   #search-toggle,.vp-tools,.vp-menu { flex-shrink: 0; }
-  #search-toggle { margin-left: auto; padding: 0; width: 32px; justify-content: center; background: transparent; font-size: 18px; }
+  #search-toggle { padding: 0; width: 32px; justify-content: center; background: transparent; font-size: 18px; }
   #search-toggle :is(.search-label,kbd) { display: none; }
   .vp-menu { order: 4; margin-left: 16px; padding: 0; }
   .vp-menu > summary { display: flex; align-items: center; justify-content: center; width: 24px; height: 32px; font-size: 20px; }
