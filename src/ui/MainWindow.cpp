@@ -686,6 +686,7 @@ void MainWindow::refreshTree() {
         blogRoot->setData(0, Qt::UserRole, "section:blog");
         blogRoot->setExpanded(!collapsed.contains("section:blog"));
         docsRoot = new QTreeWidgetItem(tree_, {tr("文档")});
+        docsRoot->setHidden(book->config["theme"].toString() != "plume");
         docsRoot->setData(0, Qt::UserRole, "section:docs");
         docsRoot->setExpanded(!collapsed.contains("section:docs"));
         for (const auto &value: book->config["docCollections"].toArray()) {

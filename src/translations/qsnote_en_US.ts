@@ -3059,6 +3059,10 @@ Waiting for transfer to finish; byte progress is unavailable with SCP.</translat
     </context>
     <context>
         <name>SiteContentSettings</name>
+        <message>
+            <source>&lt;a href="https://theme-plume.vuejs.press/blog/"&gt;Plume 官方网站&lt;/a&gt;</source>
+            <translation>&lt;a href="https://theme-plume.vuejs.press/blog/"&gt;Plume Official Website&lt;/a&gt;</translation>
+        </message>
         <message><source>图标</source><translation>Icon</translation></message>
         <message>
             <source>文档集合</source>

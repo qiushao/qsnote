@@ -64,6 +64,7 @@ bool editCollection(QJsonObject &item, bool creating, QWidget *parent) {
 bool editNavigation(QJsonObject &item, const Notebook &book, QWidget *parent) {
     QDialog dialog(parent);
     dialog.setWindowTitle(QCoreApplication::translate("SiteContentSettings", "导航项"));
+    dialog.resize(640, 440);
     auto *form = new QFormLayout(&dialog);
     auto *title = new QLineEdit(item["title"].toString(), &dialog);
     form->addRow(QCoreApplication::translate("SiteContentSettings", "名称"), title);
@@ -253,5 +254,8 @@ QWidget *siteContentSettings(Notebook &book, QWidget *parent) {
     }
     layout->addWidget(navigationActions);
     layout->addWidget(label(QCoreApplication::translate("SiteContentSettings", "选中分组后新增链接可添加子项。取消自定义导航恢复默认项。集合 Slug 创建后固定；导航引用草稿或已删除内容时需修正。"), widget, true));
+    auto *plumeLink = label(QCoreApplication::translate("SiteContentSettings", "<a href=\"https://theme-plume.vuejs.press/blog/\">Plume 官方网站</a>"), widget, true);
+    plumeLink->setOpenExternalLinks(true);
+    layout->addWidget(plumeLink);
     return widget;
 }
