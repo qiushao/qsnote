@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{headTitle}}</title><meta name="description" content="{{description}}">{{keywordsMeta}}
+<link rel="stylesheet" href="{{root}}css/vars.css"><link rel="stylesheet" href="{{root}}css/components.css"><link rel="stylesheet" href="{{root}}css/icons.css"><link rel="stylesheet" href="{{root}}css/qsnote-article.css"><link rel="stylesheet" href="{{root}}css/qsnote-plume.css">
+<script src="{{root}}js/plume.js" defer></script>
+</head>
+<body data-root="{{root}}" class="{{layout}}">
+<a class="skip-link" href="#main">跳到正文</a>
+<header class="vp-navbar">
+<a class="vp-navbar-title" href="{{root}}">{{#avatar}}<img src="{{avatar}}" alt="" width="24" height="24">{{/avatar}}<span>{{siteTitle}}</span></a>
+<button type="button" id="search-toggle" aria-label="搜索文档" hidden><span class="vpi-search" aria-hidden="true"></span><span class="search-label">搜索文档</span><kbd>Ctrl K</kbd></button>
+<details class="vp-menu" open><summary aria-label="菜单"><span class="vpi-menu" aria-hidden="true"></span></summary><nav aria-label="主导航">{{menu}}</nav></details>
+<div class="vp-tools"><button type="button" id="theme-toggle" role="switch" aria-checked="false" aria-label="深色模式" hidden><span class="switch-check"><span class="vpi-sun" aria-hidden="true"></span><span class="vpi-moon" aria-hidden="true"></span></span></button>{{#githubSocial}}<a class="github-link" href="{{githubSocial}}" aria-label="GitHub">{{githubIcon}}</a>{{/githubSocial}}</div>
+</header>
+<div class="vp-layout"><aside class="vp-left">{{sidebar}}</aside><main id="main" tabindex="-1">{{content}}</main><aside class="vp-outline" aria-label="本页目录">{{toc}}</aside></div>
+{{#mobileProfile}}<button type="button" class="vp-posts-extract" aria-label="博客资料与导航" aria-haspopup="dialog" aria-expanded="false" hidden><span class="vpi-posts-ext" aria-hidden="true"></span></button><dialog id="profile-dialog" aria-label="博客资料与导航"><form method="dialog"><button aria-label="关闭资料">×</button></form>{{mobileProfile}}</dialog>{{/mobileProfile}}
+<footer class="vp-footer">{{footer}} · Theme <a href="https://github.com/pengzhanbo/vuepress-theme-plume">Plume</a></footer>
+<dialog id="search-dialog" aria-labelledby="search-title"><form method="dialog"><button aria-label="关闭搜索">关闭</button></form><h2 id="search-title">搜索</h2><label for="search-input">搜索博客与文档</label><input id="search-input" type="search" autocomplete="off"><p id="search-status" role="status"></p><ul id="search-results"></ul></dialog>
+</body></html>

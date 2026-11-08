@@ -43,6 +43,7 @@ public:
     void removeDocuments(const QSet<QString> &ids);
     void refresh(bool suspended);
     bool saveExternalFilesAndSync();
+    bool reloadSiteFiles(const QStringList &roots);
     void reloadSettings();
     void showStatus(const QString &text);
     void setFullScreenPreview(bool enabled);

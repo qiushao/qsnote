@@ -2,6 +2,7 @@
 #include "ArticleRenderer.h"
 #include "AtomicFile.h"
 #include "StaticSite.h"
+#include "SiteDocuments.h"
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
@@ -137,6 +138,7 @@ QString NotebookStore::relativePath(const Notebook &book, const Note &note) {
         const auto name = note.title == QFileInfo(note.path).fileName() ? note.title : sanitized(note.title);
         return directory.isEmpty() ? name : directory + '/' + name;
     }
+    if (book.type == "site" && SiteDocuments::isDocument(note)) return SiteDocuments::sourcePath(book, note);
     auto name = sanitized(note.title);
     if (name.isEmpty()) name = QStringLiteral("未命名");
     if (!note.folder && !name.endsWith(QStringLiteral(".md"))) name += QStringLiteral(".md");
@@ -352,12 +354,46 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
         *error = QCoreApplication::translate("NotebookStore", "无法读取目录：%1").arg(book.path);
         return false;
     }
+    if (book.type == "site") {
+        if (!SiteDocuments::validate(book, error)) return false;
+        const auto moves = SiteDocuments::collectionMoves(book);
+        for (auto it = moves.cbegin(); it != moves.cend(); ++it) {
+            const QFileInfo target(QDir(book.path).filePath(it.value()));
+            if (target.exists() || target.isSymLink()) {
+                *error = QCoreApplication::translate("SiteDocuments", "文档路径已存在：%1").arg(it.value());
+                return false;
+            }
+        }
+        for (const auto &note: book.notes) {
+            if (!SiteDocuments::isDocument(note)) continue;
+            const auto target = SiteDocuments::sourcePath(book, note);
+            if (target != note.path && QFileInfo::exists(QDir(book.path).filePath(target))) {
+                *error = QCoreApplication::translate("SiteDocuments", "文档路径已存在：%1").arg(target);
+                return false;
+            }
+        }
+    }
     if (!QDir().mkpath(book.path)) {
         *error = QCoreApplication::translate("NotebookStore", "无法创建笔记本目录：") + book.path;
         return false;
     }
     if (book.type == "site" && !StaticSite::prepare(book, error)) return false;
+    if (book.type == "site" && !SiteDocuments::updateLinks(book, error)) return false;
     const QDir root(book.path);
+    if (book.type == "site") {
+        const auto moves = SiteDocuments::collectionMoves(book);
+        for (auto it = moves.cbegin(); it != moves.cend(); ++it) {
+            const auto before = root.filePath(it.key()), after = root.filePath(it.value());
+            if (QFileInfo::exists(before) && !QDir().rename(before, after)) {
+                *error = QCoreApplication::translate("NotebookStore", "无法将 %1 移动到 %2").arg(before, after);
+                return false;
+            }
+            for (auto &note: book.notes) {
+                if (SiteDocuments::isDocument(note) && note.path.startsWith(it.key() + '/'))
+                    note.path = it.value() + note.path.mid(it.key().size());
+            }
+        }
+    }
     // 父先子后处理，移动父目录后子孙路径随前缀替换保持一致。
     QList<Note *> order;
     for (auto &note: book.notes) order.append(&note);
@@ -396,6 +432,10 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
             const QFileInfo existing(root.absoluteFilePath(candidate));
             return used.contains(candidate) || (candidate != oldPath && (existing.exists() || existing.isSymLink()));
         };
+        if (taken(expected) && book.type == "site" && SiteDocuments::isDocument(*note)) {
+            *error = QCoreApplication::translate("SiteDocuments", "文档路径已存在：%1").arg(expected);
+            return false;
+        }
         if (taken(expected)) {
             QString suffix = expected.endsWith(QStringLiteral(".md")) ? QStringLiteral(".md") : QString();
             if (book.type == "normal") {
@@ -415,7 +455,7 @@ bool NotebookStore::syncNotebook(Notebook &book, QString *error) {
             const QString oldAbsolute = root.absoluteFilePath(oldPath);
             const QString newAbsolute = root.absoluteFilePath(expected);
             auto content = note->content;
-            if (!note->folder && note->kind == Note::Kind::Markdown && !copyInsertedImages(content, QFileInfo(oldAbsolute).absolutePath(), QFileInfo(newAbsolute).absolutePath(), book.type == "site" ? &movedImages : nullptr, error)) return false;
+            if (!SiteDocuments::isDocument(*note) && !note->folder && note->kind == Note::Kind::Markdown && !copyInsertedImages(content, QFileInfo(oldAbsolute).absolutePath(), QFileInfo(newAbsolute).absolutePath(), book.type == "site" ? &movedImages : nullptr, error)) return false;
             if ((QFileInfo::exists(oldAbsolute) || QFileInfo(oldAbsolute).isSymLink()) && (!QDir().mkpath(QFileInfo(newAbsolute).absolutePath()) || !QDir().rename(oldAbsolute, newAbsolute))) {
                 *error = QCoreApplication::translate("NotebookStore", "无法将 %1 移动到 %2").arg(oldAbsolute, newAbsolute);
                 return false;

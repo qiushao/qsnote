@@ -13,6 +13,7 @@
 #include "UiStyle.h"
 #include "core/ArticleRenderer.h"
 #include "core/ChapterOperations.h"
+#include "core/SiteDocuments.h"
 #include "core/NotebookCategories.h"
 #include "core/SitePublisher.h"
 #include "core/StaticSite.h"
@@ -678,9 +679,27 @@ void MainWindow::refreshTree() {
     const auto titles = NotebookStore::chapterTitles(*book);
     QFileIconProvider fileIcons;
     int matches = 0;
+    QTreeWidgetItem *blogRoot = nullptr;
+    QTreeWidgetItem *docsRoot = nullptr;
+    if (book->type == "site" && query.isEmpty()) {
+        blogRoot = new QTreeWidgetItem(tree_, {tr("博客")});
+        blogRoot->setData(0, Qt::UserRole, "section:blog");
+        blogRoot->setExpanded(!collapsed.contains("section:blog"));
+        docsRoot = new QTreeWidgetItem(tree_, {tr("文档")});
+        docsRoot->setData(0, Qt::UserRole, "section:docs");
+        docsRoot->setExpanded(!collapsed.contains("section:docs"));
+        for (const auto &value: book->config["docCollections"].toArray()) {
+            const auto group = value.toObject();
+            const auto key = "collection:" + group["id"].toString();
+            auto *node = new QTreeWidgetItem(docsRoot, {group["name"].toString()});
+            node->setData(0, Qt::UserRole, key);
+            node->setExpanded(!collapsed.contains(key));
+            nodes.insert(key, node);
+        }
+    }
     if (book->type == "site" && query.isEmpty() && groupBy_->currentIndex() == 0) {
         for (const auto &category: NotebookCategories::site(*book)) {
-            auto *item = new QTreeWidgetItem(tree_, {category + QStringLiteral("（0）")});
+            auto *item = new QTreeWidgetItem(blogRoot, {category + QStringLiteral("（0）")});
             item->setIcon(0, icon("folder"));
             item->setData(0, Qt::UserRole, "group:" + category);
             item->setData(0, Qt::UserRole + 4, category);
@@ -691,7 +710,7 @@ void MainWindow::refreshTree() {
         if (book->type == "normal" && !QFileInfo::exists(QDir(book->path).filePath(note.path)) && !QFileInfo(QDir(book->path).filePath(note.path)).isSymLink()) continue;
         if (!query.isEmpty() && (note.folder || (!note.title.contains(query, Qt::CaseInsensitive) && !note.content.contains(query, Qt::CaseInsensitive)))) continue;
         QStringList groups{QString()};
-        if (book->type == "site" && query.isEmpty()) {
+        if (book->type == "site" && !SiteDocuments::isDocument(note) && query.isEmpty()) {
             if (groupBy_->currentIndex() == 0) groups = {note.metadata["category"].toString().isEmpty() ? tr("未分类") : note.metadata["category"].toString()};
             else if (groupBy_->currentIndex() == 1) {
                 groups = note.metadata["tags"].toString().split(QRegularExpression("[,，]"), Qt::SkipEmptyParts);
@@ -722,9 +741,12 @@ void MainWindow::refreshTree() {
                 item->setData(0, Qt::UserRole + 3, snippet);
                 item->setToolTip(0, note.title + "\n" + snippet);
             }
-            if (book->type == "site" && query.isEmpty()) {
+            if (book->type == "site" && SiteDocuments::isDocument(note) && query.isEmpty()) {
+                docsRoot->addChild(item);
+                nodes.insert(note.id, item);
+            } else if (book->type == "site" && query.isEmpty()) {
                 if (!nodes.contains(group)) {
-                    auto *groupItem = new QTreeWidgetItem(tree_);
+                    auto *groupItem = new QTreeWidgetItem(blogRoot);
                     groupItem->setIcon(0, icon("folder"));
                     groupItem->setData(0, Qt::UserRole, "group:" + group);
                     if (groupBy_->currentIndex() == 0) groupItem->setData(0, Qt::UserRole + 4, group);
@@ -740,6 +762,18 @@ void MainWindow::refreshTree() {
             if (note.id == editorWorkspace_->currentNoteId()) tree_->setCurrentItem(item);
         }
         ++matches;
+    }
+    if (book->type == "site" && query.isEmpty()) {
+        for (const auto &note: book->notes) {
+            if (!SiteDocuments::isDocument(note)) continue;
+            auto *item = nodes.value(note.id);
+            auto *parent = nodes.value(note.parentId.isEmpty() ? "collection:" + note.metadata["collectionId"].toString() : note.parentId);
+            if (item && parent) {
+                item->parent()->removeChild(item);
+                parent->addChild(item);
+                item->setExpanded(!collapsed.contains(note.id));
+            }
+        }
     }
     if (book->type != "site" && query.isEmpty()) {
         for (const auto &note: book->notes) {
@@ -993,11 +1027,20 @@ bool MainWindow::save() {
         QMessageBox::warning(this, tr("无法保存"), tr("原有笔记数据读取失败，为避免覆盖，当前修改尚未写入磁盘。"));
         return false;
     }
+    QStringList movedSites;
+    for (const auto &book: store_.notebooks) {
+        if (book.type != "site") continue;
+        for (const auto &note: book.notes) {
+            if (SiteDocuments::isDocument(note) && !note.path.isEmpty() && note.path != SiteDocuments::sourcePath(book, note)) { movedSites.append(book.path); break; }
+        }
+    }
+    if (!movedSites.isEmpty() && !editorWorkspace_->saveExternalFilesAndSync()) return false;
     QString error;
     if (!store_.save(&error)) {
         QMessageBox::warning(this, tr("无法保存笔记"), error);
         return false;
     }
+    if (!movedSites.isEmpty() && !editorWorkspace_->reloadSiteFiles(movedSites)) return false;
     return editorWorkspace_->saveExternalFilesAndSync();
 }
 
@@ -1251,6 +1294,29 @@ void MainWindow::closeNotebook() {
 void MainWindow::createNote(const QString &parentId, bool folder, const QString &category) {
     auto *book = store_.notebook(currentNotebookId_);
     if (!book) return;
+    if (book->type == "site" && (parentId.startsWith("collection:") || (store_.note(parentId) && SiteDocuments::isDocument(*store_.note(parentId))))) {
+        const auto collectionId = parentId.startsWith("collection:") ? parentId.mid(11) : store_.note(parentId)->metadata["collectionId"].toString();
+        Note note;
+        note.id = NotebookStore::newId();
+        note.folder = folder;
+        note.parentId = parentId.startsWith("collection:") ? QString() : parentId;
+        note.metadata = {{"contentType", "doc"}, {"collectionId", collectionId}, {"slug", (folder ? "folder-" : "doc-") + note.id.left(8)}};
+        PostPropertiesDialog dialog({}, note.metadata, {}, false, this, folder);
+        if (dialog.exec() != QDialog::Accepted || dialog.title().isEmpty()) return;
+        note.title = dialog.title();
+        note.metadata = dialog.metadata();
+        book->notes.append(note);
+        QString error;
+        if (!SiteDocuments::validate(*book, &error)) {
+            book->notes.removeLast();
+            QMessageBox::warning(this, tr("文档配置无效"), error);
+            return;
+        }
+        if (!save()) return;
+        refreshTree();
+        if (!folder) editorWorkspace_->openNote(note.id, true);
+        return;
+    }
     if (book->type == "site") {
         const auto noteId = NotebookStore::newId();
         const QJsonObject metadata{{"date", QDate::currentDate().toString(Qt::ISODate)},
@@ -1362,7 +1428,32 @@ void MainWindow::showTreeMenu(const QPoint &position) {
     const auto id = item ? item->data(0, Qt::UserRole).toString() : QString();
     auto *note = store_.note(id);
     QMenu menu(this);
-    if (book && (!note || note->folder)) {
+    const bool documentContext = book && book->type == "site" && (id.startsWith("collection:") || (note && SiteDocuments::isDocument(*note)));
+    if (documentContext) {
+        const auto parentId = note ? (note->folder ? note->id : note->parentId.isEmpty() ? "collection:" + note->metadata["collectionId"].toString() : note->parentId) : id;
+        menu.addAction(tr("新建文档"), this, [this, parentId] { createNote(parentId, false); });
+        menu.addAction(tr("新建文件夹"), this, [this, parentId] { createNote(parentId, true); });
+        if (note) {
+            for (const int offset: {-1, 1}) menu.addAction(offset < 0 ? tr("上移") : tr("下移"), this, [this, book, id, offset] {
+                if (SiteDocuments::reorder(*book, id, offset)) { save(); refreshTree(); }
+            });
+            menu.addAction(tr("移动到目录…"), this, [this, book, id] {
+                const auto *source = store_.note(id);
+                QStringList names{tr("集合根目录")}, ids{QString()};
+                for (const auto *target: SiteDocuments::ordered(*book, source->metadata["collectionId"].toString())) {
+                    if (target->folder && target->id != id) { names.append(SiteDocuments::sourcePath(*book, *target).mid(12)); ids.append(target->id); }
+                }
+                bool accepted = false;
+                const auto name = QInputDialog::getItem(this, tr("移动文档"), tr("目标目录："), names, 0, false, &accepted);
+                if (!accepted) return;
+                QString error;
+                if (!SiteDocuments::move(*book, id, ids.value(names.indexOf(name)), &error)) { QMessageBox::warning(this, tr("移动失败"), error); return; }
+                save(); refreshTree();
+            });
+        }
+    }
+    if (book && book->type == "site" && id == "section:docs") menu.addAction(tr("站点配置"), this, &MainWindow::showSiteConfig);
+    if (book && id != "section:docs" && !documentContext && (!note || note->folder)) {
         const auto category = item ? item->data(0, Qt::UserRole + 4).toString() : QString();
         menu.addAction(book->type == "site" ? tr("新建文章") : book->type == "ebook" ? tr("添加章节")
                                                                                  : tr("新建笔记"),
@@ -1420,10 +1511,17 @@ void MainWindow::showTreeMenu(const QPoint &position) {
         if (book->type == "site") {
             menu.addAction(tr("属性更改"), this, [this, book, id] {
                 auto *target = store_.note(id);
-                PostPropertiesDialog dialog(target->title, target->metadata, NotebookCategories::site(*book), true, this);
+                PostPropertiesDialog dialog(target->title, target->metadata, NotebookCategories::site(*book), true, this, target->folder);
                 if (dialog.exec() != QDialog::Accepted || dialog.title().isEmpty()) return;
+                const auto previous = *target;
                 target->title = dialog.title();
                 target->metadata = dialog.metadata();
+                QString error;
+                if (!SiteDocuments::validate(*book, &error)) {
+                    *target = previous;
+                    QMessageBox::warning(this, tr("文档配置无效"), error);
+                    return;
+                }
                 save();
                 refreshTree();
             });
@@ -1460,6 +1558,7 @@ void MainWindow::showSiteConfig() {
     SiteConfigDialog dialog(*book, this);
     connect(&dialog, &SiteConfigDialog::categoriesChanged, this, &MainWindow::refreshTree);
     if (dialog.exec() != QDialog::Accepted || !save()) return;
+    refreshTree();
     if (dialog.editAboutRequested()) editorWorkspace_->openExternalFile(book->path + "/source/about/index.md");
 }
 

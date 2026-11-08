@@ -1,5 +1,6 @@
 #include "StaticSite.h"
 #include "AtomicFile.h"
+#include "SiteDocuments.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QDirIterator>
@@ -39,7 +40,7 @@ QString StaticSite::rootPath(const Notebook &book) {
 
 bool StaticSite::prepare(Notebook &book, QString *error) {
     if (book.config["theme"].toString() == "stellar") book.config["theme"] = "next";
-    if (book.config["theme"].toString() != "next" && book.config["theme"].toString() != "yilia" && book.config["theme"].toString() != "3-jekyll" && book.config["theme"].toString() != "shiro" && book.config["theme"].toString() != "custom") book.config["theme"] = "pure";
+    if (book.config["theme"].toString() != "next" && book.config["theme"].toString() != "yilia" && book.config["theme"].toString() != "3-jekyll" && book.config["theme"].toString() != "shiro" && book.config["theme"].toString() != "custom" && book.config["theme"].toString() != "plume") book.config["theme"] = "pure";
     if (!book.config.contains("commentPlatform")) book.config["commentPlatform"] = "none";
     for (const auto &directory: {"source/_posts", "source/_drafts", "public"}) {
         if (!QDir().mkpath(book.path + "/" + directory)) {
@@ -66,6 +67,11 @@ bool StaticSite::prepare(Notebook &book, QString *error) {
 }
 
 QByteArray StaticSite::postSource(const Note &note) {
+    if (SiteDocuments::isDocument(note)) {
+        const QJsonObject metadata{{"title", note.title}, {"layout", "doc"}, {"qsnote", true},
+                                   {"draft", note.metadata["draft"].toBool()}, {"collectionId", note.metadata["collectionId"]}};
+        return "---\n" + QJsonDocument(metadata).toJson() + "---\n" + note.content.toUtf8();
+    }
     // Explicit front matter edited in the Markdown body is owned by the author.
     if (note.content.startsWith("---\n") || note.content.startsWith("---\r\n")) return note.content.toUtf8();
     QJsonArray categories;

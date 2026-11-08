@@ -3,6 +3,7 @@
 #include "NotebookCategories.h"
 #include "SiteThemeRenderer.h"
 #include "StaticSite.h"
+#include "SiteDocuments.h"
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -36,6 +37,7 @@ public:
         : book_(book), output_(std::move(output)), error_(error), renderer_(book.path, "sites"), root_(StaticSite::rootPath(book)), progress_(progress) {}
 
     bool generate() {
+        if (!SiteDocuments::validate(book_, error_) || !SiteDocuments::validateNavigation(book_, error_)) return false;
         report(QCoreApplication::translate("SiteGenerator", "正在加载站点主题…"));
         SiteTemplateRenderer templates(book_);
         if (!templates.load(error_)) return false;
@@ -47,27 +49,61 @@ public:
         QStringList sources;
         while (files.hasNext()) sources.append(files.next());
         sources.sort();
+        QSet<QString> documentPaths;
+        QMap<QString, QString> documentDirectories;
+        for (const auto &note: book_.notes) {
+            if (!SiteDocuments::isDocument(note)) continue;
+            auto path = note.path.mid(7);
+            if (!path.startsWith("docs/")) continue;
+            const auto group = SiteDocuments::collection(book_, note.metadata["collectionId"].toString());
+            documentDirectories.insert(path.section('/', 0, 1), "docs/" + group["slug"].toString() + '/');
+            if (note.folder) documentDirectories.insert(path, SiteDocuments::route(book_, note));
+            while (!path.isEmpty()) {
+                documentPaths.insert(path);
+                const auto separator = path.lastIndexOf('/');
+                if (separator < 0) break;
+                path.truncate(separator);
+            }
+        }
         int sourceIndex = 0;
         for (const auto &file: sources) {
             const auto relative = QDir(source).relativeFilePath(file);
             report(QCoreApplication::translate("SiteGenerator", "正在读取源文件（%1/%2）：%3").arg(++sourceIndex).arg(sources.size()).arg(relative));
             const auto segments = relative.split('/');
             bool excluded = false;
+            QString path;
             for (const auto &segment: segments) {
-                if (segment.startsWith('.') || (segment.startsWith('_') && segment != "_posts")) excluded = true;
+                path += (path.isEmpty() ? QString() : QString("/")) + segment;
+                if ((segment.startsWith('.') || (segment.startsWith('_') && segment != "_posts")) && !documentPaths.contains(path)) excluded = true;
             }
             if (excluded) continue;
             QFile input(file);
             if (!input.open(QIODevice::ReadOnly)) return fail(file + ": " + input.errorString());
             const auto data = input.readAll();
             if (!file.endsWith(".md", Qt::CaseInsensitive) && !file.endsWith(".markdown", Qt::CaseInsensitive)) {
-                const auto target = relative.startsWith("_posts/") ? "assets/posts/" + relative.mid(7) : relative;
+                auto target = relative.startsWith("_posts/") ? "assets/posts/" + relative.mid(7) : relative;
+                qsizetype prefixLength = 0;
+                for (auto it = documentDirectories.cbegin(); it != documentDirectories.cend(); ++it) {
+                    if (relative.startsWith(it.key() + '/') && it.key().size() > prefixLength) {
+                        prefixLength = it.key().size();
+                        target = it.value() + relative.mid(prefixLength + 1);
+                    }
+                }
                 links_[QDir::cleanPath(file)] = target;
                 resources_.insert(QDir::cleanPath(file));
                 if (!relative.startsWith("_posts/") && !write(target, data)) return false;
                 continue;
             }
+            const Note *note = nullptr;
+            for (const auto &entry: book_.notes) if (!entry.folder && QDir::cleanPath(book_.path + "/" + entry.path) == QDir::cleanPath(file)) { note = &entry; break; }
+            if (relative.startsWith("docs/") && (!note || !SiteDocuments::isDocument(*note))) continue;
+            if (note && SiteDocuments::isDocument(*note) && note->metadata["draft"].toBool()) continue;
             SitePage page;
+            if (note) {
+                page.id = note->id;
+                page.document = SiteDocuments::isDocument(*note);
+                if (page.document) page.collectionId = note->metadata["collectionId"].toString();
+            }
             page.source = file;
             TextEncoding::Format format;
             if (!TextEncoding::decode(data, page.body, format)) return fail(QCoreApplication::translate("NotebookStore", "无法解码文本文件：%1").arg(file));
@@ -95,7 +131,8 @@ public:
                     return fail(QCoreApplication::translate("SiteGenerator", "无效的站点路径：") + category + "/" + route);
                 route = "categories/" + category + "/" + route + "/";
             }
-            if (!page.post && (route == "index" || route.endsWith("/index"))) route.chop(5);
+            if (page.document) route = SiteDocuments::route(book_, *note);
+            if (!page.post && !page.document && (route == "index" || route.endsWith("/index"))) route.chop(5);
             if (!route.isEmpty() && !route.endsWith('/') && !route.endsWith(".html")) route += '/';
             page.route = route;
             if (!validPath(route.isEmpty() ? "index.html" : route)) return false;
@@ -115,6 +152,15 @@ public:
         auto &categories = index.categories;
         auto &tags = index.tags;
         auto &archives = index.archives;
+        for (const auto &page: pages_) if (!page.id.isEmpty()) index.byId.insert(page.id, &page);
+        for (const auto &entry: book_.config["docCollections"].toArray()) {
+            const auto group = entry.toObject();
+            const auto id = group["id"].toString();
+            for (const auto *note: SiteDocuments::ordered(book_, id)) {
+                const auto *page = index.byId.value(note->id);
+                if (page && page->document) index.documents[id].append(page);
+            }
+        }
         const SiteThemeRenderer theme(book_, templates, index);
         for (const auto &page: pages_) if (page.post) posts.append(&page);
         std::stable_sort(posts.begin(), posts.end(), [](const SitePage *a, const SitePage *b) { return a->date > b->date; });
@@ -128,6 +174,19 @@ public:
                 archives[date.toString("yyyy/MM") + "/"].append(post);
             }
             search.append(theme.searchEntry(*post));
+        }
+        for (const auto &documents: index.documents) for (const auto *page: documents) search.append(theme.searchEntry(*page));
+        for (const auto &entry: book_.config["docCollections"].toArray()) {
+            const auto group = entry.toObject();
+            SitePage page;
+            page.collectionId = group["id"].toString();
+            page.document = true;
+            page.title = group["name"].toString();
+            page.route = "docs/" + group["slug"].toString() + '/';
+            page.html = "<ul>";
+            for (const auto *doc: index.documents.value(page.collectionId)) page.html += "<li><a href=\"" + escaped(href(doc->route)) + "\">" + escaped(doc->title) + "</a></li>";
+            page.html += "</ul>";
+            if (!writeHtml(page.route, theme.renderPage(page))) return false;
         }
         auto homePosts = posts;
         std::stable_partition(homePosts.begin(), homePosts.end(), [](const SitePage *post) { return post->pinned; });
@@ -170,6 +229,24 @@ public:
             QFile file(QDir::cleanPath(assets + "/../" + name));
             if (!file.exists()) continue;
             if (!file.open(QIODevice::ReadOnly) || !write("theme-" + QString(name), file.readAll())) return false;
+        }
+        QList<QJsonObject> navigation;
+        for (const auto &value: book_.config["navigation"].toArray()) navigation.append(value.toObject());
+        while (!navigation.isEmpty()) {
+            const auto item = navigation.takeLast();
+            const auto type = item["type"].toString();
+            const auto target = item["target"].toString();
+            if (type == "group") { for (const auto &child: item["children"].toArray()) navigation.append(child.toObject()); continue; }
+            if (type == "external") continue;
+            QString route;
+            if (type == "note") {
+                const auto *page = index.byId.value(target);
+                if (!page) return fail(QCoreApplication::translate("SiteDocuments", "导航目标未发布：%1").arg(item["title"].toString()));
+                route = page->route;
+            } else if (type == "collection") route = "docs/" + SiteDocuments::collection(book_, target)["slug"].toString() + '/';
+            else route = type == "path" ? QUrl(target).path().mid(1) : target;
+            if (route.isEmpty() || route.endsWith('/')) route += "index.html";
+            if (!outputs_.contains(route)) return fail(QCoreApplication::translate("SiteDocuments", "导航路径不存在：%1").arg(target));
         }
         return true;
     }
@@ -256,8 +333,8 @@ private:
                         } else if (!write(route, bytes)) return false;
                     }
                     target = href(route);
-                } else if (absolute) target = href(original.path().mid(1));
-                else if (links_.contains(path)) target = href(links_[path]);
+                } else if (links_.contains(path)) target = href(links_[path]);
+                else if (absolute) target = href(original.path().mid(1));
                 if (target.isEmpty()) continue;
                 if (original.hasQuery()) target += '?' + original.query(QUrl::FullyEncoded);
                 if (original.hasFragment()) target += '#' + original.fragment(QUrl::FullyEncoded);
@@ -266,6 +343,18 @@ private:
         }
         while (!toc.isEmpty()) closeHeading();
         page.html = ArticleRenderer::html(document);
+        if (page.post && page.body.contains("<!-- more -->")) {
+            QDomDocument excerpt;
+            auto container = excerpt.createElement("div");
+            excerpt.appendChild(container);
+            bool hasExcerpt = false;
+            for (auto node = document.documentElement().firstChild(); !node.isNull(); node = node.nextSibling()) {
+                if (node.isComment() && node.nodeValue().trimmed() == "more") { hasExcerpt = true; break; }
+                if (QRegularExpression("^h[1-6]$").match(node.nodeName()).hasMatch()) continue;
+                container.appendChild(excerpt.importNode(node, true));
+            }
+            if (hasExcerpt) page.excerpt = ArticleRenderer::html(excerpt);
+        }
         return true;
     }
     bool writeHtml(QString route, const QString &markup) {

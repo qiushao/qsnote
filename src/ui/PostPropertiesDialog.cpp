@@ -9,9 +9,10 @@
 #include <QScreen>
 
 PostPropertiesDialog::PostPropertiesDialog(const QString &title, const QJsonObject &metadata, const QStringList &categories,
-                                           bool editing, QWidget *parent)
-    : QDialog(parent), initialMetadata_(metadata) {
-    setWindowTitle(editing ? tr("文章属性") : tr("新建文章"));
+                                           bool editing, QWidget *parent, bool folder)
+    : QDialog(parent), initialMetadata_(metadata), folder_(folder) {
+    const bool document = metadata["contentType"].toString() == "doc";
+    setWindowTitle(document ? (folder ? tr("文件夹属性") : tr("文档属性")) : editing ? tr("文章属性") : tr("新建文章"));
     auto *layout = new QFormLayout(this);
     layout->setContentsMargins(20, 20, 20, 20);
     layout->setSpacing(12);
@@ -40,10 +41,15 @@ PostPropertiesDialog::PostPropertiesDialog(const QString &title, const QJsonObje
     layout->addRow("Slug：", slug_);
     draft_ = new QCheckBox(tr("保存为草稿"), this);
     draft_->setChecked(metadata["draft"].toBool());
+    draft_->setVisible(!folder);
     layout->addRow(draft_);
     pinned_ = new QCheckBox(tr("首页置顶"), this);
     pinned_->setChecked(metadata["pinned"].toBool());
     layout->addRow(pinned_);
+    if (document) {
+        for (auto *field: QList<QWidget *>{category_, tags_, date_, pinned_}) { field->hide(); if (auto *label = layout->labelForField(field)) label->hide(); }
+        if (keywords_) { keywords_->hide(); layout->labelForField(keywords_)->hide(); }
+    }
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     setPrimaryButton(buttons->button(QDialogButtonBox::Ok));
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
@@ -56,6 +62,12 @@ QString PostPropertiesDialog::title() const { return title_->text().trimmed(); }
 
 QJsonObject PostPropertiesDialog::metadata() const {
     auto result = initialMetadata_;
+    result["slug"] = slug_->text().trimmed();
+    result["draft"] = draft_->isChecked();
+    if (result["contentType"] == QJsonValue("doc")) {
+        if (folder_) result.remove("draft");
+        return result;
+    }
     result["category"] = category_->currentText();
     result["tags"] = tags_->text().trimmed();
     if (keywords_) result["keywords"] = keywords_->text().trimmed();

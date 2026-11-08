@@ -1,5 +1,7 @@
 #include "SiteConfigDialog.h"
 #include "UiStyle.h"
+#include "SiteContentSettings.h"
+#include "core/SiteDocuments.h"
 #include "core/NotebookCategories.h"
 #include <QComboBox>
 #include <QCoreApplication>
@@ -123,6 +125,7 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent)
         pendingAvatar_ = selected;
     });
     field("domain", QCoreApplication::translate("MainWindow", "域名"));
+    field("footer", QCoreApplication::translate("MainWindow", "页脚文字"));
     auto *editAbout = button(QCoreApplication::translate("MainWindow", "编辑关于页"), "editSiteAbout", card);
     form->addWidget(editAbout, 0, Qt::AlignLeft);
     form->addWidget(label(QCoreApplication::translate("MainWindow", "保存当前配置并关闭此窗口，在编辑器中打开关于页。"), card, true));
@@ -166,10 +169,13 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent)
     const auto updateDisqusHint = [comments, disqusHint] { disqusHint->setVisible(comments->currentData().toString() == "disqus"); };
     connect(comments, &QComboBox::currentIndexChanged, &dialog, updateDisqusHint);
     updateDisqusHint();
-    section("siteThemeCard", QCoreApplication::translate("MainWindow", "主题与页脚"));
-    auto *theme = field("theme", QCoreApplication::translate("MainWindow", "站点主题"), {"Pure", "NexT", "Yilia", "3-Jekyll", "Shiro", QCoreApplication::translate("MainWindow", "自定义")},
-                        {"pure", "next", "yilia", "3-jekyll", "shiro", "custom"})
+    section("siteThemeCard", QCoreApplication::translate("MainWindow", "主题设置"));
+    auto *theme = field("theme", QCoreApplication::translate("MainWindow", "站点主题"), {"Pure", "NexT", "Yilia", "3-Jekyll", "Shiro", "Plume", QCoreApplication::translate("MainWindow", "自定义")},
+                        {"pure", "next", "yilia", "3-jekyll", "shiro", "plume", "custom"})
                           ->findChild<QComboBox *>();
+    auto *plumeSettings = siteContentSettings(*book, card);
+    plumeSettings->setObjectName("sitePlumeSettings");
+    form->addWidget(plumeSettings);
     auto *themeDirectoryField = field("themeDirectory", QCoreApplication::translate("MainWindow", "主题目录"));
     auto *themeDirectory = themeDirectoryField->findChild<QLineEdit *>();
     themeDirectory->setPlaceholderText(QCoreApplication::translate("MainWindow", "站点内相对路径或完整路径"));
@@ -178,7 +184,8 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent)
     auto *themeHint = label(QCoreApplication::translate("MainWindow", "使用含 layout/*.html 和 source/ 的适配主题。支持 QSNote 占位符；Hexo 的 EJS、Nunjucks 和样式预处理文件需先转换，不执行主题插件或读取 _config.yml。"), card, true);
     themeHint->setWordWrap(true);
     form->addWidget(themeHint);
-    const auto updateThemeFields = [theme, themeDirectoryField, chooseTheme, themeHint] {
+    const auto updateThemeFields = [theme, plumeSettings, themeDirectoryField, chooseTheme, themeHint] {
+        plumeSettings->setVisible(theme->currentData().toString() == "plume");
         const bool custom = theme->currentData().toString() == "custom";
         themeDirectoryField->setVisible(custom);
         chooseTheme->setVisible(custom);
@@ -194,7 +201,6 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent)
         themeDirectory->setText(relative != ".." && !relative.startsWith("../") ? relative : path);
         emit themeDirectory->textEdited(themeDirectory->text());
     });
-    field("footer", QCoreApplication::translate("MainWindow", "页脚文字"));
     section("siteCategoriesCard", QCoreApplication::translate("MainWindow", "分类管理"));
     auto *categories = new QListWidget(card);
     categories->setObjectName("siteCategories");
@@ -406,6 +412,11 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent)
 }
 
 void SiteConfigDialog::accept() {
+    QString error;
+    if (!SiteDocuments::validate(draft_, &error) || !SiteDocuments::validateNavigation(draft_, &error)) {
+        QMessageBox::warning(this, tr("配置无效"), error);
+        return;
+    }
     const auto avatarPath = draft_.config["avatar"].toString();
     if (!pendingAvatar_.isEmpty() && !avatarPath.isEmpty()) {
         const QImage image(pendingAvatar_);

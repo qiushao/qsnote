@@ -1,6 +1,8 @@
 #include "SiteThemeRenderer.h"
 #include "NotebookCategories.h"
 #include "StaticSite.h"
+#include "SiteDocuments.h"
+#include "SiteNavigationIcons.h"
 #include <QDate>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -55,6 +57,7 @@ QString comments(const Notebook &book, const SitePage &page, const QString &perm
 SiteThemeRenderer::SiteThemeRenderer(const Notebook &book, const SiteTemplateRenderer &templates, const SiteIndex &index)
     : book_(book), templates_(templates), index_(index), root_(StaticSite::rootPath(book)) {}
 
+bool SiteThemeRenderer::plumeTheme() const { return templates_.theme() == SiteTemplateRenderer::Theme::Plume; }
 bool SiteThemeRenderer::nextTheme() const { return templates_.theme() == SiteTemplateRenderer::Theme::Next; }
 bool SiteThemeRenderer::yiliaTheme() const { return templates_.theme() == SiteTemplateRenderer::Theme::Yilia; }
 bool SiteThemeRenderer::threeTheme() const { return templates_.theme() == SiteTemplateRenderer::Theme::Three; }
@@ -70,12 +73,18 @@ QString SiteThemeRenderer::themeTemplate(const QString &name, QMap<QString, QStr
     const QUrl githubUrl(github);
     values["githubSocial"] = githubUrl.scheme() == "https" || githubUrl.scheme() == "http" ? escaped(github) : QString();
     auto avatar = book_.config["avatar"].toString().trimmed();
-    if (avatar.isEmpty() && !yiliaTheme() && !shiroTheme() && !customTheme())
+    if (avatar.isEmpty() && !yiliaTheme() && !shiroTheme() && !customTheme() && !plumeTheme())
         avatar = nextTheme() ? "images/avatar.gif" : threeTheme() ? "assets/img/avatar.jpg"
                                                                   : "images/avatar.jpg";
     const QUrl avatarUrl(avatar);
-    if (!avatar.isEmpty() && avatarUrl.isRelative() && !avatar.startsWith('/'))
-        avatar = href(avatarUrl.path(QUrl::FullyDecoded)) + (avatarUrl.hasQuery() ? "?" + avatarUrl.query(QUrl::FullyEncoded) : QString()) + (avatarUrl.hasFragment() ? "#" + avatarUrl.fragment(QUrl::FullyEncoded) : QString());
+    if (!avatar.isEmpty() && avatarUrl.isRelative() && (!avatar.startsWith('/') || (plumeTheme() && avatarUrl.host().isEmpty())))
+        avatar = href(avatarUrl.path(QUrl::FullyDecoded).mid(avatar.startsWith('/') ? 1 : 0)) + (avatarUrl.hasQuery() ? "?" + avatarUrl.query(QUrl::FullyEncoded) : QString()) + (avatarUrl.hasFragment() ? "#" + avatarUrl.fragment(QUrl::FullyEncoded) : QString());
+    if (plumeTheme()) {
+        values["tagCount"] = QString::number(index_.tags.size());
+        values["categoryCount"] = QString::number(index_.categories.size());
+        values["postCount"] = QString::number(index_.posts.size());
+        values["githubIcon"] = R"(<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.8-1.3-1.8-1.1-.8.1-.8.1-.8 1.2.1 1.8 1.2 1.8 1.2 1.1 1.9 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3Z"/></svg>)";
+    }
     values["avatar"] = escaped(avatar);
     values["avatarImage"] = avatar.isEmpty() ? QString() : R"(<img class="show" src=")" + escaped(avatar) + "\" alt=\"" + values["author"] + R"(" width="128" height="128">)";
     values["description"] = escaped(book_.config["description"].toString());
@@ -107,6 +116,24 @@ QString SiteThemeRenderer::taxonomyLinks(const SitePage &page, bool tags) const 
 
 QString SiteThemeRenderer::meta(const SitePage &page, bool card) const {
     const auto date = escaped(page.date.left(10));
+    if (plumeTheme()) {
+        QString result;
+        if (!page.categories.isEmpty()) result += R"(<div class="category-list"><span class="icon vpi-folder" aria-hidden="true"></span>)" + taxonomyLinks(page) + "</div>";
+        int words = 0;
+        auto matches = QRegularExpression(QStringLiteral("[\\p{Han}]|[\\p{L}\\p{N}]+")).globalMatch(page.text);
+        while (matches.hasNext()) { matches.next(); ++words; }
+        result += R"(<div class="reading-time"><span class="icon vpi-books" aria-hidden="true"></span><span>约 )" + QString::number(words) + " 字</span><span>" + QString::number(qMax(1, (words + 299) / 300)) + " 分钟</span></div>";
+        if (!page.tags.isEmpty()) {
+            result += R"(<div class="tag-list"><span class="icon vpi-tag" aria-hidden="true"></span>)";
+            for (const auto &tag: page.tags) {
+                uint color = 0;
+                for (const auto ch: tag) color = color * 31 + ch.unicode();
+                result += link("tags/" + tag + "/", tag, "tag vp-tag-color-" + QString::number(color % 6));
+            }
+            result += "</div>";
+        }
+        return result + R"(<div class="create-time"><span class="icon vpi-clock" aria-hidden="true"></span><time datetime=")" + escaped(page.date) + "\">" + date + "</time></div>";
+    }
     if (shiroTheme()) return R"(<div class="shiro-meta text-sm text-text-chrome"><time datetime=")" + escaped(page.date) + "\">" + date + "</time>" + taxonomyLinks(page) + "</div>";
     if (customTheme()) return "<time datetime=\"" + escaped(page.date) + "\">" + date + "</time>";
     if (yiliaTheme()) return R"(<a class="archive-article-date" href=")" + escaped(href(page.route)) +
@@ -143,9 +170,11 @@ QString SiteThemeRenderer::article(const SitePage &page, bool index) const {
 }
 
 QString SiteThemeRenderer::postNavigation(const SitePage &page) const {
-    const auto index = index_.posts.indexOf(&page);
-    const auto *previous = index > 0 ? index_.posts[index - 1] : nullptr;
-    const auto *next = index + 1 < index_.posts.size() ? index_.posts[index + 1] : nullptr;
+    const auto &pages = page.document ? index_.documents.value(page.collectionId) : index_.posts;
+    const auto index = pages.indexOf(&page);
+    const auto *previous = index > 0 ? pages[index - 1] : nullptr;
+    const auto *next = index >= 0 && index + 1 < pages.size() ? pages[index + 1] : nullptr;
+    if (plumeTheme()) return "<nav class=\"vp-doc-footer\" aria-label=\"上下篇\">" + (previous ? link(previous->route, "← " + previous->title) : QString("<span></span>")) + (next ? link(next->route, next->title + " →") : QString()) + "</nav>";
     if (customTheme()) return (previous ? link(previous->route, "‹ " + previous->title, "prev") : QString()) + (next ? link(next->route, next->title + " ›", "next") : QString());
     if ((nextTheme() || yiliaTheme() || threeTheme() || shiroTheme()) && !previous && !next) return {};
     if (shiroTheme()) return R"(<nav class="section-divider shiro-post-nav" aria-label="文章导航"><div>)" +
@@ -262,6 +291,16 @@ QString SiteThemeRenderer::injectCode(QString markup) const {
 QString SiteThemeRenderer::html(const QString &route, const QString &title, const QString &body, const SitePage *page) const {
     auto keywords = page && !page->keywords.isEmpty() ? page->keywords : book_.config["keywords"].toString().trimmed();
     keywords.replace(QChar(0xff0c), QChar(','));
+    if (plumeTheme()) {
+        const bool document = page && page->document;
+        const auto markup = themeTemplate("shell", {{"headTitle", escaped(title + " | " + book_.config["title"].toString(book_.name))},
+            {"title", escaped(title)}, {"content", body}, {"menu", plumeNavigation(route)}, {"layout", document ? "document" : "blog"},
+            {"sidebar", document ? plumeSidebar(page->collectionId, route) : themeTemplate("profile")},
+            {"mobileProfile", document ? QString() : themeTemplate("profile")},
+            {"toc", page && !page->toc.isEmpty() ? "<details open><summary>本页目录</summary><ol>" + page->toc + "</ol></details>" : QString()},
+            {"keywordsMeta", keywords.isEmpty() ? QString() : R"(<meta name="keywords" content=")" + escaped(keywords) + "\">"}});
+        return injectCode(markup);
+    }
     if (customTheme()) {
         const auto markup = themeTemplate("layout", {{"headTitle", escaped(title + " | " + book_.config["title"].toString(book_.name))},
                                                      {"title", escaped(title)},
@@ -327,6 +366,17 @@ QString SiteThemeRenderer::html(const QString &route, const QString &title, cons
 }
 
 QString SiteThemeRenderer::pagination(const QString &route, int page, int count) const {
+    if (plumeTheme()) {
+        if (count == 1) return {};
+        const auto pageRoute = [&route](int number) { return route + (number == 1 ? QString() : "page/" + QString::number(number) + "/"); };
+        QString result = R"(<nav class="vp-pagination" aria-label="分页">)";
+        result += page > 1 ? link(pageRoute(page - 1), "‹ 上一页", "page-range") : R"(<span class="page-range disabled" aria-disabled="true">‹ 上一页</span>)";
+        result += "<div>";
+        for (int i = 1; i <= count; ++i) result += i == page ? R"(<span class="current" aria-current="page">)" + QString::number(i) + "</span>" : link(pageRoute(i), QString::number(i));
+        result += "</div>";
+        result += page < count ? link(pageRoute(page + 1), "下一页 ›", "page-range") : R"(<span class="page-range disabled" aria-disabled="true">下一页 ›</span>)";
+        return result + "</nav>";
+    }
     if (nextTheme() || yiliaTheme() || threeTheme() || shiroTheme() || customTheme()) {
         if (count == 1) return {};
         QString result = yiliaTheme() ? R"(<nav id="page-nav">)" : R"(<nav class="pagination">)";
@@ -339,6 +389,37 @@ QString SiteThemeRenderer::pagination(const QString &route, int page, int count)
 }
 
 QString SiteThemeRenderer::renderPage(const SitePage &page) const {
+    if (plumeTheme()) {
+        QString content = page.html, breadcrumb;
+        if (page.document) {
+            const auto group = SiteDocuments::collection(book_, page.collectionId);
+            breadcrumb = link("docs/" + group["slug"].toString() + '/', group["name"].toString());
+            QStringList parents;
+            const auto *note = SiteDocuments::find(book_, page.id);
+            while (note && !note->parentId.isEmpty()) {
+                note = SiteDocuments::find(book_, note->parentId);
+                if (note) parents.prepend(escaped(note->title));
+            }
+            for (const auto &parent: parents) breadcrumb += " / " + parent;
+        } else if (page.route == "categories/" || page.route == "tags/") {
+            const bool tags = page.route == "tags/";
+            const auto &groups = tags ? index_.tags : index_.categories;
+            content += "<ul>";
+            for (auto it = groups.cbegin(); it != groups.cend(); ++it) content += "<li>" + link(page.route + (tags ? it.key() : NotebookCategories::slug(book_, it.key())) + '/', it.key()) + " (" + QString::number(it.value().size()) + ")</li>";
+            content += "</ul>";
+        } else if (page.route == "links/") {
+            content += "<ul>";
+            for (const auto &value: book_.config["links"].toArray()) {
+                const auto item = value.toObject();
+                const QUrl url(item["url"].toString());
+                if (url.scheme() == "http" || url.scheme() == "https") content += "<li><a href=\"" + escaped(url.toString()) + "\">" + escaped(item["name"].toString()) + "</a></li>";
+            }
+            content += "</ul>";
+        }
+        const auto body = themeTemplate("page", {{"title", escaped(page.title)}, {"body", content}, {"breadcrumb", breadcrumb},
+            {"meta", page.post ? meta(page) : QString()}, {"navigation", (page.post || !page.id.isEmpty()) ? postNavigation(page) : QString()}, {"comments", comments(book_, page, permalink(page.route))}});
+        return html(page.route, page.title, body, &page);
+    }
     QString body;
     if (page.post) body = article(page) + (nextTheme() || yiliaTheme() || threeTheme() || shiroTheme() || customTheme() ? QString() : postNavigation(page));
     else if (page.route == "categories/" || page.route == "tags/")
@@ -364,6 +445,12 @@ QString SiteThemeRenderer::renderPage(const SitePage &page) const {
 QString SiteThemeRenderer::renderListing(const QString &route, const QString &title, const QList<const SitePage *> &posts,
                                          const QList<const SitePage *> &subset, int page, int count) const {
     QString body;
+    if (plumeTheme()) {
+        for (const auto *post: subset) body += themeTemplate("card", {{"title", escaped(post->title)}, {"url", escaped(href(post->route))}, {"meta", meta(*post)}, {"pinned", post->pinned ? "<span class=\"sticky\">TOP</span>" : QString()}, {"excerpt", post->excerpt}});
+        const auto heading = route.isEmpty() ? QString() : "<h1>" + escaped(title) + "</h1>";
+        body = "<section class=\"vp-post-list\" aria-label=\"博客文章\">" + heading + (body.isEmpty() ? "<p>暂无文章</p>" : body) + pagination(route, page, count) + "</section>";
+        return html(route + (page == 1 ? QString() : "page/" + QString::number(page) + "/"), title, body);
+    }
     if (customTheme()) {
         QString entries;
         for (const auto *post: subset) entries += themeTemplate("card", {{"title", escaped(post->title)}, {"url", escaped(href(post->route))}, {"meta", meta(*post, true)}, {"date", escaped(post->date.left(10))}, {"tags", taxonomyLinks(*post, true)}, {"categories", taxonomyLinks(*post)}, {"excerpt", escaped(post->text.size() > 128 ? post->text.left(125) + "..." : post->text)}});
@@ -426,7 +513,7 @@ QString SiteThemeRenderer::renderListing(const QString &route, const QString &ti
 }
 
 QJsonObject SiteThemeRenderer::searchEntry(const SitePage &page) const {
-    return {{"title", nextTheme() ? escaped(page.title) : page.title}, {"url", href(page.route)}, {"text", page.text}, {"path", href(page.route)}, {"content", nextTheme() ? escaped(page.text) : page.text}};
+    return {{"type", page.document ? "doc" : "post"}, {"collection", SiteDocuments::collection(book_, page.collectionId)["name"].toString()}, {"collectionId", page.collectionId}, {"title", nextTheme() ? escaped(page.title) : page.title}, {"url", href(page.route)}, {"text", page.text}, {"path", href(page.route)}, {"content", nextTheme() ? escaped(page.text) : page.text}};
 }
 
 QJsonObject SiteThemeRenderer::contentEntry(const SitePage &page) const {
@@ -440,4 +527,66 @@ QJsonObject SiteThemeRenderer::contentEntry(const SitePage &page) const {
         entry[kind] = terms;
     }
     return entry;
+}
+
+QString SiteThemeRenderer::plumeNavigation(const QString &route) const {
+    auto entries = book_.config["navigation"].toArray();
+    if (!book_.config.contains("navigation")) {
+        entries.append(QJsonObject{{"title", "首页"}, {"type", "builtin"}, {"target", ""}});
+        QJsonArray docs;
+        for (const auto &value: book_.config["docCollections"].toArray()) {
+            const auto group = value.toObject();
+            docs.append(QJsonObject{{"title", group["name"]}, {"type", "collection"}, {"target", group["id"]}});
+        }
+        if (!docs.isEmpty()) entries.append(QJsonObject{{"title", "文档"}, {"type", "group"}, {"children", docs}});
+        for (const auto &entry: QList<QPair<QString, QString>>{{"categories/", "分类"}, {"tags/", "标签"}, {"archives/", "归档"}, {"links/", "友链"}, {"about/", "关于"}})
+            entries.append(QJsonObject{{"title", entry.second}, {"type", "builtin"}, {"target", entry.first}});
+    }
+    int iconIndex = 0;
+    const auto navigationLabel = [&iconIndex](const QJsonObject &item) {
+        return SiteNavigationIcons::markup(item, "qs-nav-icon-" + QString::number(++iconIndex) + '-') + "<span>" + escaped(item["title"].toString()) + "</span>";
+    };
+    const auto renderLink = [&](const QJsonObject &item) {
+        const auto type = item["type"].toString();
+        auto target = item["target"].toString();
+        if (type == "note") { const auto *page = index_.byId.value(target); target = page ? page->route : QString(); }
+        else if (type == "collection") target = "docs/" + SiteDocuments::collection(book_, target)["slug"].toString() + '/';
+        else if (type == "path") target = QUrl(target).path().mid(1);
+        const bool active = type != "external" && (route == target || (type == "collection" && route.startsWith(target)));
+        QString url = type == "external" ? target : href(target);
+        if (type == "path") {
+            const QUrl original(item["target"].toString());
+            if (original.hasQuery()) url += '?' + original.query(QUrl::FullyEncoded);
+            if (original.hasFragment()) url += '#' + original.fragment(QUrl::FullyEncoded);
+        }
+        return "<a href=\"" + escaped(url) + "\"" + (active ? " aria-current=\"page\"" : "") + ">" + navigationLabel(item) + "</a>";
+    };
+    QString result;
+    for (const auto &value: entries) {
+        const auto item = value.toObject();
+        if (item["type"] == QJsonValue("group")) {
+            QString children;
+            for (const auto &child: item["children"].toArray()) children += renderLink(child.toObject());
+            result += "<details class=\"vp-nav-group\"><summary>" + navigationLabel(item) + "</summary><div>" + children + "</div></details>";
+        } else result += renderLink(item);
+    }
+    return result;
+}
+
+QString SiteThemeRenderer::plumeSidebar(const QString &collectionId, const QString &route) const {
+    QMap<QString, QString> children;
+    const auto ordered = SiteDocuments::ordered(book_, collectionId);
+    for (auto it = ordered.crbegin(); it != ordered.crend(); ++it) {
+        const auto *note = *it;
+        QString entry;
+        if (note->folder) {
+            const auto content = children.value(note->id);
+            if (!content.isEmpty()) entry = "<li><details open><summary>" + escaped(note->title) + "</summary><ul>" + content + "</ul></details></li>";
+        } else if (const auto *page = index_.byId.value(note->id)) {
+            entry = "<li><a href=\"" + escaped(href(page->route)) + "\"" + (page->route == route ? " aria-current=\"page\"" : "") + ">" + escaped(page->title) + "</a></li>";
+        }
+        children[note->parentId].prepend(entry);
+    }
+    const auto group = SiteDocuments::collection(book_, collectionId);
+    return "<details open class=\"vp-sidebar\"><summary>" + escaped(group["name"].toString()) + "</summary><nav aria-label=\"文档目录\">" + link("docs/" + group["slug"].toString() + '/', "集合目录") + "<ul>" + children.value(QString()) + "</ul></nav></details>";
 }

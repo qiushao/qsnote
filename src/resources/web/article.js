@@ -57,7 +57,11 @@ window.qsnoteArticle = (() => {
         for (const tag of Object.keys(whiteList)) whiteList[tag] = [...whiteList[tag], 'class', 'id'];
         whiteList.input = ['type', 'checked', 'disabled', 'class'];
         for (const name of ['html_inline', 'html_block']) {
-            md.renderer.rules[name] = (tokens, index) => filterXSS(tokens[index].content, {whiteList});
+            md.renderer.rules[name] = (tokens, index) => {
+                // Preserve the inert blog excerpt boundary through static export.
+                const html = tokens[index].content;
+                return html.trim() === '<!-- more -->' ? '<!-- more -->' : filterXSS(html, {whiteList});
+            };
         }
 
         const fence = md.renderer.rules.fence;

@@ -7,11 +7,15 @@
 #include <QStringList>
 
 struct SitePage {
+    QString id;
+    QString collectionId;
+    bool document = false;
     QString source;
     QString route;
     QString title;
     QString body;
     QString html;
+    QString excerpt;
     QString toc;
     QString text;
     QString date;
@@ -26,6 +30,8 @@ struct SitePage {
 
 struct SiteIndex {
     QList<const SitePage *> posts;
+    QMap<QString, const SitePage *> byId;
+    QMap<QString, QList<const SitePage *>> documents;
     QMap<QString, QList<const SitePage *>> categories, tags, archives;
 };
 

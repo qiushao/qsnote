@@ -11,6 +11,7 @@ public:
                        Yilia,
                        Three,
                        Shiro,
+                       Plume,
                        Custom };
     explicit SiteTemplateRenderer(const Notebook &book);
     bool load(QString *error);

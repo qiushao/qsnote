@@ -1257,6 +1257,21 @@ void EditorWorkspace::changeEncoding(const QByteArray &encoding, bool reload) {
     updateStatus();
 }
 
+bool EditorWorkspace::reloadSiteFiles(const QStringList &roots) {
+    for (auto &note: externalFiles_) {
+        for (const auto &root: roots) {
+            if (!note.path.startsWith(root + "/source/")) continue;
+            QString error;
+            if (!NotebookStore::readFile(note, note.path, &error)) {
+                QMessageBox::warning(this, QCoreApplication::translate("MainWindow", "无法保存笔记"), error);
+                return false;
+            }
+            break;
+        }
+    }
+    return true;
+}
+
 bool EditorWorkspace::saveExternalFilesAndSync() {
     for (auto &note: externalFiles_) {
         if (!note.contentDirty) continue;

@@ -109,5 +109,30 @@
     <file>site/shiro/assets/css/qsnote-shiro.css</file>
     <file>site/shiro/assets/js/qsnote-shiro-head.js</file>
     <file>site/shiro/assets/js/qsnote-shiro.js</file>
+    <file>site/plume/LICENSE</file>
+    <file>site/plume/THIRD-PARTY-NOTICES.md</file>
+    <file>site/plume/assets/css/components.css</file>
+    <file>site/plume/assets/css/icons.css</file>
+    <file>site/plume/assets/ICON-LICENSE</file>
+    <file>site/plume/assets/css/qsnote-plume.css</file>
+    <file>site/plume/assets/css/vars.css</file>
+    <file>site/plume/assets/js/plume.js</file>
+    <file>site/plume/assets/nav-icons/home.svg</file>
+    <file>site/plume/assets/nav-icons/book.svg</file>
+    <file>site/plume/assets/nav-icons/folder.svg</file>
+    <file>site/plume/assets/nav-icons/tag.svg</file>
+    <file>site/plume/assets/nav-icons/archive.svg</file>
+    <file>site/plume/assets/nav-icons/link.svg</file>
+    <file>site/plume/assets/nav-icons/user.svg</file>
+    <file>site/plume/assets/nav-icons/code.svg</file>
+    <file>site/plume/assets/nav-icons/settings.svg</file>
+    <file>site/plume/assets/nav-icons/search.svg</file>
+    <file>site/plume/assets/nav-icons/globe.svg</file>
+    <file>site/plume/assets/nav-icons/star.svg</file>
+    <file>site/plume/assets/nav-icons/github.svg</file>
+    <file>site/plume/templates/card.html</file>
+    <file>site/plume/templates/page.html</file>
+    <file>site/plume/templates/profile.html</file>
+    <file>site/plume/templates/shell.html</file>
   </qresource>
 </RCC>

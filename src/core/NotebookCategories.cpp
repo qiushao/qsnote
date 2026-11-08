@@ -1,4 +1,5 @@
 #include "NotebookCategories.h"
+#include "SiteDocuments.h"
 #include <QCoreApplication>
 #include <QJsonArray>
 #include <QRegularExpression>
@@ -8,7 +9,7 @@ QStringList collect(const Notebook &book, const QString &fallback) {
     QStringList names;
     for (const auto &value: book.config["categories"].toArray()) names << value.toString();
     if (!names.contains(fallback)) names.prepend(fallback);
-    for (const auto &note: book.notes) names << note.metadata["category"].toString();
+    for (const auto &note: book.notes) if (!SiteDocuments::isDocument(note)) names << note.metadata["category"].toString();
     names.removeAll({});
     names.removeDuplicates();
     return names;

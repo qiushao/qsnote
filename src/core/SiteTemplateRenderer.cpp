@@ -10,6 +10,7 @@ SiteTemplateRenderer::SiteTemplateRenderer(const Notebook &book) : book_(book) {
     theme_ = name == "next" ? Theme::Next : name == "yilia" ? Theme::Yilia
                                     : name == "3-jekyll"    ? Theme::Three
                                     : name == "shiro"       ? Theme::Shiro
+                                    : name == "plume"       ? Theme::Plume
                                     : name == "custom"      ? Theme::Custom
                                                             : Theme::Pure;
 }
@@ -18,6 +19,7 @@ QString SiteTemplateRenderer::themeName() const {
     return theme_ == Theme::Next ? "next" : theme_ == Theme::Yilia ? "yilia"
                                     : theme_ == Theme::Three       ? "3-jekyll"
                                     : theme_ == Theme::Shiro       ? "shiro"
+                                    : theme_ == Theme::Plume       ? "plume"
                                                                    : "pure";
 }
 

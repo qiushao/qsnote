@@ -29,6 +29,10 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         ui/SettingsDialog.h
         ui/Theme.cpp
         ui/Theme.h
+        ui/SiteNavigationIconPicker.cpp
+        ui/SiteNavigationIconPicker.h
+        ui/SiteContentSettings.cpp
+        ui/SiteContentSettings.h
         ui/SiteConfigDialog.cpp
         ui/SiteConfigDialog.h
         ui/TodoWorkspace.cpp
@@ -68,10 +72,15 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         core/DiagramRuntime.cpp
         core/DiagramRuntime.h
         core/StaticSite.cpp
+        core/SiteDocumentLinks.cpp
+        core/SiteDocuments.cpp
+        core/SiteDocuments.h
         core/SiteGenerator.cpp
         core/SitePage.h
         core/SiteTemplateRenderer.cpp
         core/SiteTemplateRenderer.h
+        core/SiteNavigationIcons.cpp
+        core/SiteNavigationIcons.h
         core/SiteThemeRenderer.cpp
         core/SiteThemeRenderer.h
         core/FrontMatter.cpp

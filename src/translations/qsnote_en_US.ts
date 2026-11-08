@@ -1588,8 +1588,8 @@ It will be removed from the list. Files on disk will be kept, and you can add it
         </message>
         <message>
             <location line="+6" />
-            <source>主题与页脚</source>
-            <translation>Theme and Footer</translation>
+            <source>主题设置</source>
+            <translation>Theme Settings</translation>
         </message>
         <message>
             <location line="+1" />
@@ -1944,6 +1944,50 @@ It will be removed from the list. Files on disk will be kept, and you can add it
         <message>
             <source>已完成 %v / %m 步</source>
             <translation>%v / %m steps completed</translation>
+        </message>
+        <message>
+            <source>文档配置无效</source>
+            <translation>Invalid document configuration</translation>
+        </message>
+        <message>
+            <source>新建文档</source>
+            <translation>New Document</translation>
+        </message>
+        <message>
+            <source>移动到目录…</source>
+            <translation>Move to Folder…</translation>
+        </message>
+        <message>
+            <source>集合根目录</source>
+            <translation>Collection Root</translation>
+        </message>
+        <message>
+            <source>移动文档</source>
+            <translation>Move Document</translation>
+        </message>
+        <message>
+            <source>目标目录：</source>
+            <translation>Destination folder:</translation>
+        </message>
+        <message>
+            <source>移动失败</source>
+            <translation>Move Failed</translation>
+        </message>
+        <message>
+            <source>文件夹属性</source>
+            <translation>Folder Properties</translation>
+        </message>
+        <message>
+            <source>文档属性</source>
+            <translation>Document Properties</translation>
+        </message>
+        <message>
+            <source>博客</source>
+            <translation>Blog</translation>
+        </message>
+        <message>
+            <source>文档</source>
+            <translation>Documents</translation>
         </message>
     </context>
     <context>
@@ -3005,5 +3049,215 @@ Waiting for transfer to finish; byte progress is unavailable with SCP.</translat
             <source>已复制</source>
             <translation>Copied</translation>
         </message>
+    </context>
+    <context>
+        <name>SiteConfigDialog</name>
+        <message>
+            <source>配置无效</source>
+            <translation>Invalid Configuration</translation>
+        </message>
+    </context>
+    <context>
+        <name>SiteContentSettings</name>
+        <message><source>图标</source><translation>Icon</translation></message>
+        <message>
+            <source>文档集合</source>
+            <translation>Document Collections</translation>
+        </message>
+        <message>
+            <source>名称</source>
+            <translation>Name</translation>
+        </message>
+        <message>
+            <source>配置无效</source>
+            <translation>Invalid Configuration</translation>
+        </message>
+        <message>
+            <source>名称不能为空；Slug 必须以字母或数字开头，只能包含字母、数字、下划线和连字符。</source>
+            <translation>A name is required. Slugs must start with a letter or number and contain only letters, numbers, underscores and hyphens.</translation>
+        </message>
+        <message>
+            <source>导航项</source>
+            <translation>Navigation Item</translation>
+        </message>
+        <message>
+            <source>目标</source>
+            <translation>Target</translation>
+        </message>
+        <message>
+            <source>路径或 HTTP(S) 网址</source>
+            <translation>Path or HTTP(S) URL</translation>
+        </message>
+        <message>
+            <source>分组</source>
+            <translation>Group</translation>
+        </message>
+        <message>
+            <source>首页</source>
+            <translation>Home</translation>
+        </message>
+        <message>
+            <source>分类</source>
+            <translation>Categories</translation>
+        </message>
+        <message>
+            <source>标签</source>
+            <translation>Tags</translation>
+        </message>
+        <message>
+            <source>归档</source>
+            <translation>Archives</translation>
+        </message>
+        <message>
+            <source>友链</source>
+            <translation>Links</translation>
+        </message>
+        <message>
+            <source>关于</source>
+            <translation>About</translation>
+        </message>
+        <message>
+            <source>集合：</source>
+            <translation>Collection: </translation>
+        </message>
+        <message>
+            <source>站内路径</source>
+            <translation>Site Path</translation>
+        </message>
+        <message>
+            <source>外部链接</source>
+            <translation>External Link</translation>
+        </message>
+        <message>
+            <source>新增集合</source>
+            <translation>Add Collection</translation>
+        </message>
+        <message>
+            <source>改名</source>
+            <translation>Rename</translation>
+        </message>
+        <message>
+            <source>删除</source>
+            <translation>Delete</translation>
+        </message>
+        <message>
+            <source>上移</source>
+            <translation>Move Up</translation>
+        </message>
+        <message>
+            <source>下移</source>
+            <translation>Move Down</translation>
+        </message>
+        <message>
+            <source>集合 Slug 已存在。</source>
+            <translation>Collection slug already exists.</translation>
+        </message>
+        <message>
+            <source>无法删除</source>
+            <translation>Cannot Delete</translation>
+        </message>
+        <message>
+            <source>只能删除空集合。</source>
+            <translation>Only empty collections can be deleted.</translation>
+        </message>
+        <message>
+            <source>自定义导航（仅 Plume 展示）</source>
+            <translation>Custom Navigation (Plume Only)</translation>
+        </message>
+        <message>
+            <source>导航</source>
+            <translation>Navigation</translation>
+        </message>
+        <message>
+            <source>新增链接</source>
+            <translation>Add Link</translation>
+        </message>
+        <message>
+            <source>新增分组</source>
+            <translation>Add Group</translation>
+        </message>
+        <message>
+            <source>编辑</source>
+            <translation>Edit</translation>
+        </message>
+        <message>
+            <source>选中分组后新增链接可添加子项。取消自定义导航恢复默认项。集合 Slug 创建后固定；导航引用草稿或已删除内容时需修正。</source>
+            <translation>Select a group to add child links. Disable custom navigation to restore defaults. Collection slugs are fixed at creation; fix links to drafts or deleted content.</translation>
+        </message>
+    </context>
+    <context>
+        <name>SiteDocuments</name>
+        <message><source>文档或目录名称无效或文件名冲突：%1</source><translation>Invalid document or folder name, or conflicting filename: %1</translation></message>
+        <message><source>导航图标无效，请重新选择：%1</source><translation>Invalid navigation icon. Please select another icon: %1</translation></message>
+        <message>
+            <source>文档所属集合不存在：%1</source>
+            <translation>Document collection does not exist: %1</translation>
+        </message>
+        <message>
+            <source>文档或目录 Slug 无效：%1</source>
+            <translation>Invalid document or folder slug: %1</translation>
+        </message>
+        <message>
+            <source>文档路径已存在：%1</source>
+            <translation>Document path already exists: %1</translation>
+        </message>
+        <message>
+            <source>站点文档配置无效：%1</source>
+            <translation>Invalid site document configuration: %1</translation>
+        </message>
+        <message>
+            <source>集合名称、ID 或 Slug 无效或重复：%1</source>
+            <translation>Invalid or duplicate collection name, ID or slug: %1</translation>
+        </message>
+        <message>
+            <source>目录层级无效：%1</source>
+            <translation>Invalid folder hierarchy: %1</translation>
+        </message>
+        <message>
+            <source>文档或目录 Slug 冲突：%1</source>
+            <translation>Conflicting document or folder slug: %1</translation>
+        </message>
+        <message>
+            <source>导航目标无效，请修改或删除：%1</source>
+            <translation>Invalid navigation target; edit or remove: %1</translation>
+        </message>
+        <message>
+            <source>导航目标未发布：%1</source>
+            <translation>Navigation target is not published: %1</translation>
+        </message>
+        <message>
+            <source>导航路径不存在：%1</source>
+            <translation>Navigation path does not exist: %1</translation>
+        </message>
+    </context>
+    <context>
+        <name>SiteNavigationIcons</name>
+        <message><source>图标 SVG 无效或包含不支持的内容</source><translation>Invalid icon SVG or unsupported content</translation></message>
+        <message><source>请下载并预览此 Iconify 图标：%1</source><translation>Please download and preview this Iconify icon: %1</translation></message>
+        <message><source>首页</source><translation>Home</translation></message>
+        <message><source>文档</source><translation>Documents</translation></message>
+        <message><source>文件夹</source><translation>Folder</translation></message>
+        <message><source>标签</source><translation>Tag</translation></message>
+        <message><source>归档</source><translation>Archive</translation></message>
+        <message><source>链接</source><translation>Link</translation></message>
+        <message><source>用户</source><translation>User</translation></message>
+        <message><source>代码</source><translation>Code</translation></message>
+        <message><source>设置</source><translation>Settings</translation></message>
+        <message><source>搜索</source><translation>Search</translation></message>
+        <message><source>网站</source><translation>Website</translation></message>
+        <message><source>星标</source><translation>Star</translation></message>
+        <message><source>GitHub</source><translation>GitHub</translation></message>
+    </context>
+    <context>
+        <name>SiteNavigationIconPicker</name>
+        <message><source>无图标</source><translation>No Icon</translation></message>
+        <message><source>Iconify 图标名称</source><translation>Iconify Icon Name</translation></message>
+        <message><source>下载并预览</source><translation>Download and Preview</translation></message>
+        <message><source>填写“图标集:名称”，例如 map:wind-surfing。&lt;a href="https://icon-sets.iconify.design/"&gt;浏览 Iconify 图标库&lt;/a&gt;</source><translation>Enter “collection:name”, such as map:wind-surfing. &lt;a href="https://icon-sets.iconify.design/"&gt;Browse Iconify icons&lt;/a&gt;</translation></message>
+        <message><source>正在下载图标…</source><translation>Downloading icon…</translation></message>
+        <message><source>图标已缓存，保存后可离线生成站点。</source><translation>Icon cached. Save to generate the site offline.</translation></message>
+        <message><source>请输入有效名称，然后下载并预览。</source><translation>Enter a valid name, then download and preview.</translation></message>
+        <message><source>找不到该 Iconify 图标，请检查名称。</source><translation>Iconify icon not found. Please check the name.</translation></message>
+        <message><source>无法下载图标：%1</source><translation>Unable to download icon: %1</translation></message>
     </context>
 </TS>

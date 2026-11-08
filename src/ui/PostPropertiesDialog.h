@@ -13,12 +13,13 @@ class PostPropertiesDialog : public QDialog {
     Q_DECLARE_TR_FUNCTIONS(MainWindow)
 public:
     PostPropertiesDialog(const QString &title, const QJsonObject &metadata, const QStringList &categories,
-                         bool editing, QWidget *parent = nullptr);
+                         bool editing, QWidget *parent = nullptr, bool folder = false);
     QString title() const;
     QJsonObject metadata() const;
 
 private:
     QJsonObject initialMetadata_;
+    bool folder_;
     QLineEdit *title_;
     QComboBox *category_;
     QLineEdit *tags_;
