@@ -5,6 +5,7 @@
 
 namespace NotebookCategories {
 QStringList site(const Notebook &book);
+QHash<QString, int> postRanks(const Notebook &book, const QString &category);
 QString slug(const Notebook &book, const QString &name);
 bool setSlug(Notebook &book, const QString &name, const QString &value, QString *error);
 QStringList todo(const Notebook &book);

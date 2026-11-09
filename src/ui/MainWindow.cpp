@@ -712,7 +712,7 @@ void MainWindow::refreshTree() {
         if (!query.isEmpty() && (note.folder || (!note.title.contains(query, Qt::CaseInsensitive) && !note.content.contains(query, Qt::CaseInsensitive)))) continue;
         QStringList groups{QString()};
         if (book->type == "site" && !SiteDocuments::isDocument(note) && query.isEmpty()) {
-            if (groupBy_->currentIndex() == 0) groups = {note.metadata["category"].toString().isEmpty() ? tr("未分类") : note.metadata["category"].toString()};
+            if (groupBy_->currentIndex() == 0) groups = {note.metadata["category"].toString().isEmpty() ? QStringLiteral("default") : note.metadata["category"].toString()};
             else if (groupBy_->currentIndex() == 1) {
                 groups = note.metadata["tags"].toString().split(QRegularExpression("[,，]"), Qt::SkipEmptyParts);
                 for (auto &tag: groups) tag = tag.trimmed();
@@ -763,6 +763,18 @@ void MainWindow::refreshTree() {
             if (note.id == editorWorkspace_->currentNoteId()) tree_->setCurrentItem(item);
         }
         ++matches;
+    }
+    if (book->type == "site" && query.isEmpty() && groupBy_->currentIndex() == 0) {
+        for (int i = 0; i < blogRoot->childCount(); ++i) {
+            auto *group = blogRoot->child(i);
+            const auto ranks = NotebookCategories::postRanks(*book, group->data(0, Qt::UserRole + 4).toString());
+            if (ranks.isEmpty()) continue;
+            auto children = group->takeChildren();
+            std::stable_sort(children.begin(), children.end(), [&ranks](const QTreeWidgetItem *a, const QTreeWidgetItem *b) {
+                return ranks.value(a->data(0, Qt::UserRole).toString(), int(ranks.size())) < ranks.value(b->data(0, Qt::UserRole).toString(), int(ranks.size()));
+            });
+            group->addChildren(children);
+        }
     }
     if (book->type == "site" && query.isEmpty()) {
         for (const auto &note: book->notes) {
@@ -1469,6 +1481,28 @@ void MainWindow::showTreeMenu(const QPoint &position) {
                 refreshTree();
             });
             menu.addAction(tr("站点配置"), this, &MainWindow::showSiteConfig);
+        }
+    }
+    if (book && note && book->type == "site" && !documentContext && search_->text().trimmed().isEmpty() && groupBy_->currentIndex() == 0 && item->parent()) {
+        auto *group = item->parent();
+        const int position = group->indexOfChild(item);
+        for (const int offset: {-1, 1}) {
+            auto *action = menu.addAction(offset < 0 ? tr("上移") : tr("下移"));
+            action->setEnabled(position + offset >= 0 && position + offset < group->childCount());
+            connect(action, &QAction::triggered, this, [this, book, group, position, offset, id] {
+                QStringList order;
+                for (int i = 0; i < group->childCount(); ++i) order.append(group->child(i)->data(0, Qt::UserRole).toString());
+                order.swapItemsAt(position, position + offset);
+                const auto previous = book->config;
+                auto orders = book->config["categoryPostOrder"].toObject();
+                orders[group->data(0, Qt::UserRole + 4).toString()] = QJsonArray::fromStringList(order);
+                book->config["categoryPostOrder"] = orders;
+                if (!save()) book->config = previous;
+                refreshTree();
+                for (QTreeWidgetItemIterator it(tree_); *it; ++it) {
+                    if ((*it)->data(0, Qt::UserRole).toString() == id) { tree_->setCurrentItem(*it); break; }
+                }
+            });
         }
     }
     if (book && note && book->type == "ebook") {

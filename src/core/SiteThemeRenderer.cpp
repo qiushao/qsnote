@@ -217,7 +217,15 @@ QString SiteThemeRenderer::renderListing(const QString &route, const QString &ti
     data["categoryListing"] = type == "category"; data["tagListing"] = type == "tag";
     data["terms"] = terms(type == "tag" ? "tags" : "categories", title, subset);
     QJsonArray groups;
-    if (templates_.options()["groupByYear"].toArray().contains(type)) {
+    if (templates_.options()["groupByYear"].toArray().contains(type) && type == "category" && !NotebookCategories::postRanks(book_, title).isEmpty()) {
+        for (int first = 0; first < subset.size();) {
+            const auto year = subset[first]->date.left(4);
+            int end = first + 1;
+            while (end < subset.size() && subset[end]->date.left(4) == year) ++end;
+            groups.append(QJsonObject{{"year", year}, {"url", href("archives/" + year + '/')}, {"posts", postData(subset.mid(first, end - first))}});
+            first = end;
+        }
+    } else if (templates_.options()["groupByYear"].toArray().contains(type)) {
         QMap<QString, QList<const SitePage *>> years;
         for (const auto *post: subset) years[post->date.left(4)].append(post);
         for (auto it = years.cend(); it != years.cbegin();) { --it; groups.append(QJsonObject{{"year", it.key()}, {"url", href("archives/" + it.key() + '/')}, {"posts", postData(it.value())}}); }

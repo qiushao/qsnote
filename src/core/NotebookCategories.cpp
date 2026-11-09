@@ -53,6 +53,13 @@ QStringList NotebookCategories::site(const Notebook &book) {
     return collect(book, QStringLiteral("default"));
 }
 
+QHash<QString, int> NotebookCategories::postRanks(const Notebook &book, const QString &category) {
+    QHash<QString, int> ranks;
+    const auto order = book.config["categoryPostOrder"].toObject()[category].toArray();
+    for (const auto &id: order) ranks.insert(id.toString(), int(ranks.size()));
+    return ranks;
+}
+
 QString NotebookCategories::slug(const Notebook &book, const QString &name) {
     const auto category = name.isEmpty() ? QStringLiteral("default") : name;
     return book.config["categorySlugs"].toObject()[category].toString(category);
@@ -104,6 +111,9 @@ bool NotebookCategories::rename(Notebook &book, const QString &previous, const Q
         slugs[title] = slug(book, previous);
         slugs.remove(previous);
         book.config["categorySlugs"] = slugs;
+        auto orders = book.config["categoryPostOrder"].toObject();
+        if (orders.contains(previous)) orders[title] = orders.take(previous);
+        book.config["categoryPostOrder"] = orders;
     }
     auto names = categories(book);
     names.replace(names.indexOf(previous), title);
@@ -122,6 +132,9 @@ bool NotebookCategories::remove(Notebook &book, const QString &name, QString *er
         auto slugs = book.config["categorySlugs"].toObject();
         slugs.remove(name);
         book.config["categorySlugs"] = slugs;
+        auto orders = book.config["categoryPostOrder"].toObject();
+        orders.remove(name);
+        book.config["categoryPostOrder"] = orders;
     }
     book.config["categories"] = QJsonArray::fromStringList(names);
     for (auto &note: book.notes) {

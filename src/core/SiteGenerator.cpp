@@ -175,6 +175,12 @@ public:
             }
             search.append(theme.searchEntry(*post));
         }
+        for (auto it = categories.begin(); it != categories.end(); ++it) {
+            const auto ranks = NotebookCategories::postRanks(book_, it.key());
+            std::stable_sort(it.value().begin(), it.value().end(), [&ranks](const SitePage *a, const SitePage *b) {
+                return ranks.value(a->id, int(ranks.size())) < ranks.value(b->id, int(ranks.size()));
+            });
+        }
         for (const auto &documents: index.documents) for (const auto *page: documents) search.append(theme.searchEntry(*page));
         for (const auto &entry: book_.config["docCollections"].toArray()) {
             const auto group = entry.toObject();
