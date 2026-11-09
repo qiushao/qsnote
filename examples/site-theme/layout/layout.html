@@ -7,7 +7,7 @@
   <meta name="description" content="{{description}}">
   <meta name="keywords" content="{{keywords}}">
   <link rel="canonical" href="{{permalink}}">
-  {{articleStyle}}
+  <link rel="stylesheet" href="{{root}}css/qsnote-article.css">
   <link rel="stylesheet" href="{{root}}css/theme.css">
 </head>
 <body>
@@ -23,7 +23,7 @@
       <a href="{{root}}about/">关于</a>
     </nav>
   </header>
-  <main>{{body}}</main>
-  <footer>{{footer}}{{#author}} · {{author}}{{/author}}</footer>
+  <main>{{{content}}}</main>
+  <footer>{{{footer}}}{{#author}} · {{author}}{{/author}}</footer>
 </body>
 </html>

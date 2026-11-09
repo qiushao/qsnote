@@ -3,8 +3,9 @@
 Pure 来自 QSNote 提交 `9752f93` 中内置的版本（package 版本 0.0.1）。
 NexT 来自 [next-theme/hexo-theme-next](https://github.com/next-theme/hexo-theme-next)，版本 8.29.0，固定提交 `d25776ea38ddc7269fe9c3b94b6fd5cfcaae20e3`，使用 Muse 布局。
 
-- `templates/`：按上游模板的 DOM 和类名适配的 HTML 片段，`{{name}}` 由 C++ 生成器填充。NexT 对应 `_layout.njk`、`_macro/post.njk`、`_macro/sidebar.njk` 及导航、搜索、独立页面模板；归档、分类、分页由生成器按上游结构输出。
-- `{{githubSocial}}` 是用户设置的 GitHub 地址（HTML 转义后），各主题在模板中定义链接、图标和布局。`{{#githubSocial}}…{{/githubSocial}}` 仅在地址非空时输出内容；未填写或非 HTTP(S) 地址不显示。可选块可用于其他变量，不支持嵌套。城市通过 `{{city}}` 填充，只用于原主题已有的城市位置。
+- `theme.json`：声明规范版本、入口模板、资源目录及已有行为差异；内置与外部主题采用同一规范。完整配置、上下文和迁移说明见 [主题规范](../../../docs/site-themes.md)。
+- `templates/`：按上游模板 DOM 和类名适配的 HTML，包含文章、归档、分类、分页、导航和侧栏。生成器只提供通用数据，普通 `{{name}}` 默认 HTML 转义，原始 HTML 使用 `{{{body}}}`，静态片段使用 `{{>meta}}`。
+- `{{githubSocial}}` 是用户设置的 GitHub 地址（HTML 转义后），各主题在模板中定义链接、图标和布局。`{{#githubSocial}}…{{/githubSocial}}` 仅在地址非空时输出内容；未填写或非 HTTP(S) 地址不显示。区块支持嵌套、对象作用域与列表遍历。城市通过 `{{city}}` 填充，只用于原主题已有的城市位置。
 - `assets/`：原 CSS、字体、图片和浏览器脚本。Pure 的 `style.css` 直接复制；NexT 的 `main.css`、`noscript.css` 由上游 Stylus 预编译，程序构建和运行均不需要 Stylus、Hexo、Node.js 或 npm。
 - NexT 的 `config.js`、`utils.js`、`sidebar.js`、`next-boot.js` 和 `third-party/search/local-search.js` 原样复制到 `assets/js/`。搜索依赖 `hexo-generator-searchdb` 1.5.0 的 `dist/search.js`，图标使用 Font Awesome Free 7.3.1 的 CSS 与 WOFF2 字体，默认头像来自上游 `source/images/avatar.gif`。所有运行时资源均在本地。
 - NexT 的页面和搜索数据由 QSNote 提供，正文沿用编辑器预览的 Prism 高亮和默认样式，评论沿用站点配置。搜索标题和正文在写入索引时做 HTML 转义，以匹配搜索组件插入 HTML 的方式。
@@ -73,4 +74,4 @@ CSS SHA-256：`2ed7ba6e517eea794bb4e71edd77e3b891c4ba438b9e61e30630e9229f5b0db9`
 
 原 CSS SHA-256：`993ff721b9f1dff4e13fd6f233068a78680ec177f63c8ed46da9b348fba986d6`。
 
-Linux 完成 CMake 构建后运行 `python3 tests/run-site-shiro-check.py`，覆盖配置保存、原生离线生成、空站点/单篇、分页、分类标签、独立页面、子路径、资源指纹和切换主题清理，并使用 Qt WebEngine 验证搜索、明暗模式、中文目录、手机菜单与无 JavaScript 导航。截图写入 `build/site-preview-shiro*.png`。
+使用 `-DQSNOTE_BUILD_TESTS=ON` 配置并构建后运行 `ctest --test-dir build --output-on-failure`。测试覆盖五主题的固定输出、原生生成、外部改名主题、资源规则及主题切换，并使用 Qt WebEngine 检查桌面／移动视口和搜索。截图写入 `build/tests/screenshots/`。

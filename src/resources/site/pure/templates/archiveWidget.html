@@ -1,6 +1,6 @@
 <div class="widget">
 <h3 class="widget-title">归档</h3>
 <div class="widget-body">
-<ul class="archive-list">{{sidebarArchives}}</ul>
+<ul class="archive-list">{{#site.archives}}<li class="archive-list-item"><a class="archive-list-link" href="{{url}}">{{date|date(zh_CN):MMMM yyyy}}</a><span class="archive-list-count">{{count}}</span></li>{{/site.archives}}</ul>
 </div>
 </div>

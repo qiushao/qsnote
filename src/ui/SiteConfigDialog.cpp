@@ -181,7 +181,7 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent)
     themeDirectory->setPlaceholderText(QCoreApplication::translate("MainWindow", "站点内相对路径或完整路径"));
     auto *chooseTheme = button(QCoreApplication::translate("MainWindow", "选择主题目录…"), "chooseSiteTheme", card);
     form->addWidget(chooseTheme, 0, Qt::AlignLeft);
-    auto *themeHint = label(QCoreApplication::translate("MainWindow", "使用含 layout/*.html 和 source/ 的适配主题。支持 QSNote 占位符；Hexo 的 EJS、Nunjucks 和样式预处理文件需先转换，不执行主题插件或读取 _config.yml。"), card, true);
+    auto *themeHint = label(QCoreApplication::translate("MainWindow", "使用含 theme.json 的适配主题，由配置指定 HTML 模板和资源目录。旧主题需先迁移；Hexo 的 EJS、Nunjucks 和样式预处理文件需先转换，不执行主题插件或读取 _config.yml。"), card, true);
     themeHint->setWordWrap(true);
     form->addWidget(themeHint);
     const auto updateThemeFields = [theme, plumeSettings, themeDirectoryField, chooseTheme, themeHint] {

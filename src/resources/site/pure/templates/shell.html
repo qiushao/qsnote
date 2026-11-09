@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 
 <html lang="zh">
-<head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1, maximum-scale=1" name="viewport"/><meta content="{{author}}" name="author"/><meta content="QSNote" name="generator"/><title>{{headTitle}}</title>{{keywordsMeta}}<meta content="{{description}}" name="description"/><link href="{{permalink}}" rel="canonical"/><link href="{{root}}css/style.css" rel="stylesheet"/><link href="{{root}}css/qsnote-pure.css" rel="stylesheet"/><script defer="" src="{{root}}js/highlight.js"></script></head>
+<head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1, maximum-scale=1" name="viewport"/><meta content="{{author}}" name="author"/><meta content="QSNote" name="generator"/><title>{{headTitle}}</title>{{#keywords}}<meta name="keywords" content="{{keywords}}">{{/keywords}}<meta content="{{description}}" name="description"/><link href="{{permalink}}" rel="canonical"/><link href="{{root}}css/style.css" rel="stylesheet"/><link href="{{root}}css/qsnote-pure.css" rel="stylesheet"/><script defer="" src="{{root}}js/highlight.js"></script><link rel="stylesheet" href="{{root}}css/qsnote-article.css"></head>
 <body class="main-center theme-purple" itemscope="" itemtype="http://schema.org/WebPage">
 <header class="header" itemscope="" itemtype="http://schema.org/WPHeader">
 <div class="slimContent">
@@ -91,20 +91,20 @@
 <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-controls="main-sidebar" aria-expanded="true" aria-label="收起侧栏" title="收起侧栏" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 12h14M12 5l7 7-7 7"/></svg></button>
 <aside id="main-sidebar" class="sidebar" itemscope="" itemtype="http://schema.org/WPSideBar">
 <div class="slimContent">
-{{categoryWidget}}
-{{tagWidget}}
-{{cloudWidget}}
-{{archiveWidget}}
-{{recentWidget}}
+{{^view.about}}{{#categoryCount}}{{>categoryWidget}}{{/categoryCount}}{{/view.about}}
+{{^view.about}}{{#tagCount}}{{>tagWidget}}{{/tagCount}}{{/view.about}}
+{{^view.about}}{{#tagCount}}{{>cloudWidget}}{{/tagCount}}{{/view.about}}
+{{^view.about}}{{#postCount}}{{>archiveWidget}}{{/postCount}}{{/view.about}}
+{{^view.about}}{{#postCount}}{{>recentWidget}}{{/postCount}}{{/view.about}}
 </div>
 </aside>
-{{tocSidebar}}<main class="main" role="main">{{content}}</main>
+{{#postToc}}<aside class="sidebar sidebar-toc collapse" id="collapseToc" itemscope itemtype="http://schema.org/WPSideBar"><div class="slimContent"><nav id="toc" class="article-toc"><h3 class="toc-title">Catalogue</h3><ol class="toc">{{{postToc}}}</ol></nav></div></aside>{{/postToc}}<main class="main" role="main">{{{content}}}</main>
 <footer class="footer" itemscope="" itemtype="http://schema.org/WPFooter">
 <ul class="social-links">
 {{#githubSocial}}<li><a href="{{githubSocial}}" target="_blank" rel="noopener noreferrer" title="GitHub" aria-label="GitHub"><i class="icon icon-github"></i></a></li>{{/githubSocial}}
 </ul>
 <div class="copyright">
-<p>{{footer}}</p>
+<p>{{{footer}}}</p>
 <div class="publishby">
         	Theme by <a href="https://github.com/cofess" target="_blank"> cofess </a>base on <a href="https://github.com/cofess/hexo-theme-pure" target="_blank">pure</a>.
         </div>

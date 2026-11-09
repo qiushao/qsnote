@@ -1,0 +1,4 @@
+<span class="article-date"><i class="icon icon-calendar-check"></i> <a class="article-date" href="{{url}}"><time datetime="{{date}}" itemprop="datePublished">{{#card}}{{date|date:M月 d}}{{/card}}{{^card}}{{date|date:yyyy-MM-dd}}{{/card}}</time></a></span>
+{{#hasCategories}}<span class="article-category"><i class="icon icon-folder"></i> {{>categories}}</span>
+{{/hasCategories}}{{#hasTags}}<span class="article-tag"><i class="icon icon-tags"></i> {{>tags}}</span>
+{{/hasTags}}<span class="post-comment"><i class="icon icon-comment"></i> <a class="article-comment-link" href="{{url}}#comments">评论</a></span>

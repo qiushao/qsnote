@@ -1,136 +1,176 @@
-# 自定义站点主题
+# 站点主题规范（版本 1）
 
-[教程目录](README.md) · 上一篇：[静态站点与发布](static-sites.md)
+[教程目录](README.md) · [静态站点与发布](static-sites.md)
 
-本篇适合已经能预览站点、了解基本 HTML/CSS 的用户。使用仓库中的[示例主题](../examples/site-theme/)起步，避免从空目录搭建。
+内置 Pure、NexT、3-Jekyll、Shiro、Plume 和外部主题使用同一个渲染器。主题名称仅用于定位资源。生成器提供数据，`theme.json` 声明行为和入口，HTML 模板负责布局、类名、图标及组件显隐。无需 Hexo、Node.js 或模板运行时。
 
-## 1. 先启用示例主题
+## 启用示例
 
-1. 复制仓库的 `examples/site-theme/` 整个目录到站点笔记本下，例如 `themes/my-theme/`。
-2. 打开“站点配置 → 主题设置”，站点主题选“自定义”。
-3. 主题目录填 `themes/my-theme`，或通过“选择主题目录…”选择完整路径。
-4. 保存配置，点击“站点预览”。
+1. 复制完整的 [examples/site-theme](../examples/site-theme/) 到笔记本的 `themes/my-theme/`。
+2. 在“站点配置 → 主题设置”选择“自定义”，主题目录填 `themes/my-theme`，也可选择绝对路径。
+3. 保存并预览。相对目录以笔记本根目录为基准。
 
-预期结果：站点使用示例中的导航、文章卡片、正文和页脚。相对主题目录以站点笔记本根目录为基准；为了迁移方便，可将主题一起放在笔记本内备份。
+也可以复制任一 `src/resources/site/<主题>/` 目录，以任意名称作为外部主题使用，无需修改 C++。
 
-主题采用 Hexo 风格的 `layout/`、`source/` 目录结构，但模板格式是 QSNote 自己的 HTML 占位符。不能直接选择任意 Hexo 主题就运行：EJS、Nunjucks、Stylus/Sass 等需先转换或编译；程序不执行主题插件，也不读取主题 `_config.yml`。
-
-## 2. 理解五个必需模板
+## 目录和配置
 
 ```text
 my-theme/
-├── layout/
-│   ├── layout.html    # 页面外壳
-│   ├── index.html     # 首页和列表
-│   ├── card.html      # 列表中的文章卡片
-│   ├── post.html      # 文章页
-│   └── page.html      # 独立页面
-└── source/
-    └── css/theme.css
+├── theme.json
+├── layout/          # HTML 模板，支持子目录
+│   ├── layout.html
+│   ├── index.html
+│   ├── post.html
+│   ├── page.html
+│   └── ...
+└── source/          # 编译好的 CSS、JavaScript、图片等
 ```
 
-这五个模板必须存在且不为空。`archive.html`、`category.html`、`tag.html` 是可选的对应列表模板；不提供时使用列表回退模板。
+示例配置：
 
-生成器先准备文章和列表内容，再将其填入模板，最后套到 `layout.html` 的 `{{body}}`。同一个占位符在不同模板中可以有不同含义，例如外壳的 `body` 是完整页面主体，文章模板中的 `body` 是文章正文。
-
-## 3. 第一次改样式
-
-打开复制后的 `source/css/theme.css`，在末尾添加：
-
-```css
-.site-title {
-  color: #3567c7;
-  letter-spacing: 0.08em;
+```json
+{
+  "version": 1,
+  "templates": "layout",
+  "assets": "source",
+  "entries": {
+    "layout": "layout",
+    "index": "index",
+    "post": "post",
+    "page": "page",
+    "archive": "index",
+    "category": "index",
+    "tag": "index",
+    "categories": "categoryIndex",
+    "tags": "tagIndex",
+    "links": "links",
+    "document": "page",
+    "documentNode": "documentNode"
+  },
+  "options": {
+    "excerptLength": 128,
+    "excerptFormat": "text",
+    "singlePostIndex": false,
+    "groupByYear": [],
+    "searchEscapeFields": []
+  }
 }
 ```
 
-重新预览，预期示例主题的站点标题颜色与字距改变。`layout/layout.html` 里的样式引用应保持：
+`version` 必须为数字 `1`。`templates`、`assets` 是主题根目录内的相对目录，不能包含 `..`、绝对路径或空路径段。`entries` 中所有键必填，值是不含 `.html` 的模板路径；多个入口可指向同一个模板，没有隐式回退。配置中未知键、错误类型、不存在或空的模板都会报错，并注明文件路径。
+
+| 入口 | 用途 |
+| --- | --- |
+| `layout` | 所有页面的外壳，使用 `{{{content}}}` 插入已渲染的主体 |
+| `index` | 首页和首页后续分页 |
+| `post` / `page` | 文章 / 普通独立页面 |
+| `archive` | 全站及年月归档 |
+| `category` / `tag` | 某分类 / 某标签下的文章列表 |
+| `categories` / `tags` | 分类 / 标签总览页 |
+| `links` | 友链页 |
+| `document` | 文档及文档集合目录页 |
+| `documentNode` | 文档目录的单个节点，生成器从叶到根渲染，无需递归引用模板 |
+
+`options` 可省略，各字段独立生效：
+
+| 选项 | 默认值及含义 |
+| --- | --- |
+| `excerptLength` | `128`，文本摘要长度，至少为 3；超长时末尾三个字符为 `...` |
+| `excerptFormat` | `text`；`html` 使用正文 `<!-- more -->` 前已渲染内容，没有该标记则为空 |
+| `singlePostIndex` | `false`；首页某页只有一篇文章时提供 `singlePost`，模板决定如何展开 |
+| `groupByYear` | `[]`；可列出 `index`、`archive`、`category`、`tag`，为这些列表提供按年份降序的 `groups` |
+| `searchEscapeFields` | `[]`；可列出 `title`、`content`，对搜索 JSON 的这些字段进行 HTML 转义，适配已有搜索客户端 |
+| `defaultAvatar` | 空字符串；未设置头像时使用的资源路径 |
+| `rootRelativeAvatar` | `false`；是否把 `/` 开头的站内头像路径也加上部署子路径 |
+
+视觉选项应直接写在模板中；不要把主题名字作为行为模式。分页大小和站点 URL 规则仍由公共生成器管理。
+
+## 模板语法
+
+普通插值默认 HTML 转义，包括单引号和双引号。对象和数组不能直接当作字符串输出，缺少的字段输出空字符串。
 
 ```html
+<h1>{{title}}</h1>
+<a href="{{url}}">{{site.title}}</a>
+<div class="markdown-body">{{{body}}}</div>
+```
+
+三重花括号表示原始 HTML，适用于生成器提供的正文、目录、评论、已渲染片段及用户配置的 HTML 页脚。不要用它插入标题、标签名、URL 或其它普通文本。插入值不会再次作为模板解析，正文中的 `{{title}}` 保持原样。
+
+条件、循环和对象作用域采用同一种区块语法，允许嵌套：
+
+```html
+{{#site.author}}<p>{{site.author}}</p>{{/site.author}}
+{{#posts}}
+  <article>
+    <h2><a href="{{url}}">{{title}}</a></h2>
+    {{#hasTags}}<ul>{{#tags}}<li>{{name}}</li>{{/tags}}</ul>{{/hasTags}}
+  </article>
+{{/posts}}
+{{^posts}}<p>暂无文章</p>{{/posts}}
+```
+
+- 布尔值按真假判断；数字 `0`、空字符串、空数组、空对象、null 和缺失字段为假。字符串 `"false"` 为真。
+- `{{#数组}}` 对每个元素执行一次；`{{.}}` 引用当前元素。需要为整个列表加一个容器时，使用 `hasTags`、`hasCategories` 等布尔字段。
+- `{{#对象}}` 将对象设为当前作用域；字段先查当前作用域，再查外层。布尔值或字符串条件不改变作用域。
+- `{{^字段}}` 在字段为假时执行。结束块必须与开始块同名。
+- `{{>card}}` 静态引用 `card.html`，沿用当前作用域。允许引用子目录片段，但不允许直接或间接引用环，也不支持动态模板名。
+- `{{date|date:yyyy-MM-dd}}` 用 Qt 日期格式展示 ISO 日期；例如 `M月 d` 或 `MM-dd`。月份名称可显式指定区域：`{{date|date(zh_CN):MMMM yyyy}}`。不支持其它过滤器、表达式、EJS/Nunjucks 或任意脚本执行。
+
+所有模板在加载时解析并检查区块和片段引用。字段名可以包含点号访问对象；未知字段视为缺失值，因此修改字段名后应预览确认。
+
+## 数据上下文
+
+| 范围 | 字段 |
+| --- | --- |
+| 全站 `site` | `root`、`title`、`author`、`city`、`githubSocial`、`avatar`、`description`、`footer`、`domain`、`postCount`、`categoryCount`、`tagCount` |
+| 全站列表 | `site.posts`、`site.recent`（前 5 篇）、`site.categories`、`site.tags`、`site.archives`、`site.friends`、`site.navigation` |
+| 当前页面 | `title`、`headTitle`、`route`、`url`、`permalink`、`keywords`、`body`；单页还提供完整 `page` 对象 |
+| 文章对象 | `id`、`title`、`url`、`route`、`permalink`、`date`、`updated`、`body`、`text`、`excerpt`、`toc`、`post`、`document`、`pinned`、`tags`、`categories`、`hasTags`、`hasCategories`、`wordCount`、`readingMinutes` |
+| 单篇补充 | `comments`、`previous`、`next`（标题和 URL）、`hasNavigation`、`showNavigation` |
+| 列表 | `posts`（当前页）、`listCount`（总篇数）、`subsetCount`（当前页篇数）、`listTitle`（是否需要列表标题）、`groups`（年份和文章）、`singlePost`、`card`、`categoryListing`、`tagListing`、`terms` |
+| 分页对象 `pagination` | `number`、`count`、`multiple`、`previous`、`next`（URL 或空）、`pages`（`number`、`url`、`current`） |
+| 文档 | `collection`（`title`、`url`）、`parents`（上级目录名数组）、`documentTree`（已渲染目录节点） |
+| 目录节点入口 | `title`、`folder`、`children`（已渲染子节点）、`url`、`active` |
+
+全站标量字段同时提供顶层别名，其中站点标题使用 `siteTitle`，避免与页面 `title` 冲突。外壳的 `content` 是入口模板的已渲染 HTML，`body` 始终是原正文。列表文章不包含评论或前后篇数据。
+
+文章的分类／标签条目包含 `name`、`url`；标签还包含稳定的 `color`（0–5）及 `label`（是否属于前 3 个）。全站分类／标签条目另含 `count`、`posts`、`selected`；`terms` 对应当前分类／标签列表，`selected` 标识匹配的条目。归档条目包含 `date`（该月首日的 ISO 日期）、`url`、`count`，友链包含 `title`、`url`。
+
+`site.navigation` 包含 `title`、`icon`（已校验的 SVG）、`url`、`active`，分组包含 `group` 和 `children`。未配置导航时自动提供首页、文档集合及站点索引入口。`site.posts` 还提供 `active` 和属性用的 `tagsJson`，可用于客户端筛选。
+
+`view` 提供布尔字段：`home`（仅第一页）、`index`、`listing`、`archive`、`taxonomy`、`page`、`post`、`document`、`about`、`links`、`categories`、`tags`。`postToc` 为文章目录，`navToc` 是使用 `nav-` 类名前缀的同一目录，供已有侧栏脚本使用。`rootJsonValue` 和 `searchJsonValue` 是经过脚本上下文编码的 JSON，供 NexT 的配置脚本使用。
+
+## 资源、搜索与自定义代码
+
+`assets` 指定目录的内容复制到输出根目录。所有主题统一忽略以 `.` 或 `_` 开头的路径段；发现 Stylus、Sass、Less、EJS、Nunjucks、Pug、Swig 等待编译文件时拒绝生成。主题目录中的 `LICENSE` 和 `THIRD-PARTY-NOTICES.md` 会随输出保留。
+
+使用 `{{root}}` 构建资源路径，它包含部署子路径：
+
+```html
+<link rel="stylesheet" href="{{root}}css/qsnote-article.css">
 <link rel="stylesheet" href="{{root}}css/theme.css">
 ```
 
-主题 `source/` 内的文件复制到生成站点根目录，`{{root}}` 会包含站点子路径。若站点发布在 `/learning/`，上述链接就指向 `/learning/css/theme.css`；不要固定写成 `/css/theme.css`。
+保留公共正文样式引用，以支持代码、公式和图表。资源 CSS、JavaScript 不做预处理。生成的 `search.json` 和 `content.json` 可供主题脚本使用；示例主题没有搜索界面。评论继续使用站点配置，`{{{comments}}}` 输出已生成代码；head/body 自定义代码在最终外壳渲染完后注入。
 
-## 4. 常用占位符
+## 旧主题迁移
 
-| 用途 | 占位符 | 放置示例 |
-| --- | --- | --- |
-| 站点信息 | `siteTitle`、`description`、`author`、`city`、`footer`、`domain` | 外壳标题与页脚 |
-| 路径与身份 | `root`、`githubSocial`、`avatar`、`avatarImage` | 导航、个人链接、头像 |
-| 页面头部 | `headTitle`、`keywords`、`permalink`、`articleStyle` | `layout.html` 的 head 内 |
-| 通用内容 | `title`、`body` | 页面或文章标题、正文 |
-| 文章卡片 | `url`、`date`、`meta`、`categories`、`tags`、`excerpt` | `card.html` 的摘要与链接 |
-| 文章页 | `toc`、`navigation`、`comments` | `post.html` 的目录、前后篇和评论 |
-| 列表 | `pagination`、`pageNumber`、`pageCount`、`postCount` | `index.html` 的分页与数量 |
+**没有 `theme.json` 的旧主题会明确报错，不再隐式沿用旧实现。**
 
-这些占位符是允许的名称集合，具体是否有值取决于所在模板。没有值时输出空字符串；不支持自定义变量、循环或表达式。普通文本由生成器转义，`body`、`meta`、`articleStyle` 等包含已生成的 HTML，直接放在对应位置即可。保留示例外壳的 `{{articleStyle}}`，让正文、公式、代码等获得必要样式。
+1. 添加版本 1 配置，显式映射所有入口；原先可选的归档／分类／标签模板可直接映射到 `index`。
+2. 将正文、页脚和评论的旧 `{{body}}` 等改为三重花括号；普通文本维持双重花括号，不要自行预转义。
+3. 外壳用 `{{{content}}}`；列表入口用 `{{#posts}}{{>card}}{{/posts}}`，原 `body` 不再是卡片集合。
+4. `meta`、分类标签链接、分页和前后篇 DOM 改为主题片段；参考完整示例的 `meta.html`、`categories.html`、`tags.html`、`pagination.html`、`navigation.html`。原 `avatarImage`、`articleStyle` 等 DOM 占位符改为模板中的 HTML。
+5. 为分类／标签总览、友链、文档和文档节点显式提供入口。只有声明为入口或被片段引用的模板会用于对应页面。
+6. 检查空站点、多页列表、中文与特殊字符、子路径、目录、评论、窄窗口和主题切换。始终修改主题源目录，`public/` 会在成功生成后被替换。
 
-练习：修改 `card.html`，在文章标题下面显示日期：
+## 开发验证
 
-```html
-<article class="card">
-  <h2><a href="{{url}}">{{title}}</a></h2>
-  <time>{{date}}</time>
-  <p>{{excerpt}}</p>
-</article>
+```bash
+cmake -S . -B build -DQSNOTE_BUILD_TESTS=ON
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
 ```
 
-预期结果：首页每张卡片出现文章日期。保持 `index.html` 中的 `{{body}}` 与 `{{pagination}}`，否则文章列表或翻页入口不会显示。
-
-## 5. 条件块
-
-变量有非空值时才显示一段内容，可使用成对的条件块：
-
-```html
-{{#githubSocial}}
-<a href="{{githubSocial}}">GitHub</a>
-{{/githubSocial}}
-
-{{#toc}}
-<details>
-  <summary>文章目录</summary>
-  {{toc}}
-</details>
-{{/toc}}
-```
-
-把第一段放进外壳页脚：站点配置不填 GitHub 地址时链接不出现，填写有效 HTTP(S) 地址后出现。第二段放在文章模板中，有目录时显示折叠目录。
-
-条件块不能嵌套，开始和结束必须使用同一个变量名。`{{#author}}…{{/city}}`、未知占位符、`<% ... %>` 或 `{% ... %}` 都会导致模板校验失败。
-
-## 6. 导航、搜索与静态资源
-
-自定义导航可直接指向生成的页面：
-
-```html
-<nav>
-  <a href="{{root}}">首页</a>
-  <a href="{{root}}archives/">归档</a>
-  <a href="{{root}}projects/">项目</a>
-</nav>
-```
-
-“项目”需要先按[独立页面教程](static-sites.md)创建 `source/projects/index.md`。自定义主题示例不包含内置主题的交互搜索界面；需要搜索时自行编写前端并读取生成的搜索数据，或者继续使用内置主题。不要把“允许使用搜索数据”误认为模板会自动出现搜索框。
-
-图片、编译后的 CSS 和 JavaScript 放进主题 `source/`，引用时使用 `{{root}}` 加相对路径。主题 CSS 和脚本不做预处理；先在外部编译好再放入。主题代码与“站点配置 → 自定义代码”可以同时生效，调试时需考虑两者叠加。
-
-## 7. 验证与迁移
-
-用至少两篇文章、一篇独立页面及一个标签练习，逐项检查：
-
-1. 首页文章链接能打开，正文、图片、公式与图表正常。
-2. 标签、分类、归档及前后篇链接有效；文章超过 10 篇时分页有效。
-3. 将域名设为带子路径的测试值（如 `https://example.com/learning/`），重新本机预览，样式和导航仍正常。
-4. 缩窄预览窗口，检查长标题、图片和表格没有挡住操作。
-5. 没有作者、头像、GitHub 地址或评论时，不出现无意义的空区域。
-
-模板错误时按报错文件检查必需文件、变量拼写和条件块。调整主题只修改原主题目录，再重新生成；直接修改 `public/` 会在下次生成时被替换。迁移时把 `themes/my-theme/` 一并复制，若使用绝对主题路径则需在新机器重新选择目录。
-
-### Plume
-
-内置 `plume` 主题使用本地静态 HTML/CSS/JavaScript，包含一个博客和多个文档集合。
-配置入口与支持范围见 [站点使用说明](static-sites.md#plume-与文档集合)。
-来源、许可证、移植文件和更新步骤记录于
-[`src/resources/site/plume/THIRD-PARTY-NOTICES.md`](../src/resources/site/plume/THIRD-PARTY-NOTICES.md)。
-生成结果会附带上游 MIT 许可证。无需运行 VuePress 或安装 Node.js。
+测试覆盖模板解析和非法配置、五主题 250 份固定内容基线、完整生成流程、外部改名主题、资源规则、输出清理、桌面／移动视口及搜索。浏览器检查使用项目已有的 Qt WebEngine，截图写入 `build/tests/screenshots/`。固定基线比较忽略无意义 HTML 空白和属性顺序，保留结构、属性、链接、文本及搜索 JSON。完整生成的改名主题比较使用相同的 Markdown 缓存状态：现有正文渲染器冷、热缓存可能产生空白差异，本次不修改该逻辑。

@@ -1,4 +1,4 @@
-
+{{{body}}}
 <article class="article article-links article-type-list" itemscope="">
 <header class="article-header">
 <h1 itemprop="title">友链</h1>
@@ -7,7 +7,7 @@
     </p>
 </header>
 <div class="article-body">
-<div class="row">{{links}}</div>
+<div class="row">{{#site.friends}}{{>friend}}{{/site.friends}}</div>
 </div>
 </article>
 

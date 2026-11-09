@@ -212,21 +212,19 @@ public:
         QDirIterator resources(assets, QDir::Files, QDirIterator::Subdirectories);
         while (resources.hasNext()) {
             const auto path = resources.next();
-            if (templates.theme() == SiteTemplateRenderer::Theme::Custom) {
-                const auto segments = QDir(assets).relativeFilePath(path).split('/');
-                bool excluded = false;
-                for (const auto &segment: segments) if (segment.startsWith('.') || segment.startsWith('_')) excluded = true;
-                if (excluded) continue;
-                const auto suffix = QFileInfo(path).suffix().toLower();
-                if (QStringList{"styl", "stylus", "scss", "sass", "less", "ejs", "njk", "nunjucks", "pug", "swig"}.contains(suffix))
-                    return fail(QCoreApplication::translate("SiteGenerator", "自定义主题资源需要预编译：") + path);
-            }
+            const auto segments = QDir(assets).relativeFilePath(path).split('/');
+            bool excluded = false;
+            for (const auto &segment: segments) if (segment.startsWith('.') || segment.startsWith('_')) excluded = true;
+            if (excluded) continue;
+            const auto suffix = QFileInfo(path).suffix().toLower();
+            if (QStringList{"styl", "stylus", "scss", "sass", "less", "ejs", "njk", "nunjucks", "pug", "swig"}.contains(suffix))
+                return fail(QCoreApplication::translate("SiteGenerator", "主题资源需要预编译：") + path);
             QFile file(path);
             if (!file.open(QIODevice::ReadOnly)) return fail(QCoreApplication::translate("SiteGenerator", "无法读取站点资源：") + path);
             if (!write(path.mid(assets.size() + 1), file.readAll())) return false;
         }
         for (const auto &name: {"LICENSE", "THIRD-PARTY-NOTICES.md"}) {
-            QFile file(QDir::cleanPath(assets + "/../" + name));
+            QFile file(templates.directory() + '/' + name);
             if (!file.exists()) continue;
             if (!file.open(QIODevice::ReadOnly) || !write("theme-" + QString(name), file.readAll())) return false;
         }

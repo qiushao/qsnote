@@ -3,6 +3,7 @@
 
 #include "SitePage.h"
 #include "SiteTemplateRenderer.h"
+#include <QJsonArray>
 
 class SiteThemeRenderer {
 public:
@@ -14,34 +15,21 @@ public:
     QJsonObject contentEntry(const SitePage &page) const;
 
 private:
-    bool plumeTheme() const;
-    QString plumeNavigation(const QString &route) const;
-    QString plumeSidebar(const QString &collectionId, const QString &route) const;
-    bool nextTheme() const;
-    bool threeTheme() const;
-    bool shiroTheme() const;
-    bool customTheme() const;
     QString href(const QString &route) const;
-    QString themeTemplate(const QString &name, QMap<QString, QString> values = {}) const;
-    QString link(const QString &route, const QString &title, const QString &classes = {}) const;
-    QString taxonomyLinks(const SitePage &page, bool tags = false) const;
-    QString meta(const SitePage &page, bool card = false) const;
     QString permalink(const QString &route) const;
-    QString article(const SitePage &page, bool index = false) const;
-    QString postNavigation(const SitePage &page) const;
-    QString collection(const QList<const SitePage *> &posts) const;
-    QStringList categoryNames() const;
-    QString taxonomy(const QString &kind, const QString &selected = {}, const QList<const SitePage *> &subset = {}) const;
-    QString tagLabels(const SitePage &page) const;
-    QString sidebarRecent() const;
-    QString sidebarTerms(const QMap<QString, QList<const SitePage *>> &groups, const QString &type, bool cloud = false) const;
+    QJsonObject pageData(const SitePage &page, bool details = true) const;
+    QJsonArray postData(const QList<const SitePage *> &posts) const;
+    QJsonArray terms(const QString &kind, const QString &selected = {}, const QList<const SitePage *> &subset = {}) const;
+    QJsonObject context(const QString &route, const QString &title, const SitePage *page = nullptr) const;
+    QJsonArray navigation(const QString &route) const;
+    QString documentTree(const QString &collectionId, const QString &route) const;
     QString injectCode(QString markup) const;
-    QString html(const QString &route, const QString &title, const QString &body, const SitePage *page = nullptr) const;
-    QString pagination(const QString &route, int page, int count) const;
     const Notebook &book_;
     const SiteTemplateRenderer &templates_;
     const SiteIndex &index_;
     QString root_;
+    // Only index-owned list pages are cached; synthetic collection pages are temporary.
+    mutable QMap<const SitePage *, QJsonObject> listPages_;
 };
 
 #endif

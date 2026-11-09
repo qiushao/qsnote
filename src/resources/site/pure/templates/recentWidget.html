@@ -1,6 +1,6 @@
 <div class="widget">
 <h3 class="widget-title">最新文章</h3>
 <div class="widget-body">
-<ul class="recent-post-list list-unstyled no-thumbnail">{{sidebarRecent}}</ul>
+<ul class="recent-post-list list-unstyled no-thumbnail">{{#site.recent}}<li><div class="item-inner"><p class="item-category">{{#categories}}<a class="category-link" href="{{url}}">{{name}}</a>{{/categories}}</p><p class="item-title"><a class="title" href="{{url}}">{{title}}</a></p><p class="item-date"><time datetime="{{date}}" itemprop="datePublished">{{date|date:yyyy-MM-dd}}</time></p></div></li>{{/site.recent}}</ul>
 </div>
 </div>

@@ -81,9 +81,8 @@
     <file>site/shiro/assets/js/progress.min.js</file>
     <file>site/shiro/assets/js/theme-toggle.min.js</file>
     <file>site/shiro/assets/js/toc.min.js</file>
-    <file>site/shiro/templates/archive.html</file>
+    <file>site/shiro/templates/archiveRow.html</file>
     <file>site/shiro/templates/card.html</file>
-    <file>site/shiro/templates/list.html</file>
     <file>site/shiro/templates/page.html</file>
     <file>site/shiro/templates/post.html</file>
     <file>site/shiro/templates/shell.html</file>
@@ -115,5 +114,81 @@
     <file>site/plume/templates/page.html</file>
     <file>site/plume/templates/profile.html</file>
     <file>site/plume/templates/shell.html</file>
+    <file>site/pure/theme.json</file>
+    <file>site/pure/templates/archive.html</file>
+    <file>site/pure/templates/categories.html</file>
+    <file>site/pure/templates/category.html</file>
+    <file>site/pure/templates/categoryGroup.html</file>
+    <file>site/pure/templates/categoryIndex.html</file>
+    <file>site/pure/templates/collection.html</file>
+    <file>site/pure/templates/documentNode.html</file>
+    <file>site/pure/templates/index.html</file>
+    <file>site/pure/templates/meta.html</file>
+    <file>site/pure/templates/navigation.html</file>
+    <file>site/pure/templates/pagination.html</file>
+    <file>site/pure/templates/tag.html</file>
+    <file>site/pure/templates/tagGroup.html</file>
+    <file>site/pure/templates/tagIndex.html</file>
+    <file>site/pure/templates/tags.html</file>
+    <file>site/next/theme.json</file>
+    <file>site/next/templates/archive.html</file>
+    <file>site/next/templates/categories.html</file>
+    <file>site/next/templates/category.html</file>
+    <file>site/next/templates/categoryIndex.html</file>
+    <file>site/next/templates/documentNode.html</file>
+    <file>site/next/templates/index.html</file>
+    <file>site/next/templates/links.html</file>
+    <file>site/next/templates/meta.html</file>
+    <file>site/next/templates/navigation.html</file>
+    <file>site/next/templates/pagination.html</file>
+    <file>site/next/templates/tag.html</file>
+    <file>site/next/templates/tagIndex.html</file>
+    <file>site/next/templates/tags.html</file>
+    <file>site/3-jekyll/theme.json</file>
+    <file>site/3-jekyll/templates/archive.html</file>
+    <file>site/3-jekyll/templates/categories.html</file>
+    <file>site/3-jekyll/templates/category.html</file>
+    <file>site/3-jekyll/templates/categoryIndex.html</file>
+    <file>site/3-jekyll/templates/documentNode.html</file>
+    <file>site/3-jekyll/templates/index.html</file>
+    <file>site/3-jekyll/templates/links.html</file>
+    <file>site/3-jekyll/templates/meta.html</file>
+    <file>site/3-jekyll/templates/navigation.html</file>
+    <file>site/3-jekyll/templates/pagination.html</file>
+    <file>site/3-jekyll/templates/tag.html</file>
+    <file>site/3-jekyll/templates/tagIndex.html</file>
+    <file>site/3-jekyll/templates/tags.html</file>
+    <file>site/shiro/theme.json</file>
+    <file>site/shiro/templates/archive.html</file>
+    <file>site/shiro/templates/categories.html</file>
+    <file>site/shiro/templates/category.html</file>
+    <file>site/shiro/templates/categoryIndex.html</file>
+    <file>site/shiro/templates/documentNode.html</file>
+    <file>site/shiro/templates/index.html</file>
+    <file>site/shiro/templates/links.html</file>
+    <file>site/shiro/templates/meta.html</file>
+    <file>site/shiro/templates/navigation.html</file>
+    <file>site/shiro/templates/pagination.html</file>
+    <file>site/shiro/templates/tag.html</file>
+    <file>site/shiro/templates/tagIndex.html</file>
+    <file>site/shiro/templates/tags.html</file>
+    <file>site/plume/theme.json</file>
+    <file>site/plume/templates/archive.html</file>
+    <file>site/plume/templates/categories.html</file>
+    <file>site/plume/templates/category.html</file>
+    <file>site/plume/templates/categoryIndex.html</file>
+    <file>site/plume/templates/documentNode.html</file>
+    <file>site/plume/templates/githubIcon.html</file>
+    <file>site/plume/templates/index.html</file>
+    <file>site/plume/templates/links.html</file>
+    <file>site/plume/templates/menu.html</file>
+    <file>site/plume/templates/meta.html</file>
+    <file>site/plume/templates/navLink.html</file>
+    <file>site/plume/templates/navigation.html</file>
+    <file>site/plume/templates/pagination.html</file>
+    <file>site/plume/templates/post.html</file>
+    <file>site/plume/templates/tag.html</file>
+    <file>site/plume/templates/tagIndex.html</file>
+    <file>site/plume/templates/tags.html</file>
   </qresource>
 </RCC>

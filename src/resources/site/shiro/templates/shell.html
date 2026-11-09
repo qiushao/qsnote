@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{headTitle}}</title>
   <meta name="description" content="{{description}}">
-  {{keywordsMeta}}
+  {{#keywords}}<meta name="keywords" content="{{keywords}}">{{/keywords}}
   <link rel="canonical" href="{{permalink}}">
   <script src="{{root}}js/qsnote-shiro-head.js"></script>
   <link rel="stylesheet" href="{{root}}css/style.min.css">
-  {{#toc}}<link rel="stylesheet" href="{{root}}css/toc.min.css">{{/toc}}
+  {{#postToc}}<link rel="stylesheet" href="{{root}}css/toc.min.css">{{/postToc}}
   <link rel="stylesheet" href="{{root}}css/qsnote-shiro.css">
-</head>
+<link rel="stylesheet" href="{{root}}css/qsnote-article.css"></head>
 <body class="h-full fog-bg text-text-body">
   <a href="#main-content" class="shiro-skip-link">跳至正文</a>
   <svg width="0" height="0" class="absolute pointer-events-none" aria-hidden="true">
@@ -77,15 +77,15 @@
 </svg>
 </button>
         </div>
-        <div class="hidden md:block"><ul class="nav-desktop flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-base text-text-body px-4">{{menu}}</ul></div>
-        <div id="mobileMenu" class="menu-panel md:hidden mt-4" data-open="false"><ul class="mx-auto max-w-sm max-h-menu overflow-y-auto rounded-2xl border border-border-strong bg-paper/95 shadow-xs">{{menu}}</ul></div>
+        <div class="hidden md:block"><ul class="nav-desktop flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-base text-text-body px-4"><li><a class="nav-desktop-link focus-elegant" href="{{root}}">首页</a></li><li><a class="nav-desktop-link focus-elegant" href="{{root}}archives/">归档</a></li><li><a class="nav-desktop-link focus-elegant" href="{{root}}categories/">分类</a></li><li><a class="nav-desktop-link focus-elegant" href="{{root}}tags/">标签</a></li><li><a class="nav-desktop-link focus-elegant" href="{{root}}links/">友链</a></li><li><a class="nav-desktop-link focus-elegant" href="{{root}}about/">关于</a></li></ul></div>
+        <div id="mobileMenu" class="menu-panel md:hidden mt-4" data-open="false"><ul class="mx-auto max-w-sm max-h-menu overflow-y-auto rounded-2xl border border-border-strong bg-paper/95 shadow-xs"><li><a class="nav-desktop-link focus-elegant" href="{{root}}">首页</a></li><li><a class="nav-desktop-link focus-elegant" href="{{root}}archives/">归档</a></li><li><a class="nav-desktop-link focus-elegant" href="{{root}}categories/">分类</a></li><li><a class="nav-desktop-link focus-elegant" href="{{root}}tags/">标签</a></li><li><a class="nav-desktop-link focus-elegant" href="{{root}}links/">友链</a></li><li><a class="nav-desktop-link focus-elegant" href="{{root}}about/">关于</a></li></ul></div>
         <script>if(document.documentElement.classList.contains('js')) document.getElementById('mobileMenu').inert=true;</script>
       </nav>
-      <main id="main-content" class="section-divider" tabindex="-1">{{content}}</main>
+      <main id="main-content" class="section-divider" tabindex="-1">{{{content}}}</main>
       <footer class="section-divider site-footer">
         <div class="site-footer-meta text-center text-sm text-text-chrome leading-relaxed">
           {{#author}}<p>{{author}}</p>{{/author}}
-          <div>{{footer}}</div>
+          <div>{{{footer}}}</div>
           <p class="font-eng text-footnote tracking-wide opacity-90">Elegant theme by <a href="https://github.com/Acris/hexo-theme-shiro" class="link-chrome">Shiro</a> · Made by <a href="https://acris.me" class="link-chrome">Acris</a></p>
           {{#githubSocial}}<p><a href="{{githubSocial}}" class="link-chrome">GitHub</a></p>{{/githubSocial}}
         </div>
@@ -103,7 +103,7 @@
   <script defer src="{{root}}js/qsnote-shiro.js"></script>
   <script defer src="{{root}}js/theme-toggle.min.js"></script>
   <script defer src="{{root}}js/mobile-menu.min.js"></script>
-  {{#toc}}<script defer src="{{root}}js/toc.min.js"></script>{{/toc}}
+  {{#postToc}}<script defer src="{{root}}js/toc.min.js"></script>{{/postToc}}
   <script defer src="{{root}}js/progress.min.js"></script>
   <script defer src="{{root}}js/back-to-top.min.js"></script>
 </body>

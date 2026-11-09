@@ -1,6 +1,6 @@
 <div class="widget">
 <h3 class="widget-title">标签</h3>
 <div class="widget-body">
-<ul class="tag-list" itemprop="keywords">{{sidebarTags}}</ul>
+<ul class="tag-list" itemprop="keywords">{{#site.tags}}<li class="tag-list-item"><a class="tag-list-link" href="{{url}}">{{name}}</a><span class="tag-list-count">{{count}}</span></li>{{/site.tags}}</ul>
 </div>
 </div>

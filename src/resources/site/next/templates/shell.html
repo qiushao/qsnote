@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="{{description}}">
-<title>{{headTitle}}</title>{{keywordsMeta}}
+<title>{{headTitle}}</title>{{#keywords}}<meta name="keywords" content="{{keywords}}">{{/keywords}}
 <link rel="stylesheet" href="{{root}}css/main.css">
 <link rel="stylesheet" href="{{root}}lib/fontawesome/css/all.min.css">
-<script class="next-config" data-name="main" type="application/json">{{config}}</script>
-<script class="next-config" data-name="page" type="application/json">{{pageConfig}}</script>
+<script class="next-config" data-name="main" type="application/json">{"root":{{{rootJsonValue}}},"path":{{{searchJsonValue}}},"scheme":"Muse","sidebar":{"position":"left","display":"post"},"motion":{"enable":false},"codeblock":{"fold":{"enable":false},"copy_button":{"enable":false}},"comments":{"lazyload":false},"localsearch":{"preload":true,"top_n_per_article":1,"unescape":false},"i18n":{"hits":"找到 ${hits} 个搜索结果"}}</script>
+<script class="next-config" data-name="page" type="application/json">{"isHome":{{view.home}},"isPost":{{view.post}},"lang":"zh-CN","sidebar":""}</script>
 <script src="{{root}}js/config.js"></script>
 <script defer src="{{root}}js/utils.js"></script>
 <script defer src="{{root}}js/sidebar.js"></script>
@@ -16,7 +16,7 @@
 <script defer src="{{root}}js/search.js"></script>
 <script defer src="{{root}}js/local-search.js"></script>
 <noscript><link rel="stylesheet" href="{{root}}css/noscript.css"></noscript>
-</head>
+<link rel="stylesheet" href="{{root}}css/qsnote-article.css"></head>
 <body itemscope itemtype="http://schema.org/WebPage">
 <div class="headband"></div>
 <main class="main">
@@ -41,10 +41,10 @@
 <div class="search-result-container"><div class="search-result-icon"><i class="fa fa-spinner fa-pulse fa-5x"></i></div></div>
 </div></div></template>
 </header>
-<aside class="sidebar"><div class="sidebar-inner {{sidebarClass}}">
+<aside class="sidebar"><div class="sidebar-inner {{#postToc}}sidebar-nav-active sidebar-toc-active{{/postToc}}{{^postToc}}sidebar-overview-active{{/postToc}}">
 <ul class="sidebar-nav"><li class="sidebar-nav-toc">文章目录</li><li class="sidebar-nav-overview">站点概览</li></ul>
 <div class="sidebar-panel-container">
-<div class="post-toc-wrap sidebar-panel">{{toc}}</div>
+<div class="post-toc-wrap sidebar-panel">{{#postToc}}<div class="post-toc animated"><ol class="nav">{{{navToc}}}</ol></div>{{/postToc}}</div>
 <div class="site-overview-wrap sidebar-panel"><div class="site-author animated" itemprop="author" itemscope itemtype="http://schema.org/Person"><img class="site-author-image" itemprop="image" alt="{{author}}" src="{{avatar}}"><p class="site-author-name" itemprop="name">{{author}}</p><div class="site-description" itemprop="description">{{description}}</div></div>
 <div class="site-state-wrap animated"><nav class="site-state">
 <div class="site-state-item site-state-posts"><a href="{{root}}archives/"><span class="site-state-item-count">{{postCount}}</span><span class="site-state-item-name">日志</span></a></div>
@@ -52,9 +52,9 @@
 <div class="site-state-item site-state-tags"><a href="{{root}}tags/"><span class="site-state-item-count">{{tagCount}}</span><span class="site-state-item-name">标签</span></a></div>
 </nav></div>{{#githubSocial}}<div class="links-of-author animated"><span class="links-of-author-item"><a href="{{githubSocial}}" target="_blank" rel="noopener noreferrer" title="GitHub" aria-label="GitHub"><i class="fab fa-github fa-fw"></i>GitHub</a></span></div>{{/githubSocial}}</div></div></div></aside>
 </div>
-<div class="main-inner {{layout}}">{{content}}</div>
+<div class="main-inner {{#view.archive}}archive posts-collapse{{/view.archive}}{{#view.taxonomy}}archive posts-collapse{{/view.taxonomy}}{{#view.post}}post posts-expand{{/view.post}}{{#view.page}}page posts-expand{{/view.page}}{{#view.index}}index posts-expand{{/view.index}}">{{{content}}}</div>
 </main>
-<footer class="footer"><div class="footer-inner"><div>{{footer}}</div><div class="powered-by">主题 — <a href="https://github.com/next-theme/hexo-theme-next" rel="noopener" target="_blank">NexT.Muse</a></div></div></footer>
+<footer class="footer"><div class="footer-inner"><div>{{{footer}}}</div><div class="powered-by">主题 — <a href="https://github.com/next-theme/hexo-theme-next" rel="noopener" target="_blank">NexT.Muse</a></div></div></footer>
 <div class="toggle sidebar-toggle" role="button" aria-label="切换侧栏"><span class="toggle-line"></span><span class="toggle-line"></span><span class="toggle-line"></span></div>
 <div class="back-to-top" role="button" aria-label="返回顶部"><i class="fa fa-arrow-up fa-lg"></i><span>0%</span></div>
 </body>

@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "templates": "layout",
+  "assets": "source",
+  "entries": {
+    "layout": "layout",
+    "index": "index",
+    "post": "post",
+    "page": "page",
+    "archive": "index",
+    "category": "index",
+    "tag": "index",
+    "categories": "categoryIndex",
+    "tags": "tagIndex",
+    "links": "links",
+    "document": "page",
+    "documentNode": "documentNode"
+  },
+  "options": {
+    "excerptLength": 128,
+    "excerptFormat": "text",
+    "singlePostIndex": false,
+    "groupByYear": [],
+    "searchEscapeFields": []
+  }
+}

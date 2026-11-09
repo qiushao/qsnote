@@ -1,10 +1,10 @@
 <div class="content">
-<article class="article article-type-post" id="{{articleId}}" itemscope="" itemtype="http://schema.org/BlogPosting">
+<article class="article article-type-post" id="post-{{route}}" itemscope="" itemtype="http://schema.org/BlogPosting">
 <div class="article-header">
-<h1 class="article-title" itemprop="name">{{title}}</h1>
-<div class="article-meta">{{meta}}</div>
+{{#inlinePost}}<h1 itemprop="name"><a class="article-title" href="{{url}}">{{title}}</a></h1>{{/inlinePost}}{{^inlinePost}}<h1 class="article-title" itemprop="name">{{title}}</h1>{{/inlinePost}}
+<div class="article-meta">{{>meta}}</div>
 </div>
-<div class="article-entry marked-body" itemprop="articleBody">{{body}}</div>
+<div class="article-entry marked-body" itemprop="articleBody">{{{body}}}</div>
 <div class="article-footer">
 <blockquote class="mt-2x">
 <ul class="post-copyright list-unstyled">
@@ -19,5 +19,6 @@
 </blockquote>
 </div>
 </article>
-<section id="comments">{{comments}}</section>
+<section id="comments">{{{comments}}}</section>
 </div>
+{{^inlinePost}}{{>navigation}}{{/inlinePost}}

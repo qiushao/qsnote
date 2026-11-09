@@ -1,6 +1,6 @@
 <div class="widget">
 <h3 class="widget-title">分类</h3>
 <div class="widget-body">
-<ul class="category-list">{{sidebarCategories}}</ul>
+<ul class="category-list">{{#site.categories}}<li class="category-list-item"><a class="category-list-link" href="{{url}}">{{name}}</a><span class="category-list-count">{{count}}</span></li>{{/site.categories}}</ul>
 </div>
 </div>

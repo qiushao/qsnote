@@ -338,8 +338,8 @@
             <translation>Choose theme directory</translation>
         </message>
         <message>
-            <source>使用含 layout/*.html 和 source/ 的适配主题。支持 QSNote 占位符；Hexo 的 EJS、Nunjucks 和样式预处理文件需先转换，不执行主题插件或读取 _config.yml。</source>
-            <translation>Use an adapted theme with layout/*.html and source/. QSNote placeholders are supported; convert Hexo EJS, Nunjucks and stylesheet sources first. Theme plugins and _config.yml are not loaded.</translation>
+            <source>使用含 theme.json 的适配主题，由配置指定 HTML 模板和资源目录。旧主题需先迁移；Hexo 的 EJS、Nunjucks 和样式预处理文件需先转换，不执行主题插件或读取 _config.yml。</source>
+            <translation>Use an adapted theme with theme.json specifying HTML templates and assets. Migrate legacy themes first; convert Hexo EJS, Nunjucks and stylesheet sources before use. Theme plugins and _config.yml are not loaded.</translation>
         </message>
         <message>
             <source>撤销</source>
@@ -2799,6 +2799,110 @@ It will be removed from the list. Files on disk will be kept, and you can add it
         <message>
             <source>站点生成完成</source>
             <translation>Site generation complete</translation>
+        </message>
+        <message>
+            <source>主题加载失败：%1：%2</source>
+            <translation>Failed to load theme: %1: %2</translation>
+        </message>
+        <message>
+            <source>缺少 theme.json，请按主题规范迁移旧主题</source>
+            <translation>Missing theme.json. Migrate this legacy theme using the theme specification.</translation>
+        </message>
+        <message>
+            <source>主题资源名称无效</source>
+            <translation>Invalid theme resource name</translation>
+        </message>
+        <message>
+            <source>JSON 对象无效：%1</source>
+            <translation>Invalid JSON object: %1</translation>
+        </message>
+        <message>
+            <source>未知配置项：%1</source>
+            <translation>Unknown configuration key: %1</translation>
+        </message>
+        <message>
+            <source>不支持的主题规范版本，应为 1</source>
+            <translation>Unsupported theme specification version; expected 1</translation>
+        </message>
+        <message>
+            <source>%1 必须是相对目录</source>
+            <translation>%1 must be a relative directory</translation>
+        </message>
+        <message>
+            <source>找不到主题资源目录</source>
+            <translation>Theme assets directory not found</translation>
+        </message>
+        <message>
+            <source>entries 必须是对象</source>
+            <translation>entries must be an object</translation>
+        </message>
+        <message>
+            <source>entries.%1 必须指定模板名称</source>
+            <translation>entries.%1 must specify a template name</translation>
+        </message>
+        <message>
+            <source>未知页面入口：%1</source>
+            <translation>Unknown page entry: %1</translation>
+        </message>
+        <message>
+            <source>options 必须是对象</source>
+            <translation>options must be an object</translation>
+        </message>
+        <message>
+            <source>主题行为配置无效：%1</source>
+            <translation>Invalid theme behavior option: %1</translation>
+        </message>
+        <message>
+            <source>模板为空或包含不支持的模板语法</source>
+            <translation>Template is empty or contains unsupported syntax</translation>
+        </message>
+        <message>
+            <source>找不到页面入口模板：%1</source>
+            <translation>Entry template not found: %1</translation>
+        </message>
+        <message>
+            <source>找不到引用的模板片段：%1</source>
+            <translation>Referenced partial not found: %1</translation>
+        </message>
+        <message>
+            <source>模板片段存在引用环：%1</source>
+            <translation>Partial reference cycle: %1</translation>
+        </message>
+        <message>
+            <source>%1（位置 %2）</source>
+            <translation>%1 (offset %2)</translation>
+        </message>
+        <message>
+            <source>占位符未闭合</source>
+            <translation>Unclosed placeholder</translation>
+        </message>
+        <message>
+            <source>条件块结束标记不匹配：%1</source>
+            <translation>Mismatched section closing tag: %1</translation>
+        </message>
+        <message>
+            <source>模板片段引用无效：%1</source>
+            <translation>Invalid partial reference: %1</translation>
+        </message>
+        <message>
+            <source>日期区域设置无效：%1</source>
+            <translation>Invalid date locale: %1</translation>
+        </message>
+        <message>
+            <source>日期格式不能为空</source>
+            <translation>Date format must not be empty</translation>
+        </message>
+        <message>
+            <source>模板字段无效：%1</source>
+            <translation>Invalid template field: %1</translation>
+        </message>
+        <message>
+            <source>条件块未闭合：%1</source>
+            <translation>Unclosed section: %1</translation>
+        </message>
+        <message>
+            <source>主题资源需要预编译：</source>
+            <translation>Theme assets must be precompiled: </translation>
         </message>
     </context>
     <context>

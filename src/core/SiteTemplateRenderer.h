@@ -6,25 +6,31 @@
 
 class SiteTemplateRenderer {
 public:
-    enum class Theme { Pure,
-                       Next,
-                       Three,
-                       Shiro,
-                       Plume,
-                       Custom };
     explicit SiteTemplateRenderer(const Notebook &book);
     bool load(QString *error);
-    QString render(const QString &name, const QMap<QString, QString> &values) const;
-    Theme theme() const { return theme_; }
-    bool contains(const QString &name) const { return customTemplates_.contains(name); }
+    QString render(const QString &name, const QJsonObject &context) const;
+    QString renderEntry(const QString &type, const QJsonObject &context) const;
     QString assetsPath() const;
+    QString directory() const { return themePath_; }
+    QJsonObject options() const { return options_; }
 
 private:
-    QString themeName() const;
+    struct Node {
+        enum class Kind { Text, Value, Raw, Section, Inverted, Partial };
+        Kind kind = Kind::Text;
+        QString value;
+        QString dateFormat;
+        QList<Node> children;
+        QString dateLocale;
+    };
+    bool parse(const QString &source, qsizetype &offset, QList<Node> &nodes, const QString &block, QString *error) const;
+    QString evaluate(const QList<Node> &nodes, const QList<QJsonValue> &scopes) const;
     const Notebook &book_;
-    Theme theme_;
-    QString customThemePath_;
-    QMap<QString, QString> customTemplates_;
+    QString themePath_;
+    QString assetsDirectory_;
+    QJsonObject entries_;
+    QJsonObject options_;
+    QMap<QString, QList<Node>> templates_;
 };
 
 #endif

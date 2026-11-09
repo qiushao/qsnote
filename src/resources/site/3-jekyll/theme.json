@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "templates": "templates",
+  "assets": "assets",
+  "entries": {
+    "index": "index",
+    "post": "post",
+    "page": "page",
+    "archive": "archive",
+    "category": "category",
+    "tag": "tag",
+    "categories": "categoryIndex",
+    "tags": "tagIndex",
+    "links": "links",
+    "document": "page",
+    "layout": "shell",
+    "documentNode": "documentNode"
+  },
+  "options": {
+    "excerptLength": 128,
+    "excerptFormat": "text",
+    "singlePostIndex": false,
+    "groupByYear": [],
+    "searchEscapeFields": [],
+    "defaultAvatar": "assets/img/avatar.jpg",
+    "rootRelativeAvatar": false
+  }
+}

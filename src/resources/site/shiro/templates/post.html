@@ -1,15 +1,15 @@
 <article class="py-2">
-  <header class="text-center mb-8"><h1 class="page-title mb-4">{{title}}</h1>{{meta}}</header>
+  <header class="text-center mb-8"><h1 class="page-title mb-4">{{title}}</h1>{{>meta}}</header>
 {{#toc}}
   <nav id="tocInline" class="toc-inline toc:hidden mb-8" aria-label="文章目录">
     <button type="button" class="toc-toggle" aria-expanded="false" aria-controls="tocInlineBody" disabled><span class="toc-toggle-title">文章目录</span><span class="toc-chevron" aria-hidden="true">⌄</span></button>
-    <div class="toc-body" id="tocInlineBody" data-open="false">{{toc}}</div>
+    <div class="toc-body" id="tocInlineBody" data-open="false"><ol class="toc-list">{{{toc}}}</ol></div>
     <script>if(document.documentElement.classList.contains('js')) document.getElementById('tocInlineBody').inert=true;</script>
   </nav>
-  <nav id="tocSidebar" class="toc-sidebar hidden toc:block" aria-label="文章目录"><div class="toc-sidebar-inner"><p class="toc-sidebar-title">文章目录</p><div class="toc-body">{{toc}}</div></div></nav>
+  <nav id="tocSidebar" class="toc-sidebar hidden toc:block" aria-label="文章目录"><div class="toc-sidebar-inner"><p class="toc-sidebar-title">文章目录</p><div class="toc-body"><ol class="toc-list">{{{toc}}}</ol></div></div></nav>
 {{/toc}}
-  <div class="prose-shiro">{{body}}</div>
-  {{#tags}}<div class="mt-8 flex flex-wrap gap-2 shiro-tags">{{tags}}</div>{{/tags}}
-  {{navigation}}
-  {{#comments}}<section id="comments" class="section-divider">{{comments}}</section>{{/comments}}
+  <div class="prose-shiro">{{{body}}}</div>
+  {{#hasTags}}<div class="mt-8 flex flex-wrap gap-2 shiro-tags">{{>tags}}</div>{{/hasTags}}
+  {{>navigation}}
+  {{#comments}}<section id="comments" class="section-divider">{{{comments}}}</section>{{/comments}}
 </article>

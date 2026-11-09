@@ -1,4 +1,5 @@
-<article class="group flex min-w-0 items-baseline gap-6 shiro-archive-item">
-  <time datetime="{{date}}" class="w-24 shrink-0 text-right text-sm text-text-chrome oldstyle-nums">{{date}}</time>
-  <h3 class="min-w-0 text-base font-normal text-text-body transition-colors group-hover:text-seal"><a href="{{url}}" class="link-underline break-words">{{title}}</a></h3>
-</article>
+<section class="mx-auto max-w-3xl">
+  <header class="text-center mb-8"><h1 class="page-title mb-4">{{title}}</h1><p class="text-sm text-text-chrome">共 {{listCount}} 篇文章</p></header>
+  <div class="space-y-16 max-w-2xl mx-auto">{{#groups}}<section><h2 class="section-heading"><a class="section-heading-link oldstyle-nums" href="{{url}}">{{year}}</a></h2><div class="space-y-4">{{#posts}}{{>archiveRow}}{{/posts}}</div></section>{{/groups}}{{^posts}}<p class="text-center text-text-chrome">暂无文章</p>{{/posts}}</div>
+</section>
+{{>pagination}}
