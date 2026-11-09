@@ -46,9 +46,9 @@ img { display: block; max-width: 100%; height: auto; }
 [data-theme="dark"] .switch-check .vpi-moon { opacity: 1; }
 #reading-toggle { display: flex; align-items: center; margin-left: 16px; padding-left: 16px; border-left: 1px solid var(--vp-c-divider); color: var(--vp-c-text-2); }
 #reading-toggle:hover,#reading-toggle[aria-pressed="true"] { color: var(--vp-c-brand-1); }
-#reading-toggle svg,.vp-social-link svg { width: 20px; height: 20px; }
-#reading-toggle .collapse-icon,#reading-toggle[aria-pressed="true"] .expand-icon { display: none; }
-#reading-toggle[aria-pressed="true"] .collapse-icon { display: inline; }
+#reading-toggle svg,#reading-exit svg,.vp-social-link svg { width: 20px; height: 20px; }
+#reading-exit { display: flex; align-items: center; justify-content: center; position: fixed; top: 16px; right: 16px; z-index: 30; width: 40px; height: 40px; border: 1px solid var(--vp-c-divider); border-radius: 8px; background: var(--vp-c-bg); color: var(--vp-c-text-2); box-shadow: var(--vp-shadow-1); opacity: .65; }
+#reading-exit:hover,#reading-exit:focus-visible { opacity: 1; color: var(--vp-c-brand-1); }
 .vp-layout { display: grid; grid-template-columns: 240px minmax(0,900px) 240px; gap: 24px; max-width: 1476px; margin: auto; padding: 32px 24px; align-items: start; }
 .vp-left,.vp-outline { position: sticky; top: 96px; max-height: calc(100vh - 120px); overflow: auto; font-size: 14px; }
 .vp-outline { border-left: 1px solid var(--vp-c-divider); padding-left: 16px; }
@@ -191,7 +191,7 @@ dialog form { float: right; }
 @media (max-width: 419px) { .vp-post-list { gap: 16px; } }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
 body.reading-mode .vp-layout { display: block; max-width: none; }
-body.reading-mode :is(.vp-left,.vp-outline,.vp-blog-sidebar,.vp-posts-extract) { display: none; }
+body.reading-mode :is(.vp-navbar,.vp-left,.vp-outline,.vp-blog-sidebar,.vp-posts-extract) { display: none; }
 /* The shared article stylesheet deliberately has high specificity. Keep its
    Markdown structure while applying Plume's palette to the reading surface. */
 #main .qsnote-article { color: var(--vp-c-text-1); background: transparent; font-family: inherit; --qsnote-code-background: var(--vp-c-bg-soft); --qsnote-code-foreground: var(--vp-c-text-1); --qsnote-inline-code-background: var(--vp-c-gray-soft); --qsnote-inline-code-foreground: var(--vp-c-brand-1); --qsnote-code-header: var(--vp-c-bg-alt); --qsnote-code-label: var(--vp-c-text-2); }

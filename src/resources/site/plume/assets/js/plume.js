@@ -15,14 +15,19 @@
     try { localStorage.setItem('qsnote-plume-theme', root.dataset.theme); } catch (_) {}
   });
   const reading = document.querySelector('#reading-toggle');
+  const readingExit = document.querySelector('#reading-exit');
   reading.hidden = false;
-  reading.addEventListener('click', () => {
-    const enabled = document.body.classList.toggle('reading-mode');
+  const setReadingMode = enabled => {
+    document.body.classList.toggle('reading-mode', enabled);
+    readingExit.hidden = !enabled;
     const label = enabled ? '退出全屏阅读' : '全屏阅读';
     reading.setAttribute('aria-pressed', String(enabled));
     reading.setAttribute('aria-label', label);
     reading.title = label;
-  });
+    (enabled ? readingExit : reading).focus({ preventScroll: true });
+  };
+  reading.addEventListener('click', () => setReadingMode(true));
+  readingExit.addEventListener('click', () => setReadingMode(false));
   document.querySelectorAll('.code-copy').forEach(button => {
     button.addEventListener('click', async () => {
       try {
