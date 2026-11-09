@@ -113,6 +113,7 @@
     <file>site/plume/templates/card.html</file>
     <file>site/plume/templates/page.html</file>
     <file>site/plume/templates/profile.html</file>
+    <file>site/plume/templates/blogSidebar.html</file>
     <file>site/plume/templates/shell.html</file>
     <file>site/pure/theme.json</file>
     <file>site/pure/templates/archive.html</file>

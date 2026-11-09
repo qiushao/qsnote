@@ -1,0 +1,12 @@
+{{#categoryCount}}<section class="vp-blog-widget">
+<h2><a href="{{root}}categories/">分类</a></h2>
+<ul>{{#site.categories}}<li><a href="{{url}}"><span>{{name}}</span><span class="count">{{count}}</span></a></li>{{/site.categories}}</ul>
+</section>{{/categoryCount}}
+{{#tagCount}}<section class="vp-blog-widget">
+<h2><a href="{{root}}tags/">标签</a></h2>
+<ul>{{#site.tags}}<li><a href="{{url}}"><span>{{name}}</span><span class="count">{{count}}</span></a></li>{{/site.tags}}</ul>
+</section>{{/tagCount}}
+{{#postCount}}<section class="vp-blog-widget">
+<h2><a href="{{root}}archives/">归档</a></h2>
+<ul>{{#site.archives}}<li><a href="{{url}}"><span>{{date|date(zh_CN):MMMM yyyy}}</span><span class="count">{{count}}</span></a></li>{{/site.archives}}</ul>
+</section>{{/postCount}}
