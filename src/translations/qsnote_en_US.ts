@@ -3368,4 +3368,9 @@ Waiting for transfer to finish; byte progress is unavailable with SCP.</translat
         <message><source>找不到该 Iconify 图标，请检查名称。</source><translation>Iconify icon not found. Please check the name.</translation></message>
         <message><source>无法下载图标：%1</source><translation>Unable to download icon: %1</translation></message>
     </context>
+    <context>
+        <name>PlumeTheme</name>
+        <message><source>全屏阅读</source><translation>Full-width reading</translation></message>
+        <message><source>退出全屏阅读</source><translation>Exit full-width reading</translation></message>
+    </context>
 </TS>

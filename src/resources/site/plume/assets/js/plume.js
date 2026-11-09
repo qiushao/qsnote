@@ -14,6 +14,15 @@
     theme.setAttribute('aria-checked', String(root.dataset.theme === 'dark'));
     try { localStorage.setItem('qsnote-plume-theme', root.dataset.theme); } catch (_) {}
   });
+  const reading = document.querySelector('#reading-toggle');
+  reading.hidden = false;
+  reading.addEventListener('click', () => {
+    const enabled = document.body.classList.toggle('reading-mode');
+    const label = enabled ? '退出全屏阅读' : '全屏阅读';
+    reading.setAttribute('aria-pressed', String(enabled));
+    reading.setAttribute('aria-label', label);
+    reading.title = label;
+  });
   document.querySelectorAll('.code-copy').forEach(button => {
     button.addEventListener('click', async () => {
       try {
