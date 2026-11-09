@@ -37,7 +37,7 @@ jobs:
         with:
           version: '6.4.2'
           arch: clang_64
-          modules: 'qt5compat qtwebengine qtwebchannel qtpositioning'
+          modules: 'qt5compat qtwebengine qtwebchannel qtpositioning qtserialport'
 
       - name: Build
         run: |

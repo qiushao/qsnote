@@ -104,7 +104,7 @@ brew install --cask qiushao/qsnote/qsnote
 
 ## GitHub Actions
 
-`.github/workflows/` 下提供 Linux、macOS 和 Windows MSVC 2022 三套独立流程，参考 `qshell` 的标签发布方式，并共用上述本地打包脚本。Linux 使用 Ubuntu 24.04 系统 Qt 包；macOS 使用构建矩阵，Intel 使用 `macos-15-intel`，ARM64 使用 `macos-15`，Windows 使用 `windows-2022`，两者安装 Qt 6.4.2 及 WebEngine、WebChannel、Positioning、Qt 5 Compatibility 组件。
+`.github/workflows/` 下提供 Linux、macOS 和 Windows MSVC 2022 三套独立流程，参考 `qshell` 的标签发布方式，并共用上述本地打包脚本。Linux 使用 Ubuntu 24.04 系统 Qt 包；macOS 使用构建矩阵，Intel 使用 `macos-15-intel`，ARM64 使用 `macos-15`，Windows 使用 `windows-2022`，两者安装 Qt 6.4.2 及 WebEngine、WebChannel、Positioning、Qt 5 Compatibility 组件。macOS 额外安装 SerialPort，以满足打包时 Positioning 的 NMEA 插件依赖。
 
 - 推送到 `master` / `main`、向这些分支提交 PR，或手动运行：构建、打包并上传 Actions artifact。仅修改 `docs/` 或根目录 Markdown 文件时跳过自动构建。
 - 推送 `V*` / `v*` 标签（例如 `V1.2.3`）：去掉标签前缀作为应用版本，并将安装包上传到对应 GitHub Release。
