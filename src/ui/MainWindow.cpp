@@ -914,7 +914,7 @@ void MainWindow::updatePanels() {
     const auto margins = headerLayout->contentsMargins();
     const bool compact = width() < 2 * sideWidth + search_->minimumWidth()
                                    + 2 * headerLayout->horizontalSpacing() + margins.left() + margins.right();
-    siteActions->setMinimumWidth(compact ? 0 : qMax(0, actionWidth - 6));
+    siteActions->setMinimumWidth(qMax(0, actionWidth - 6));
     const bool stacked = headerLeft->minimumSizeHint().width() + headerRight->minimumSizeHint().width()
                          + margins.left() + margins.right() + 2 * headerLayout->horizontalSpacing() > width();
     int rightRow, rightColumn, rightRowSpan, rightColumnSpan;
@@ -925,12 +925,7 @@ void MainWindow::updatePanels() {
         headerLayout->addWidget(headerLeft, 0, 0, 1, stacked ? 3 : 1);
         headerLayout->addWidget(headerRight, stacked ? 2 : 0, stacked ? 0 : 2, 1, stacked ? 3 : 1);
     }
-    int searchRow, searchColumn, rowSpan, columnSpan;
-    headerLayout->getItemPosition(headerLayout->indexOf(search_), &searchRow, &searchColumn, &rowSpan, &columnSpan);
-    if (searchRow != (compact ? 1 : 0)) {
-        headerLayout->removeWidget(search_);
-        headerLayout->addWidget(search_, compact ? 1 : 0, compact ? 0 : 1, 1, compact ? 3 : 1, Qt::AlignCenter);
-    }
+    search_->setVisible(!compact);
     headerLayout->activate();
     const int unit = fontMetrics().horizontalAdvance('M');
     left_->setVisible(leftRequested_ && width() >= unit * 52);
