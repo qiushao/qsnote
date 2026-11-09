@@ -170,8 +170,8 @@ SiteConfigDialog::SiteConfigDialog(Notebook &notebook, QWidget *parent)
     connect(comments, &QComboBox::currentIndexChanged, &dialog, updateDisqusHint);
     updateDisqusHint();
     section("siteThemeCard", QCoreApplication::translate("MainWindow", "主题设置"));
-    auto *theme = field("theme", QCoreApplication::translate("MainWindow", "站点主题"), {"Pure", "NexT", "Yilia", "3-Jekyll", "Shiro", "Plume", QCoreApplication::translate("MainWindow", "自定义")},
-                        {"pure", "next", "yilia", "3-jekyll", "shiro", "plume", "custom"})
+    auto *theme = field("theme", QCoreApplication::translate("MainWindow", "站点主题"), {"Pure", "NexT", "3-Jekyll", "Shiro", "Plume", QCoreApplication::translate("MainWindow", "自定义")},
+                        {"pure", "next", "3-jekyll", "shiro", "plume", "custom"})
                           ->findChild<QComboBox *>();
     auto *plumeSettings = siteContentSettings(*book, card);
     plumeSettings->setObjectName("sitePlumeSettings");

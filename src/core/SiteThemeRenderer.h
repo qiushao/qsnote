@@ -18,7 +18,6 @@ private:
     QString plumeNavigation(const QString &route) const;
     QString plumeSidebar(const QString &collectionId, const QString &route) const;
     bool nextTheme() const;
-    bool yiliaTheme() const;
     bool threeTheme() const;
     bool shiroTheme() const;
     bool customTheme() const;

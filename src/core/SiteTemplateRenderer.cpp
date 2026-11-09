@@ -7,7 +7,7 @@
 
 SiteTemplateRenderer::SiteTemplateRenderer(const Notebook &book) : book_(book) {
     const auto name = book.config["theme"].toString();
-    theme_ = name == "next" ? Theme::Next : name == "yilia" ? Theme::Yilia
+    theme_ = name == "next" ? Theme::Next
                                     : name == "3-jekyll"    ? Theme::Three
                                     : name == "shiro"       ? Theme::Shiro
                                     : name == "plume"       ? Theme::Plume
@@ -16,7 +16,7 @@ SiteTemplateRenderer::SiteTemplateRenderer(const Notebook &book) : book_(book) {
 }
 
 QString SiteTemplateRenderer::themeName() const {
-    return theme_ == Theme::Next ? "next" : theme_ == Theme::Yilia ? "yilia"
+    return theme_ == Theme::Next ? "next"
                                     : theme_ == Theme::Three       ? "3-jekyll"
                                     : theme_ == Theme::Shiro       ? "shiro"
                                     : theme_ == Theme::Plume       ? "plume"

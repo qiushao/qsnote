@@ -8,7 +8,6 @@ class SiteTemplateRenderer {
 public:
     enum class Theme { Pure,
                        Next,
-                       Yilia,
                        Three,
                        Shiro,
                        Plume,
