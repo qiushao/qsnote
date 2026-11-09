@@ -134,11 +134,11 @@ dialog form { float: right; }
 #search-results a { display: block; padding: 10px; }
 #search-results small { display: block; color: var(--vp-c-text-2); }
 @media (min-width: 768px) {
-  .blog-page .vp-layout,.blog-home .vp-layout { grid-template-columns: 200px minmax(0,1fr) 200px; justify-content: center; max-width: 1440px; }
+  .blog .vp-layout { grid-template-columns: 200px minmax(0,1fr) 200px; justify-content: center; max-width: 1440px; }
   .blog-page .vp-outline { grid-column: 3; grid-row: 1; width: 200px; }
 }
 @media (min-width: 1200px) {
-  .blog-page .vp-layout,.blog-home .vp-layout { grid-template-columns: 240px minmax(0,900px) 240px; max-width: 1476px; }
+  .blog .vp-layout { grid-template-columns: 240px minmax(0,900px) 240px; max-width: 1476px; }
   .blog-page .vp-outline { width: 240px; }
 }
 @media (max-width: 1199px) { .document .vp-layout { grid-template-columns: 220px minmax(0,1fr); } .document .vp-outline { position: static; grid-column: 2; grid-row: 1; } .document main { grid-column: 2; } .document .vp-left { grid-row: 1 / span 2; } }
