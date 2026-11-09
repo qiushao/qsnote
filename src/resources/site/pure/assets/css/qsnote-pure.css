@@ -1,3 +1,8 @@
+.article-toc .toc-link.active {
+  color: #6f5499;
+  font-weight: bold;
+}
+
 .sidebar-toggle {
   display: none;
   position: fixed;

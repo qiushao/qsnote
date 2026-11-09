@@ -38,6 +38,61 @@ $(function() {
     }
   });
 
+  // Follow the current article heading, using the same offset as Shiro.
+  var tocContent = document.querySelector('#collapseToc .slimContent');
+  if (tocContent) {
+    var tocEntries = Array.from(tocContent.querySelectorAll('.toc-link[href^="#"]')).map(function(link) {
+      return { link: link, heading: document.getElementById(decodeURIComponent(link.getAttribute('href').slice(1))) };
+    }).filter(function(entry) { return entry.heading; });
+    var activeEntry = null;
+    var tocUpdatePending = false;
+
+    function updateToc() {
+      tocUpdatePending = false;
+      var current = null;
+      tocEntries.forEach(function(entry) {
+        if (entry.heading.getBoundingClientRect().top <= 100) current = entry;
+      });
+      if (current !== activeEntry) {
+        if (activeEntry) {
+          activeEntry.link.classList.remove('active');
+          activeEntry.link.removeAttribute('aria-current');
+        }
+        activeEntry = current;
+        if (activeEntry) {
+          activeEntry.link.classList.add('active');
+          activeEntry.link.setAttribute('aria-current', 'location');
+        }
+      }
+      if (!activeEntry || !tocContent.getClientRects().length) return;
+      var linkRect = activeEntry.link.getBoundingClientRect();
+      var contentRect = tocContent.getBoundingClientRect();
+      var offset = linkRect.top < contentRect.top ? linkRect.top - contentRect.top :
+        Math.max(0, linkRect.bottom - contentRect.bottom);
+      if (offset) {
+        var scrollTop = tocContent.scrollTop + offset;
+        if (typeof $.fn.slimScroll != 'undefined') {
+          $(tocContent).slimScroll({ scrollTo: scrollTop + 'px' });
+        } else {
+          tocContent.scrollTop = scrollTop;
+        }
+      }
+    }
+
+    function scheduleTocUpdate() {
+      if (tocUpdatePending) return;
+      tocUpdatePending = true;
+      window.requestAnimationFrame(updateToc);
+    }
+    window.addEventListener('scroll', scheduleTocUpdate, { passive: true });
+    window.addEventListener('resize', scheduleTocUpdate);
+    window.addEventListener('load', scheduleTocUpdate);
+    $('#collapseToc').on('shown.bs.collapse', scheduleTocUpdate);
+    $sidebarToggle.on('click', scheduleTocUpdate);
+    if (document.fonts) document.fonts.ready.then(scheduleTocUpdate);
+    scheduleTocUpdate();
+  }
+
   // geopattern 背景生成
   $(".geopattern").each(function() {
     $(this).geopattern($(this).data('pattern-id'));
