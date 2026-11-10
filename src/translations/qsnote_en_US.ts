@@ -71,6 +71,10 @@
     <context>
         <name>SourceOutline</name>
         <message>
+            <source>节</source>
+            <translation>Section</translation>
+        </message>
+        <message>
             <source>命名空间</source>
             <translation>Namespace</translation>
         </message>
@@ -3380,5 +3384,159 @@ Waiting for transfer to finish; byte progress is unavailable with SCP.</translat
         <name>PlumeTheme</name>
         <message><source>全屏阅读</source><translation>Full-width reading</translation></message>
         <message><source>退出全屏阅读</source><translation>Exit full-width reading</translation></message>
+    </context>
+    <context>
+        <name>FindReplaceDialog</name>
+        <message>
+            <source>当前文档</source>
+            <translation>Current document</translation>
+        </message>
+        <message>
+            <source>查找和替换</source>
+            <translation>Find and Replace</translation>
+        </message>
+        <message>
+            <source>查找</source>
+            <translation>Find</translation>
+        </message>
+        <message>
+            <source>替换</source>
+            <translation>Replace</translation>
+        </message>
+        <message>
+            <source>查找内容</source>
+            <translation>Find what</translation>
+        </message>
+        <message>
+            <source>替换为</source>
+            <translation>Replace with</translation>
+        </message>
+        <message>
+            <source>区分大小写</source>
+            <translation>Match case</translation>
+        </message>
+        <message>
+            <source>全词匹配</source>
+            <translation>Match whole word</translation>
+        </message>
+        <message>
+            <source>循环查找</source>
+            <translation>Wrap around</translation>
+        </message>
+        <message>
+            <source>仅在选区内</source>
+            <translation>In selection</translation>
+        </message>
+        <message>
+            <source>普通</source>
+            <translation>Normal</translation>
+        </message>
+        <message>
+            <source>扩展（\n、\r、\t、\0、\\）</source>
+            <translation>Extended (\n, \r, \t, \0, \\)</translation>
+        </message>
+        <message>
+            <source>正则表达式</source>
+            <translation>Regular expression</translation>
+        </message>
+        <message>
+            <source>搜索模式</source>
+            <translation>Search mode</translation>
+        </message>
+        <message>
+            <source>. 匹配换行</source>
+            <translation>. matches newline</translation>
+        </message>
+        <message>
+            <source>正则替换支持 $1、\1、${name} 捕获组；扩展模式支持转义字符。</source>
+            <translation>Regex replacements support $1, \1 and ${name} capture groups; extended mode supports escape sequences.</translation>
+        </message>
+        <message>
+            <source>上一个</source>
+            <translation>Previous</translation>
+        </message>
+        <message>
+            <source>下一个</source>
+            <translation>Next</translation>
+        </message>
+        <message>
+            <source>计数</source>
+            <translation>Count</translation>
+        </message>
+        <message>
+            <source>在当前文档中查找全部</source>
+            <translation>Find All in Current Document</translation>
+        </message>
+        <message>
+            <source>全部替换</source>
+            <translation>Replace all</translation>
+        </message>
+        <message>
+            <source>%1 个匹配</source>
+            <translation>%1 matches</translation>
+        </message>
+        <message>
+            <source>行</source>
+            <translation>Line</translation>
+        </message>
+        <message>
+            <source>内容</source>
+            <translation>Content</translation>
+        </message>
+        <message>
+            <source>请输入查找内容</source>
+            <translation>Enter text to find</translation>
+        </message>
+        <message>
+            <source>正则表达式无效：%1</source>
+            <translation>Invalid regular expression: %1</translation>
+        </message>
+        <message>
+            <source>未找到匹配内容</source>
+            <translation>No matches found</translation>
+        </message>
+        <message>
+            <source>已到达搜索范围边界</source>
+            <translation>Reached the search boundary</translation>
+        </message>
+        <message>
+            <source>第 %1 / %2 个匹配%3</source>
+            <translation>Match %1 of %2%3</translation>
+        </message>
+        <message>
+            <source>（已循环）</source>
+            <translation> (wrapped)</translation>
+        </message>
+        <message>
+            <source>已替换 %1 处</source>
+            <translation>Replaced %1 occurrences</translation>
+        </message>
+    </context>
+    <context>
+        <name>SearchResultsDock</name>
+        <message>
+            <source>搜索结果</source>
+            <translation>Search Results</translation>
+        </message>
+        <message>
+            <source>搜索“%1”（%2 个匹配，1 个文档）</source>
+            <translation>Search “%1” (%2 hits in 1 document)</translation>
+        </message>
+        <message>
+            <source>%1（%2 个匹配）</source>
+            <translation>%1 (%2 hits)</translation>
+        </message>
+        <message>
+            <source>行 %1：</source>
+            <translation>Line %1: </translation>
+        </message>
+        <message>
+            <source>搜索结果 — %1 个匹配</source>
+            <translation>Search Results — %1 hits</translation>
+        </message>
+        <message>
+            <source>（原文已修改或关闭，请重新查找）</source>
+            <translation> (Document changed or closed; search again)</translation>
+        </message>
     </context>
 </TS>

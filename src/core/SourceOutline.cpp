@@ -2,6 +2,8 @@
 #include "SourceLanguage.h"
 #include <QCoreApplication>
 #include <QHash>
+#include <QFileInfo>
+#include <QRegularExpression>
 #include <QSet>
 #include <cstring>
 #include <memory>
@@ -244,6 +246,18 @@ private:
 }// namespace
 
 SourceOutline::Result SourceOutline::parse(const QString &fileName, const QString &source) {
+    if (QFileInfo(fileName).suffix().compare("ini", Qt::CaseInsensitive) == 0) {
+        Result result{true, {}};
+        const QRegularExpression section(R"(^\s*\[([^\]\r\n]+)\]\s*(?:[;#].*)?$)");
+        const auto lines = source.split('\n');
+        for (int line = 0; line < lines.size(); ++line) {
+            auto text = lines[line];
+            if (line == 0 && text.startsWith(QChar::ByteOrderMark)) text.remove(0, 1);
+            const auto match = section.match(text);
+            if (match.hasMatch() && !match.captured(1).trimmed().isEmpty()) result.symbols.append({match.captured(1).trimmed(), Kind::Section, line, -1});
+        }
+        return result;
+    }
     const auto *language = SourceLanguage::forFile(fileName).grammar;
     if (!language) return {};
     const std::unique_ptr<TSParser, decltype(&ts_parser_delete)> parser(ts_parser_new(), ts_parser_delete);
@@ -255,6 +269,8 @@ SourceOutline::Result SourceOutline::parse(const QString &fileName, const QStrin
 
 QString SourceOutline::kindName(Kind kind) {
     switch (kind) {
+        case Kind::Section:
+            return QCoreApplication::translate("SourceOutline", "节");
         case Kind::Namespace:
             return QCoreApplication::translate("SourceOutline", "命名空间");
         case Kind::Class:

@@ -15,6 +15,12 @@ target_link_libraries(qsnote_i18n PUBLIC Qt6::Core)
 
 add_executable(qsnote WIN32 MACOSX_BUNDLE
         main.cpp
+        ui/SearchResultsDock.cpp
+        ui/SearchResultsDock.h
+        ui/FindReplaceDialog.cpp
+        ui/FindReplaceDialog.h
+        core/TextSearch.cpp
+        core/TextSearch.h
         ui/EditorWorkspace.cpp
         ui/EditorWorkspace.h
         ui/SourceHighlighter.cpp

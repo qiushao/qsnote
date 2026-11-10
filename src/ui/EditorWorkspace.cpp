@@ -1,5 +1,8 @@
 #include "EditorWorkspace.h"
 #include "FlowLayout.h"
+#include "FindReplaceDialog.h"
+#include "SearchResultsDock.h"
+#include <QMainWindow>
 #include "MarkdownEditor.h"
 #include "MarkdownPreview.h"
 #include "RoundedTreeWidget.h"
@@ -168,6 +171,32 @@ protected:
 
 EditorWorkspace::EditorWorkspace(NotebookStore &store, std::function<bool()> save, QWidget *parent)
     : QWidget(parent), store_(store), save_(std::move(save)) {
+    auto *searchResults = new SearchResultsDock(qobject_cast<QMainWindow *>(window()));
+    connect(searchResults, &SearchResultsDock::matchActivated, this, [this](QTextDocument *document, int start, int end) {
+        for (auto it = textEditors_.cbegin(); it != textEditors_.cend(); ++it) {
+            if (it.value()->document() != document) continue;
+            openNote(it.key(), true);
+            QTextCursor cursor(document);
+            cursor.setPosition(start);
+            cursor.setPosition(end, QTextCursor::KeepAnchor);
+            it.value()->setTextCursor(cursor);
+            it.value()->ensureCursorVisible();
+            it.value()->setFocus();
+            return;
+        }
+        for (auto it = editorSessions_.cbegin(); it != editorSessions_.cend(); ++it) {
+            auto *editor = it.value().editor->getTextEdit();
+            if (editor->document() != document) continue;
+            openNote(it.key(), true);
+            QTextCursor cursor(document);
+            cursor.setPosition(start);
+            cursor.setPosition(end, QTextCursor::KeepAnchor);
+            editor->setTextCursor(cursor);
+            editor->ensureCursorVisible();
+            editor->setFocus();
+            return;
+        }
+    });
     auto *center = this;
     center->setObjectName("center");
     center->setMinimumWidth(0);
@@ -345,6 +374,10 @@ EditorWorkspace::EditorWorkspace(NotebookStore &store, std::function<bool()> sav
     });
     auto *find = new QShortcut(QKeySequence::Find, window());
     connect(find, &QShortcut::activated, this, [this] {
+        if (auto *editor = textEditors_.value(currentNoteId())) {
+            FindReplaceDialog::openFor(editor);
+            return;
+        }
         if (const auto *note = documentNote(currentNoteId()); note && note->kind == Note::Kind::Markdown) {
             auto *focus = QApplication::focusWidget();
             if (viewMode_ == ViewMode::Preview || (viewMode_ == ViewMode::Split && focus && (focus == preview_ || preview_->isAncestorOf(focus)))) {
@@ -358,9 +391,13 @@ EditorWorkspace::EditorWorkspace(NotebookStore &store, std::function<bool()> sav
     });
     auto *replace = new QShortcut(QKeySequence::Replace, window());
     connect(replace, &QShortcut::activated, this, [this] {
+        if (auto *editor = textEditors_.value(currentNoteId())) {
+            FindReplaceDialog::openFor(editor, true);
+            return;
+        }
         if (!markdownEditor_) return;
         if (viewMode_ == ViewMode::Preview) setPreview(false);
-        markdownEditor_->showFindReplace();
+        FindReplaceDialog::openFor(editor_, true);
     });
     auto *mode = new QShortcut(QKeySequence("Ctrl+E"), window());
     connect(mode, &QShortcut::activated, this, [this] { setPreview(viewMode_ != ViewMode::Preview); });
@@ -790,6 +827,9 @@ void EditorWorkspace::activatePlainText(const QString &id) {
             if (currentNoteId() == id) syncOutlineToLine(topVisibleLine(editor));
         });
     }
+    const auto *note = documentNote(id);
+    const auto *owner = store_.owner(id);
+    textEditors_[id]->document()->setMetaInformation(QTextDocument::DocumentTitle, owner ? QDir(owner->path).filePath(note->path) : note->path);
     pages_->setCurrentWidget(textEditors_[id]);
     updateStatus();
 }
@@ -804,6 +844,9 @@ void EditorWorkspace::activateEditor(const QString &id) {
         textEdit->viewport()->installEventFilter(this);
         textEdit->setPlaceholderText(QCoreApplication::translate("MainWindow", "开始书写 Markdown..."));
         textEdit->setProperty("noteId", id);
+        const auto *note = documentNote(id);
+        const auto *owner = store_.owner(id);
+        textEdit->document()->setMetaInformation(QTextDocument::DocumentTitle, owner ? QDir(owner->path).filePath(note->path) : note->path);
         session.editor = documentEditor;
         editors_->addWidget(documentEditor);
         editorSessions_.insert(id, session);
@@ -1130,6 +1173,7 @@ void EditorWorkspace::showSourceOutline(const SourceOutline::Result &result) {
             case SourceOutline::Kind::Field:
                 item->setForeground(0, QColor("#167863"));
                 break;
+            case SourceOutline::Kind::Section:
             case SourceOutline::Kind::Namespace:
                 item->setForeground(0, QColor("#63748b"));
                 break;

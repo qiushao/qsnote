@@ -1,4 +1,5 @@
 #include "MarkdownEditor.h"
+#include "FindReplaceDialog.h"
 #include "Theme.h"
 #include "UiStyle.h"
 #include "InplacePreview.h"
@@ -352,60 +353,7 @@ void MarkdownEditor::insertImage(quint64 requestId, const QString &selectedText)
 }
 
 void MarkdownEditor::showFindReplace() {
-    QDialog dialog(this);
-    dialog.setWindowTitle(tr("查找和替换"));
-    dialog.setObjectName("findReplace");
-    auto *layout = new QVBoxLayout(&dialog);
-    layout->setContentsMargins(20, 20, 20, 20);
-    layout->setSpacing(12);
-    auto *fields = new QFormLayout;
-    fields->setSpacing(12);
-    fields->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    auto *query = new QLineEdit(getTextEdit()->textCursor().selectedText(), &dialog);
-    auto *replacement = new QLineEdit(&dialog);
-    query->setObjectName("findText");
-    replacement->setObjectName("replaceText");
-    fields->addRow(tr("查找"), query);
-    fields->addRow(tr("替换为"), replacement);
-    layout->addLayout(fields);
-    auto *options = new QHBoxLayout;
-    auto *sensitive = new QCheckBox(tr("区分大小写"), &dialog);
-    auto *whole = new QCheckBox(tr("全词"), &dialog);
-    auto *regex = new QCheckBox(tr("正则表达式"), &dialog);
-    for (auto *check: {sensitive, whole, regex}) options->addWidget(check);
-    layout->addLayout(options);
-    auto *result = new QLabel(&dialog);
-    result->setObjectName("findResult");
-    result->setProperty("dim", true);
-    layout->addWidget(result);
-    auto *actions = new QHBoxLayout;
-    const QStringList labels = {tr("上一个"), tr("下一个"), tr("替换"), tr("全部替换")};
-    for (int index = 0; index < labels.size(); ++index) {
-        auto *button = new QPushButton(labels[index], &dialog);
-        button->setObjectName(QStringLiteral("findAction%1").arg(index));
-        actions->addWidget(button);
-        connect(button, &QPushButton::clicked, &dialog, [=] {
-            if (query->text().isEmpty()) return;
-            if (regex->isChecked() && !QRegularExpression(query->text()).isValid()) {
-                result->setText(tr("正则表达式无效"));
-                return;
-            }
-            vte::FindFlags flags;
-            if (sensitive->isChecked()) flags |= vte::CaseSensitive;
-            if (whole->isChecked()) flags |= vte::WholeWordOnly;
-            if (regex->isChecked()) flags |= vte::RegularExpression;
-            if (index == 0) flags |= vte::FindBackward;
-            const auto found = index < 2    ? findText({query->text()}, flags)
-                               : index == 2 ? replaceText(query->text(), flags, replacement->text())
-                                            : replaceAll(query->text(), flags, replacement->text());
-            result->setText(tr("%1 个匹配%2").arg(found.m_totalMatches).arg(found.m_wrapped ? tr("（已回到开头）") : ""));
-        });
-    }
-    layout->addLayout(actions);
-    query->setFocus();
-    dialog.exec();
-    clearSearchHighlight();
-    getTextEdit()->setFocus();
+    FindReplaceDialog::openFor(getTextEdit());
 }
 
 void MarkdownEditor::reloadSettings() {

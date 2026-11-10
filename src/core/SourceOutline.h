@@ -12,7 +12,8 @@ enum class Kind { Namespace,
                   Method,
                   Variable,
                   Field,
-                  Type };
+                  Type,
+                  Section };
 
 struct Symbol {
     QString name;
