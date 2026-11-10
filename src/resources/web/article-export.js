@@ -1,6 +1,9 @@
 'use strict';
 window.qsnoteExport = {
     prepare(text) {
+        // The standalone export page has no view; give width-dependent diagrams a layout width.
+        document.body.style.width = '1024px';
+        console.info("Export: Markdown parse begin");
         const root = qsnoteArticle.markdown(text, true);
         document.getElementById('content').replaceChildren(root);
         return [...root.querySelectorAll('pre > code')]
@@ -10,7 +13,9 @@ window.qsnoteExport = {
         try {
             const root = document.querySelector('.qsnote-article');
             window.exportStage = qsnoteTranslations.diagram;
-            await qsnoteArticle.graphs(root, {strict: true, plantUml: async source => ({data: plantUml[source]})});
+            console.info("Export: graphs begin");
+            await qsnoteArticle.graphs(root, {strict: true, log: details => console.info("Export graph: " + JSON.stringify(details)), plantUml: async source => ({data: plantUml[source]})});
+            console.info("Export: graphs completed; rasterization begin");
             // Freeze generated graphics for readers without JavaScript or SVG support.
             for (const node of root.querySelectorAll('eq,eqn,.diagram svg')) {
                 window.exportStage = node.tagName;
@@ -46,6 +51,14 @@ window.qsnoteExport = {
                     // WaveDrom installs its stylesheet in the document rather than the SVG.
                     document.querySelectorAll('head style').forEach(style => svg.prepend(style.cloneNode(true)));
                 }
+                console.info("Export dimensions: " + JSON.stringify({
+                    tag: node.tagName, id: node.id, graph: node.closest('.diagram')?.id,
+                    sourceLine: node.closest('[data-source-line]')?.dataset.sourceLine,
+                    width, height, viewBox: node.getAttribute('viewBox'),
+                    svgWidth: node.getAttribute('width'), svgHeight: node.getAttribute('height'),
+                    bounds: node.getBoundingClientRect().toJSON(), alt
+                }));
+                if (!(width > 0 && height > 0)) console.error("Export invalid node: " + node.outerHTML);
                 if (!(width > 0 && height > 0)) throw new Error(qsnoteTranslations.imageSizeError);
                 svg.setAttribute('width', width);
                 svg.setAttribute('height', height);
@@ -66,6 +79,7 @@ window.qsnoteExport = {
                 output.alt = alt;
                 if (math) output.className = node.tagName.toLowerCase() === 'eq' ? 'math-inline' : 'math-display';
                 node.replaceWith(output);
+                console.info("Export: rasterization completed " + alt);
             }
             root.querySelectorAll('.code-toolbar > .toolbar').forEach(toolbar => toolbar.remove());
             root.querySelectorAll('input[type=checkbox]').forEach(input => input.disabled = true);
@@ -75,7 +89,9 @@ window.qsnoteExport = {
                 if (!node.className) node.removeAttribute('class');
             });
             window.exportResult = {html: new XMLSerializer().serializeToString(root)};
+            console.info("Export: serialization completed");
         } catch (error) {
+            console.error("Export failed at " + window.exportStage + ": " + (error.stack || error));
             window.exportResult = {error: String(error.message || error)};
         }
         document.title = 'article-export-ready';

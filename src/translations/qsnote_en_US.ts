@@ -113,6 +113,14 @@
     <context>
         <name>ArticleRenderer</name>
         <message>
+            <source>渲染日志：%1</source>
+            <translation>Render log: %1</translation>
+        </message>
+        <message>
+            <source>无法写入渲染日志：%1（%2）</source>
+            <translation>Unable to write render log: %1 (%2)</translation>
+        </message>
+        <message>
             <location filename="../core/ArticleRenderer.cpp" line="+103" />
             <source>无法读取预览资源。</source>
             <translation>Unable to read preview resources.</translation>

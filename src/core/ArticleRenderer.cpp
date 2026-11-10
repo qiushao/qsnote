@@ -4,6 +4,7 @@
 #include "WebTranslations.h"
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
 #include <QEventLoop>
@@ -23,6 +24,25 @@
 #include <utility>
 
 namespace {
+void writeRenderLog(QFile &file, const QString &message) {
+    if (!file.isOpen()) return;
+    file.write((QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs) + " " + message + '\n').toUtf8());
+    file.flush();
+}
+
+class ExportPage : public QWebEnginePage {
+public:
+    explicit ExportPage(QFile &logFile) : logFile_(logFile) {}
+
+protected:
+    void javaScriptConsoleMessage(JavaScriptConsoleMessageLevel level, const QString &message, int line, const QString &source) override {
+        writeRenderLog(logFile_, QString("JavaScript level=%1 %2:%3 %4").arg(static_cast<int>(level)).arg(source).arg(line).arg(message));
+    }
+
+private:
+    QFile &logFile_;
+};
+
 bool parseArticle(const QString &markup, QDomDocument &document) {
     // Qt 6.4 drops spacing-only text nodes, including newlines between highlighted tokens.
     // Protect them as CDATA during parsing, then restore text nodes for HTML output.
@@ -102,6 +122,11 @@ ArticleRenderer::ArticleRenderer(const QString &notebookPath, const QString &cac
     const auto notebookKey = QCryptographicHash::hash(QDir(notebookPath).absolutePath().toUtf8(), QCryptographicHash::Sha256).toHex();
     cacheDirectory_ = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
         + '/' + cacheGroup + '/' + QString::fromLatin1(notebookKey) + "/articles";
+    const auto logDirectory = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/render-logs";
+    QDir().mkpath(logDirectory);
+    logFile_.setFileName(logDirectory + '/' + cacheGroup + '-' + QString::fromLatin1(notebookKey) + ".log");
+    logFile_.open(QIODevice::WriteOnly | QIODevice::Append);
+    writeRenderLog(logFile_, "Renderer started: notebook=" + notebookPath + " group=" + cacheGroup + " Qt=" + qVersion());
 }
 ArticleRenderer::~ArticleRenderer() = default;
 
@@ -144,6 +169,7 @@ QString ArticleRenderer::html(const QDomDocument &document) {
 }
 
 bool ArticleRenderer::render(const QString &markdown, const QString &documentId, QDomDocument &document, QString *error) {
+    writeRenderLog(logFile_, "Article begin: " + documentId + " characters=" + QString::number(markdown.size()));
     // Cache before callers resolve links, number chapters or package authored images.
     // PlantUML can include external files, so those articles must be rendered again.
     const bool cacheable = !markdown.contains("plantuml", Qt::CaseInsensitive) && !markdown.contains("puml", Qt::CaseInsensitive);
@@ -155,9 +181,19 @@ bool ArticleRenderer::render(const QString &markdown, const QString &documentId,
         const bool cached = data.startsWith(key) && parseArticle(QString::fromUtf8(data.mid(key.size())), document)
             && document.documentElement().tagName() == "article";
         cache.close();
-        if (cached) return true;
+        if (cached) { writeRenderLog(logFile_, "Cache hit: " + documentId); return true; }
     }
-    if (!renderUncached(markdown, document, error)) return false;
+    writeRenderLog(logFile_, "Cache miss; rendering article");
+    if (!renderUncached(markdown, document, error)) {
+        writeRenderLog(logFile_, "Article failed: " + documentId + " error=" + *error);
+        if (logFile_.isOpen() && logFile_.error() == QFileDevice::NoError) {
+            *error += '\n' + QCoreApplication::translate("ArticleRenderer", "渲染日志：%1").arg(logFile_.fileName());
+        } else {
+            *error += '\n' + QCoreApplication::translate("ArticleRenderer", "无法写入渲染日志：%1（%2）").arg(logFile_.fileName(), logFile_.errorString());
+        }
+        return false;
+    }
+    writeRenderLog(logFile_, "Article completed: " + documentId);
     // Cache failures must not prevent preview or export.
     if (cacheable && QDir().mkpath(cacheDirectory_)) {
         QSaveFile output(path);
@@ -169,7 +205,8 @@ bool ArticleRenderer::render(const QString &markdown, const QString &documentId,
 
 bool ArticleRenderer::renderUncached(const QString &markdown, QDomDocument &document, QString *error) {
     if (!browser_) {
-        browser_ = std::make_unique<QWebEnginePage>();
+        writeRenderLog(logFile_, "Loading renderer resources");
+        browser_ = std::make_unique<ExportPage>(logFile_);
         installWebTranslations(browser_.get());
         browser_->setUrlRequestInterceptor(new ExportRequests(browser_.get()));
         browser_->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, false);
@@ -190,6 +227,7 @@ bool ArticleRenderer::renderUncached(const QString &markdown, QDomDocument &docu
         loop.exec(QEventLoop::ExcludeUserInputEvents);
         if (!loaded) { *error = QCoreApplication::translate("ArticleRenderer", "无法加载正文渲染器。"); return false; }
     }
+    writeRenderLog(logFile_, "Preparing Markdown");
     const auto prepared = evaluate(*browser_, "(function(input){try{return {plantUml:qsnoteExport.prepare(input.text)}}catch(error){return {error:qsnoteTranslations.mathError+error.message}}})("
                                    + json({{"text", markdown}}) + ")").toMap();
     if (prepared.isEmpty() || prepared.contains("error")) {
@@ -200,6 +238,7 @@ bool ArticleRenderer::renderUncached(const QString &markdown, QDomDocument &docu
     for (const auto &value: prepared.value("plantUml").toList()) {
         const auto source = value.toString();
         if (plantUml.contains(source)) continue;
+        writeRenderLog(logFile_, "PlantUML begin: " + source);
         PlantUmlRenderer renderer;
         QEventLoop loop;
         QByteArray png;
@@ -210,8 +249,10 @@ bool ArticleRenderer::renderUncached(const QString &markdown, QDomDocument &docu
         QTimer::singleShot(0, &renderer, [&] { renderer.render(source); });
         loop.exec(QEventLoop::ExcludeUserInputEvents);
         if (!message.isEmpty()) { *error = "PlantUML：" + message; return false; }
+        writeRenderLog(logFile_, "PlantUML completed: bytes=" + QString::number(png.size()));
         plantUml[source] = QString::fromLatin1(png.toBase64());
     }
+    writeRenderLog(logFile_, "Loading math styles and fonts");
     const auto mathCss = embeddedMathStylesheet(error);
     if (mathCss.isEmpty()) { *error = QCoreApplication::translate("ArticleRenderer", "无法读取公式字体和样式。") + "\n" + *error; return false; }
     QEventLoop loop;

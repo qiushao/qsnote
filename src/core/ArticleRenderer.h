@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QDomDocument>
+#include <QFile>
 #include <QString>
 #include <memory>
 
@@ -22,6 +23,7 @@ public:
 private:
     [[nodiscard]] QString cachePath(const QString &documentId) const;
     bool renderUncached(const QString &markdown, QDomDocument &document, QString *error);
+    QFile logFile_;
     QString cacheDirectory_;
     QString foreground_;
     std::unique_ptr<QWebEnginePage> browser_;

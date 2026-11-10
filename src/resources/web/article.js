@@ -154,6 +154,7 @@ window.qsnoteArticle = (() => {
             if (code.dataset.sourceLine !== undefined) graph.dataset.sourceLine = code.dataset.sourceLine;
             const source = code.textContent;
             const parent = code.parentElement;
+            options.log?.({id: graph.id, language, sourceLine: code.dataset.sourceLine, source});
             try {
                 if (language === 'mermaid') {
                     const result = await mermaid.render(`mermaid-${graphId}`, source);
