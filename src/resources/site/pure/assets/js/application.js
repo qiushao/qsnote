@@ -1,4 +1,30 @@
 $(function() {
+  var root = document.documentElement;
+  var giscus = document.querySelector('script[data-src="https://giscus.app/client.js"]');
+  function syncGiscusTheme() {
+    if (!giscus) return;
+    giscus.dataset.theme = root.dataset.theme;
+    var frame = document.querySelector('iframe.giscus-frame');
+    if (frame) {
+      frame.contentWindow.postMessage({ giscus: { setConfig: { theme: root.dataset.theme } } }, 'https://giscus.app');
+    }
+  }
+  if (giscus) {
+    syncGiscusTheme();
+    document.addEventListener('load', function(event) {
+      if (event.target.matches && event.target.matches('iframe.giscus-frame')) syncGiscusTheme();
+    }, true);
+    giscus.src = giscus.dataset.src;
+  }
+  var $themeToggle = $('#theme-toggle');
+  $themeToggle.prop('hidden', false).attr('aria-checked', String(root.dataset.theme === 'dark')).on('click', function() {
+    root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+    $themeToggle.attr('aria-checked', String(root.dataset.theme === 'dark'));
+    try { localStorage.setItem('qsnote-pure-theme', root.dataset.theme); } catch (_) {}
+    syncGiscusTheme();
+  });
+
+
   // Toggle both the widgets and the article Catalogue sidebar.
   var $sidebarToggle = $('#sidebar-toggle');
   function setSidebarExpanded(expanded) {

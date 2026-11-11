@@ -27,7 +27,8 @@ QString comments(const Notebook &book, const SitePage &page, const QString &perm
         const auto category = c["giscusCategory"].toString().trimmed();
         const auto categoryId = c["giscusCategoryId"].toString().trimmed();
         if (repo.isEmpty() || repoId.isEmpty() || category.isEmpty() || categoryId.isEmpty()) return {};
-        return R"(<section class="giscus"></section><script src="https://giscus.app/client.js" data-repo=")" + escaped(repo) +
+        const auto sourceAttribute = c["theme"].toString("pure") == "pure" ? "data-src" : "src";
+        return R"(<section class="giscus"></section><script )" + QString::fromLatin1(sourceAttribute) + R"(="https://giscus.app/client.js" data-repo=")" + escaped(repo) +
                R"(" data-repo-id=")" + escaped(repoId) + R"(" data-category=")" + escaped(category) + R"(" data-category-id=")" + escaped(categoryId) +
                R"(" data-mapping="pathname" data-strict="0" data-reactions-enabled="1" data-emit-metadata="0" data-input-position="bottom" data-theme="preferred_color_scheme" data-lang="zh-CN" crossorigin="anonymous" async></script>)";
     }
