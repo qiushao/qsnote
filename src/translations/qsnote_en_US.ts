@@ -718,6 +718,10 @@
             <translation>Digital Timing Diagram</translation>
         </message>
         <message>
+            <source>步骤时间线</source>
+            <translation>Steps Timeline</translation>
+        </message>
+        <message>
             <source>提示块</source>
             <translation>Alert</translation>
         </message>

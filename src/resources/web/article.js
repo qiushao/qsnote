@@ -51,6 +51,7 @@ window.qsnoteArticle = (() => {
             render: (tokens, index) => tokens[index].nesting === 1
                 ? `<aside class="${tokens[index].info.trim()}">` : '</aside>\n'
         });
+        md.use(markdownitContainer, 'steps');
         // Filter authored HTML only. Library-generated math retains its MathML and
         // SVG, and the XSS filter keeps its default URL and CSS validation.
         const whiteList = filterXSS.getDefaultWhiteList();
@@ -93,6 +94,30 @@ window.qsnoteArticle = (() => {
             aside.append(title);
             while (quote.firstChild) aside.append(quote.firstChild);
             quote.replaceWith(aside);
+        }
+        // Steps timeline: ordered lists in a "steps" container get numbered
+        // badges. The first paragraph is the title, the rest descriptions, and
+        // a ★ prefix in the bold title marks a key step.
+        for (const list of root.querySelectorAll('.steps > ol')) {
+            for (const item of list.children) {
+                if (item.tagName !== 'LI') continue;
+                let paragraphs = item.querySelectorAll(':scope > p');
+                if (!paragraphs.length) {
+                    // Tight lists have no <p>: split title and description at the first line.
+                    const html = item.innerHTML.trim();
+                    const newline = html.indexOf('\n');
+                    item.innerHTML = newline > -1
+                        ? `<p>${html.slice(0, newline)}</p><p>${html.slice(newline + 1)}</p>`
+                        : `<p>${html}</p>`;
+                    paragraphs = item.querySelectorAll(':scope > p');
+                }
+                paragraphs.forEach((paragraph, index) => paragraph.classList.add(index === 0 ? 't' : 'd'));
+                const title = item.querySelector('.t strong');
+                if (title && title.textContent.startsWith('★')) {
+                    item.classList.add('k');
+                    title.textContent = title.textContent.slice(1);
+                }
+            }
         }
         // Preserve authored image dimensions even when a site theme sets image sizes.
         root.querySelectorAll('img').forEach(image => {

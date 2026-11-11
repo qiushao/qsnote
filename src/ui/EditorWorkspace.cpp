@@ -541,6 +541,16 @@ void EditorWorkspace::buildToolbar() {
             editor_->setFocus();
         });
     }
+    diagramMenu->addAction(QCoreApplication::translate("MainWindow", "步骤时间线"), this, [this] {
+        if (!documentNote(currentNoteId())) return;
+        setPreview(false);
+        auto cursor = editor_->textCursor();
+        cursor.beginEditBlock();
+        cursor.insertText("\n\n::: steps\n1. **★准备环境**\n\n   安装依赖并确认版本，这一步最容易出错。\n\n2. **构建项目**\n\n   运行构建命令，等待编译完成。\n\n3. **验证结果**\n\n   启动应用，检查核心流程。\n:::\n\n");
+        cursor.endEditBlock();
+        editor_->setTextCursor(cursor);
+        editor_->setFocus();
+    });
     auto *alertMenu = diagramMenu->addMenu(QCoreApplication::translate("MainWindow", "提示块"));
     struct Alert {
         QString title;

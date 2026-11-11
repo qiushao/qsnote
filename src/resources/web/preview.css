@@ -37,6 +37,11 @@ main { padding: 16px 20px 60px; margin-inline: auto; }
 [data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article img { height: auto; }
 [data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .code-block .code-copy { border-color: #3b4048; background: #21252b; color: #9da4b1; }
 [data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .code-block .code-copy:hover { background: #2c313a; color: #e6edf3; }
+[data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .steps > ol > li { border-left-color: #485463; }
+[data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .steps > ol > li:last-child { border-left-color: transparent; }
+[data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .steps > ol > li::before { border-color: #566070; color: #9da4b1; }
+[data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .steps > ol > li.k::before { border-color: #e06c75; color: #e06c75; }
+[data-theme=dark] .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .steps .d { color: #aab6c4; }
 
 /* Light token colors from highlight.css are unreadable on the dark code panel. */
 [data-theme=dark] .token.comment,[data-theme=dark] .token.prolog,[data-theme=dark] .token.doctype,[data-theme=dark] .token.cdata { color: #7f8794; }

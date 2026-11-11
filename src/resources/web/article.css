@@ -40,6 +40,17 @@
 .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article aside.alert-important { background: #fbefff; border-left-color: #8250df; }.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article aside.alert-important .alert-title { color: #8250df; }
 .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article aside.alert-warning { background: #fff8c5; border-left-color: #9a6700; }.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article aside.alert-warning .alert-title { color: #9a6700; }
 .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article aside.alert-caution { background: #ffebe9; border-left-color: #cf222e; }.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article aside.alert-caution .alert-title { color: #cf222e; }
+/* Steps timeline from "steps" containers: counters draw numbered badges riding
+   the vertical rule; the first paragraph is the title, ★ titles mark key steps. */
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .steps > ol { list-style: none; counter-reset: qsnote-step; margin: 14px 0 0; padding: 0; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .steps > ol > li { position: relative; margin-left: 13px; padding: 0 0 26px 42px; counter-increment: qsnote-step; border-left: 1px solid #cfd1c7; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .steps > ol > li:last-child { border-left-color: transparent; padding-bottom: 0; }
+/* border-box keeps the 28px badge centred on the rule; the opaque background
+   masks the line behind it and follows the reader surface in the preview. */
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .steps > ol > li::before { content: counter(qsnote-step, decimal-leading-zero); position: absolute; left: -14px; top: -1px; box-sizing: border-box; width: 28px; height: 28px; background: var(--qsnote-surface, #fff); border: 1px solid #afb3a7; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 9px; line-height: 26px; text-align: center; color: #7c8078; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .steps > ol > li.k::before { border-color: #b93a1c; color: #b93a1c; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .steps .t { margin: 0 0 4px; font-size: .9em; font-weight: 600; line-height: 1.6; }
+.qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .steps .d { margin: 0; font-size: .85em; line-height: 1.85; color: #4d524c; }
 .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article eq .katex-display { display: inline-block; margin: 0; vertical-align: middle; }
 .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .diagram { overflow: auto; margin: 16px 0; text-align: center; }
 .qsnote-article.qsnote-article.qsnote-article.qsnote-article.qsnote-article .render-error { color: #b42318; white-space: pre-wrap; }
