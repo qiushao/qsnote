@@ -6,6 +6,7 @@
 #include <QRegularExpression>
 #include <QSet>
 
+class QLabel;
 class QMainWindow;
 class QTextDocument;
 class QTabWidget;
@@ -24,6 +25,7 @@ private:
     void invalidateDocument(QTextDocument *document);
     void closeTab(int index);
     QTabWidget *tabs_;
+    QLabel *titleLabel_;
     QHash<QTreeWidgetItem *, QPointer<QTextDocument>> documents_;
     QSet<QTextDocument *> watchedDocuments_;
 };

@@ -81,7 +81,9 @@ QTabBar::tab { background: transparent; color: @textDim; border: 1px solid trans
 QTabBar::tab:hover { background: @tabHover; color: @textSecondary; }
 QTabBar::tab:selected { background: @surface; color: @accentStrong; border-color: @inputBorder; }
 QTabBar#noteTabs::tab:selected { border-bottom: 2px solid @accent; }
-QPushButton#noteTabClose { padding: 0; min-width: 0; min-height: 0; border-radius: 4px; }
+QPushButton#noteTabClose, QPushButton#searchResultTabClose, QPushButton#searchResultsClose { padding: 0; min-width: 0; min-height: 0; border-radius: 4px; }
+QWidget#searchResultsTitleBar { background: @surface; border-bottom: 1px solid @border; }
+QLabel#searchResultsTitle { font-size: 13px; font-weight: 600; color: @textSecondary; }
 QTextEdit#editor, QTextEdit#inactiveEditor { border: none; background: @window; padding: 8px 12px; selection-background-color: @accentSoft; }
 QTextBrowser { border: none; background: @surface; padding: 20px 24px; selection-background-color: @accentSoft; }
 QScrollBar:vertical { background: transparent; width: 8px; margin: 0; }

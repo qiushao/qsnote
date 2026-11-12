@@ -1,9 +1,15 @@
 #include "SearchResultsDock.h"
 #include "RoundedTreeWidget.h"
+#include <QCoreApplication>
+#include <QHBoxLayout>
+#include <QLabel>
 #include <QMainWindow>
+#include <QPushButton>
+#include <QStyle>
 #include <QPainter>
 #include <QShortcut>
 #include <QStyledItemDelegate>
+#include <QTabBar>
 #include <QTabWidget>
 #include <QTextBlock>
 #include <QTextDocument>
@@ -47,6 +53,28 @@ public:
 
 SearchResultsDock::SearchResultsDock(QMainWindow *window) : QDockWidget(tr("搜索结果"), window) {
     setObjectName("searchResultsDock");
+    auto *titleBar = new QWidget(this);
+    titleBar->setObjectName("searchResultsTitleBar");
+    auto *titleLayout = new QHBoxLayout(titleBar);
+    titleLayout->setContentsMargins(8, 3, 4, 3);
+    titleLayout->setSpacing(0);
+    titleLabel_ = new QLabel(tr("搜索结果"), titleBar);
+    titleLabel_->setObjectName("searchResultsTitle");
+    titleLabel_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    titleLayout->addWidget(titleLabel_);
+    titleLayout->addStretch();
+    auto *close = new QPushButton(titleBar);
+    close->setObjectName("searchResultsClose");
+    close->setProperty("iconButton", true);
+    close->setIcon(QIcon(":/icons/close.svg"));
+    close->setIconSize(QSize(14, 14));
+    close->setFixedSize(20, 20);
+    close->setFocusPolicy(Qt::NoFocus);
+    close->setToolTip(QCoreApplication::translate("MainWindow", "关闭"));
+    close->setAccessibleName(close->toolTip());
+    connect(close, &QPushButton::clicked, this, &SearchResultsDock::hide);
+    titleLayout->addWidget(close);
+    setTitleBarWidget(titleBar);
     auto *body = new QWidget(this);
     auto *layout = new QVBoxLayout(body);
     layout->setContentsMargins(4, 4, 4, 4);
@@ -62,7 +90,9 @@ SearchResultsDock::SearchResultsDock(QMainWindow *window) : QDockWidget(tr("搜�
     connect(tabs_, &QTabWidget::tabCloseRequested, this, &SearchResultsDock::closeTab);
     connect(tabs_, &QTabWidget::currentChanged, this, [this](int index) {
         const auto *tree = qobject_cast<QTreeWidget *>(tabs_->widget(index));
-        setWindowTitle(tree ? tr("搜索结果 — %1 个匹配").arg(tree->topLevelItem(0)->childCount()) : tr("搜索结果"));
+        const auto title = tree ? tr("搜索结果 — %1 个匹配").arg(tree->topLevelItem(0)->childCount()) : tr("搜索结果");
+        setWindowTitle(title);
+        titleLabel_->setText(title);
     });
     auto *showResults = new QShortcut(QKeySequence(Qt::Key_F7), window);
     connect(showResults, &QShortcut::activated, this, [this] {
@@ -112,6 +142,25 @@ void SearchResultsDock::showResults(const QString &query, const QString &file, Q
         });
     }
     const int tab = tabs_->addTab(results, tr("%1（%2 个匹配）").arg(query).arg(matches.size()));
+    // Replace the blurry style-provided pixmap close button with the crisp SVG icon used by note tabs.
+    const auto side = static_cast<QTabBar::ButtonPosition>(tabs_->style()->styleHint(QStyle::SH_TabBar_CloseButtonPosition, nullptr, tabs_->tabBar()));
+    auto *close = new QPushButton(tabs_->tabBar());
+    close->setObjectName("searchResultTabClose");
+    close->setProperty("iconButton", true);
+    close->setIcon(QIcon(":/icons/close.svg"));
+    close->setIconSize(QSize(12, 12));
+    close->setFixedSize(20, 20);
+    close->setFocusPolicy(Qt::NoFocus);
+    close->setToolTip(QCoreApplication::translate("MainWindow", "关闭标签"));
+    close->setAccessibleName(close->toolTip());
+    tabs_->tabBar()->setTabButton(tab, side, close);
+    connect(close, &QPushButton::clicked, this, [this, close, side] {
+        for (int index = 0; index < tabs_->count(); ++index) {
+            if (tabs_->tabBar()->tabButton(index, side) != close) continue;
+            closeTab(index);
+            return;
+        }
+    });
     tabs_->setTabToolTip(tab, title + '\n' + file);
     tabs_->setCurrentIndex(tab);
     show();
