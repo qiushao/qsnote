@@ -5,6 +5,7 @@
 #include "UiStyle.h"
 #include <QButtonGroup>
 #include <QCheckBox>
+#include <QColorDialog>
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDialogButtonBox>
@@ -72,7 +73,9 @@ QPixmap accentSwatchIcon(const QColor &background, const QColor &accent, const Q
     painter.setBrush(accent);
     painter.drawEllipse(QRectF(16, 16, 24, 24));
     if (checked) {
-        painter.setPen(QPen(background, 2.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        const QColor checkColor = qAbs(qGray(background.rgb()) - qGray(accent.rgb())) >= 128
+                                          ? background : QColor(qGray(accent.rgb()) > 128 ? Qt::black : Qt::white);
+        painter.setPen(QPen(checkColor, 2.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         painter.drawPolyline(QPolygonF{{22, 28}, {26, 32}, {34, 23}});
     }
     return pixmap;
@@ -207,8 +210,15 @@ SettingsDialog::SettingsDialog(MarkdownEditor *editor, QWidget *parent) : Overla
             {"cyan", QCoreApplication::translate("MainWindow", "雨过青")},
             {"blue", QCoreApplication::translate("MainWindow", "秋水蓝")},
             {"purple", QCoreApplication::translate("MainWindow", "暮山紫")},
-            {"ink", QCoreApplication::translate("MainWindow", "远山墨")}};
+            {"ink", QCoreApplication::translate("MainWindow", "远山墨")},
+            {"custom", QCoreApplication::translate("MainWindow", "自定义")}};
     const QString currentAccent = settings.value("Appearance/accent", "sunset").toString();
+    customSeed_ = Theme::customSeed();
+    customOverrides_ = {Theme::customOverrides(false), Theme::customOverrides(true)};
+    auto *customPanel = new QWidget(body);
+    customPanel->setObjectName("customThemePanel");
+    customPanel->setVisible(currentAccent == "custom");
+    QPushButton *customSwatch = nullptr;
     for (const auto &id: Theme::accentIds()) {
         const QColor color = Theme::accentColor(id, false);
         const QColor background = Theme::color("window", id, false);
@@ -230,14 +240,103 @@ SettingsDialog::SettingsDialog(MarkdownEditor *editor, QWidget *parent) : Overla
         swatch->setFixedSize(68, 68);
         auto *name = label(accentNames.value(id), item);
         name->setAlignment(Qt::AlignCenter);
-        if (id == currentAccent) name->setStyleSheet("color: " + color.name());
-        connect(swatch, &QPushButton::toggled, name, [name, color](bool on) { name->setStyleSheet(on ? "color: " + color.name() : QString()); });
+        if (id != "custom") {
+            if (id == currentAccent) name->setStyleSheet("color: " + color.name());
+            connect(swatch, &QPushButton::toggled, name, [name, color](bool on) { name->setStyleSheet(on ? "color: " + color.name() : QString()); });
+        }
+        if (id == "custom") {
+            customSwatch = swatch;
+            connect(swatch, &QPushButton::toggled, customPanel, &QWidget::setVisible);
+        }
         itemLayout->addWidget(swatch, 0, Qt::AlignCenter);
         itemLayout->addWidget(name);
         swatchLayout->addWidget(item);
         swatchGroup->addButton(swatch);
     }
     appearance->addWidget(swatches);
+    appearance->addWidget(customPanel);
+    auto *customLayout = column(customPanel, 0, 8);
+    customLayout->addWidget(label(QCoreApplication::translate("MainWindow", "选择主色自动生成配色。手动调整项会保留，点击“自动”可恢复。主色共用，浅色和深色的微调分别保存。"), customPanel, true));
+    auto *customForm = new QFormLayout;
+    customForm->setSpacing(8);
+    customForm->setRowWrapPolicy(QFormLayout::WrapLongRows);
+    customLayout->addLayout(customForm);
+    auto *colorMode = new QComboBox(customPanel);
+    colorMode->setObjectName("customColorMode");
+    colorMode->addItem(QCoreApplication::translate("MainWindow", "浅色配色"));
+    colorMode->addItem(QCoreApplication::translate("MainWindow", "深色配色"));
+    colorMode->setCurrentIndex(Theme::isDark() ? 1 : 0);
+    auto *colorPicker = button("", "customAccentColor", customPanel);
+    customForm->addRow(QCoreApplication::translate("MainWindow", "主色"), colorPicker);
+    customForm->addRow(QCoreApplication::translate("MainWindow", "调整模式"), colorMode);
+    const QList<QPair<QString, QString>> colorFields = {
+            {"window", QCoreApplication::translate("MainWindow", "背景色")},
+            {"text", QCoreApplication::translate("MainWindow", "文字色")},
+            {"focus", QCoreApplication::translate("MainWindow", "焦点色")},
+            {"accent", QCoreApplication::translate("MainWindow", "强调色")}};
+    QHash<QString, QPair<QPushButton *, QPushButton *>> colorButtons;
+    for (const auto &field: colorFields) {
+        auto *fieldRow = new QWidget(customPanel);
+        auto *fieldLayout = row(fieldRow, 0, 0, 8);
+        auto *choose = button("", "customColor_" + field.first, fieldRow);
+        auto *reset = button(QCoreApplication::translate("MainWindow", "自动"), "customReset_" + field.first, fieldRow);
+        fieldLayout->addWidget(choose, 1);
+        fieldLayout->addWidget(reset);
+        customForm->addRow(field.second, fieldRow);
+        colorButtons.insert(field.first, {choose, reset});
+    }
+    auto *resetColors = button(QCoreApplication::translate("MainWindow", "恢复当前模式的自动配色"), "resetCustomColors", customPanel);
+    customLayout->addWidget(resetColors, 0, Qt::AlignLeft);
+    const auto refreshColors = [this, colorMode, colorPicker, colorButtons, customSwatch, resetColors] {
+        const bool dark = colorMode->currentIndex() == 1;
+        const auto &overrides = customOverrides_[colorMode->currentIndex()];
+        const auto setColor = [](QPushButton *target, const QColor &value) {
+            QPixmap icon(20, 20);
+            icon.fill(value);
+            target->setIcon(QIcon(icon));
+            target->setText(value.name());
+        };
+        setColor(colorPicker, customSeed_);
+        for (auto it = colorButtons.cbegin(); it != colorButtons.cend(); ++it) {
+            setColor(it.value().first, Theme::customColor(it.key(), customSeed_, overrides, dark));
+            it.value().second->setEnabled(overrides.contains(it.key()));
+        }
+        resetColors->setEnabled(!overrides.isEmpty());
+        const QColor background = Theme::customColor("window", customSeed_, overrides, dark);
+        const QColor accent = Theme::customColor("accent", customSeed_, overrides, dark);
+        const QColor border = Theme::customColor("border", customSeed_, overrides, dark);
+        QIcon icon;
+        icon.addPixmap(accentSwatchIcon(background, accent, border, false), QIcon::Normal, QIcon::Off);
+        icon.addPixmap(accentSwatchIcon(background, accent, border, true), QIcon::Normal, QIcon::On);
+        customSwatch->setIcon(icon);
+    };
+    connect(colorPicker, &QPushButton::clicked, this, [this, refreshColors] {
+        const QColor selected = QColorDialog::getColor(customSeed_, this, QCoreApplication::translate("MainWindow", "选择主色"));
+        if (!selected.isValid()) return;
+        customSeed_ = selected;
+        refreshColors();
+    });
+    for (const auto &field: colorFields) {
+        const auto controls = colorButtons.value(field.first);
+        connect(controls.first, &QPushButton::clicked, this, [this, colorMode, field, refreshColors] {
+            auto &overrides = customOverrides_[colorMode->currentIndex()];
+            const QColor initial = Theme::customColor(field.first, customSeed_, overrides, colorMode->currentIndex() == 1);
+            const QColor selected = QColorDialog::getColor(initial, this, field.second);
+            if (!selected.isValid()) return;
+            overrides.insert(field.first, selected);
+            refreshColors();
+        });
+        connect(controls.second, &QPushButton::clicked, this, [this, colorMode, field, refreshColors] {
+            customOverrides_[colorMode->currentIndex()].remove(field.first);
+            refreshColors();
+        });
+    }
+    connect(colorMode, &QComboBox::currentIndexChanged, this, refreshColors);
+    connect(resetColors, &QPushButton::clicked, this, [this, colorMode, refreshColors] {
+        customOverrides_[colorMode->currentIndex()].clear();
+        refreshColors();
+    });
+    refreshColors();
 
     auto *editorCard = section("editorSettingsCard", QCoreApplication::translate("MainWindow", "编辑器设置"));
     // An empty workspace still allows editing the same settings as an open note.
@@ -284,7 +383,7 @@ SettingsDialog::SettingsDialog(MarkdownEditor *editor, QWidget *parent) : Overla
     connect(close, &QPushButton::clicked, this, &QDialog::reject);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    apply_ = [language, font, fontSize, tray, updates, modeGroup, swatchGroup, applyEditor] {
+    apply_ = [this, language, font, fontSize, tray, updates, modeGroup, swatchGroup, applyEditor] {
         QSettings settings;
         settings.setValue("General/language", language->currentData());
         settings.setValue("General/uiFontFamily", font->currentFont().family());
@@ -293,6 +392,13 @@ SettingsDialog::SettingsDialog(MarkdownEditor *editor, QWidget *parent) : Overla
         settings.setValue("General/checkUpdatesOnStartup", updates->isChecked());
         if (auto *checked = modeGroup->checkedButton()) settings.setValue("Appearance/mode", checked->property("mode").toString());
         if (auto *checked = swatchGroup->checkedButton()) settings.setValue("Appearance/accent", checked->property("accent").toString());
+        settings.setValue("Appearance/customAccent", customSeed_.name());
+        for (int i = 0; i < 2; ++i) {
+            settings.beginGroup(i == 1 ? "Appearance/customDark" : "Appearance/customLight");
+            settings.remove("");
+            for (auto it = customOverrides_[i].cbegin(); it != customOverrides_[i].cend(); ++it) settings.setValue(it.key(), it.value().name());
+            settings.endGroup();
+        }
         settings.sync();
         applyEditor();
     };

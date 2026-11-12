@@ -1182,6 +1182,54 @@
             <translation>Ink Black</translation>
         </message>
         <message>
+            <source>选择主色自动生成配色。手动调整项会保留，点击“自动”可恢复。主色共用，浅色和深色的微调分别保存。</source>
+            <translation>Choose a base color to generate the palette. Manual changes are preserved; click “Auto” to reset a color. The base color is shared; light and dark adjustments are saved separately.</translation>
+        </message>
+        <message>
+            <source>浅色配色</source>
+            <translation>Light palette</translation>
+        </message>
+        <message>
+            <source>深色配色</source>
+            <translation>Dark palette</translation>
+        </message>
+        <message>
+            <source>调整模式</source>
+            <translation>Edit palette</translation>
+        </message>
+        <message>
+            <source>主色</source>
+            <translation>Base color</translation>
+        </message>
+        <message>
+            <source>背景色</source>
+            <translation>Background color</translation>
+        </message>
+        <message>
+            <source>文字色</source>
+            <translation>Text color</translation>
+        </message>
+        <message>
+            <source>焦点色</source>
+            <translation>Focus color</translation>
+        </message>
+        <message>
+            <source>强调色</source>
+            <translation>Accent color</translation>
+        </message>
+        <message>
+            <source>自动</source>
+            <translation>Auto</translation>
+        </message>
+        <message>
+            <source>恢复当前模式的自动配色</source>
+            <translation>Reset this palette to automatic colors</translation>
+        </message>
+        <message>
+            <source>选择主色</source>
+            <translation>Choose base color</translation>
+        </message>
+        <message>
             <location line="+2" />
             <source>编辑器设置</source>
             <translation>Editor Settings</translation>

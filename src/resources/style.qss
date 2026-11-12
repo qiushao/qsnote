@@ -20,13 +20,13 @@ QPushButton#encoding, QPushButton#lineEnding { border: none; border-radius: 4px;
 QPushButton { border: 1px solid @inputBorder; background: @surface; border-radius: 7px; padding: 6px 12px; font-size: 14px; }
 QPushButton:hover { background: @hover; border-color: @hoverBorder; }
 QPushButton:pressed { background: @accentWash; }
-QPushButton:focus { border-color: @accent; }
+QPushButton:focus { border-color: @focus; }
 QPushButton:disabled { color: @textDisabled; background: @disabledBg; border-color: @borderLight; }
 QPushButton[primary="true"] { background: @accent; border-color: @accent; color: @onAccent; }
 QPushButton[primary="true"]:hover { background: @accentStrong; border-color: @accentStrong; }
 QPushButton[primary="true"]:pressed { background: @accentPressed; border-color: @accentPressed; }
 QPushButton[primary="true"]:disabled { background: @border; border-color: @inputBorder; color: @textDim; }
-QPushButton[primary="true"]:focus { border-color: @text; }
+QPushButton[primary="true"]:focus { border-color: @focusStrong; }
 QDialogButtonBox QPushButton { min-width: 56px; }
 QPushButton[iconButton="true"] { border: 1px solid transparent; background: transparent; color: @textSecondary; padding: 5px; min-width: 18px; min-height: 18px; border-radius: 5px; }
 QPushButton[iconButton="true"]:hover { background: @accentWash; color: @textStrong; }
@@ -37,13 +37,13 @@ QPushButton[tool="true"], QPushButton[mode="true"] { border: 1px solid transpare
 QPushButton[tool="true"]:hover, QPushButton[mode="true"]:hover { background: @accentFaint; color: @accent; }
 QPushButton[mode="true"]:checked { background: @accentWash; color: @accent; }
 QPushButton[tool="true"]:disabled { background: transparent; color: @textFaint; }
-QPushButton[iconButton="true"]:focus, QPushButton[windowButton="true"]:focus, QPushButton[tool="true"]:focus, QPushButton[mode="true"]:focus { border-color: @accent; }
+QPushButton[iconButton="true"]:focus, QPushButton[windowButton="true"]:focus, QPushButton[tool="true"]:focus, QPushButton[mode="true"]:focus { border-color: @focus; }
 QLineEdit, QComboBox, QDateEdit, QSpinBox, QDoubleSpinBox { border: 1px solid @inputBorder; border-radius: 7px; background: @surface; padding: 6px 10px; font-size: 14px; selection-background-color: @accentSoft; selection-color: @text; }
 QLineEdit:hover, QComboBox:hover { border-color: @inputHoverBorder; }
-QLineEdit:focus, QComboBox:focus, QDateEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus { border-color: @accent; }
+QLineEdit:focus, QComboBox:focus, QDateEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus { border-color: @focus; }
 QLineEdit:disabled, QComboBox:disabled, QDateEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled { color: @textDisabled; background: @disabledBg; }
 QLineEdit#search { background: @panel; border-color: @borderLight; border-radius: 8px; padding: 7px 10px; }
-QLineEdit#search:focus { background: @surface; border-color: @accent; }
+QLineEdit#search:focus { background: @surface; border-color: @focus; }
 QComboBox, QDateEdit { padding-right: 28px; }
 QSpinBox, QDoubleSpinBox { padding-right: 28px; }
 QSpinBox::up-button, QDoubleSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right; width: 24px; border: none; border-left: 1px solid @border; border-top-right-radius: 7px; margin: 1px 1px 0 0; }
@@ -58,12 +58,12 @@ QWidget#notebookPicker { background: @panel; border: 1px solid transparent; bord
 QComboBox#notebooks { background: transparent; border: none; font-weight: 600; }
 QComboBox#groupBy, QComboBox#todoStatus { background: transparent; border-color: transparent; color: @textSecondary; padding-top: 6px; padding-bottom: 6px; }
 QComboBox#groupBy:hover, QComboBox#todoStatus:hover { background: @hoverSoft; }
-QComboBox#groupBy:focus, QComboBox#todoStatus:focus, QComboBox#notebooks:focus { border: 1px solid @accent; }
+QComboBox#groupBy:focus, QComboBox#todoStatus:focus, QComboBox#notebooks:focus { border: 1px solid @focus; }
 QTreeWidget { border: none; background: transparent; outline: none; font-size: 14px; }
 QTreeWidget::item { min-height: 36px; padding: 2px 9px; border: 1px solid transparent; border-radius: 6px; }
 QTreeWidget::item:hover { background: @hoverSoft; }
 QTreeWidget::item:selected { background: @accentMuted; color: @accentStrong; }
-QTreeWidget::item:focus { border-color: @accentBorder; }
+QTreeWidget::item:focus { border-color: @focusBorder; }
 QTreeWidget#noteTree::item, QTreeWidget#outline::item, QTreeWidget#findResults::item { min-height: 28px; padding: 1px 7px; border: none; border-radius: 0; }
 QTreeWidget#findResults::item { min-height: 24px; padding: 0 7px; }
 QTreeWidget::branch { background: transparent; }
@@ -124,14 +124,15 @@ QCheckBox { spacing: 7px; font-size: 14px; }
 QTreeWidget#todoList::item { min-height: 38px; border: none; border-radius: 0; }
 QCheckBox::indicator, QTreeWidget#todoList::indicator { width: 14px; height: 14px; border: 1px solid @checkBorder; border-radius: 4px; background: @surface; }
 QCheckBox::indicator:checked, QTreeWidget#todoList::indicator:checked { background: @accent; border-color: @accent; image: url(:/icons/check.svg); }
-QCheckBox::indicator:hover, QCheckBox::indicator:focus { border-color: @accent; }
+QCheckBox::indicator:hover { border-color: @accent; }
+QCheckBox::indicator:focus { border-color: @focus; }
 QCheckBox::indicator:disabled { background: @borderLight; border-color: @inputBorder; }
 QLineEdit#todoTitle { font-size: 16px; font-weight: 600; padding: 9px 10px; }
 QPlainTextEdit[codeInput="true"] { border: 1px solid @inputBorder; border-radius: 8px; background: @panelAlt; padding: 12px; selection-background-color: @accentSoft; selection-color: @text; }
-QPlainTextEdit[codeInput="true"]:focus { border-color: @accent; background: @surface; }
+QPlainTextEdit[codeInput="true"]:focus { border-color: @focus; background: @surface; }
 QListWidget#readerHeadingList { border: 1px solid @border; border-radius: 7px; background: @surface; padding: 4px; outline: none; }
 QListWidget#readerHeadingList::item { padding: 8px 10px; border-radius: 5px; }
 QListWidget#readerHeadingList::item:hover { background: @hover; }
 QListWidget#readerHeadingList::item:selected { background: @accentMuted; color: @accentStrong; }
 QPlainTextEdit#todoContent { border: 1px solid @inputBorder; border-radius: 8px; background: @surface; padding: 12px; selection-background-color: @accentSoft; }
-QPlainTextEdit#todoContent:focus { border-color: @accent; }
+QPlainTextEdit#todoContent:focus { border-color: @focus; }

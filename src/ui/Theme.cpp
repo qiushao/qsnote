@@ -3,6 +3,7 @@
 #include <QGuiApplication>
 #include <QHash>
 #include <QSettings>
+#include <cmath>
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
 #include <QStyleHints>
 #endif
@@ -48,6 +49,12 @@ QColor mix(const QColor &base, const QColor &tint, double t) {
                             base.blueF() + (tint.blueF() - base.blueF()) * f);
 }
 
+QColor contrastingText(const QColor &color) {
+    const auto linear = [](double value) { return value <= 0.04045 ? value / 12.92 : std::pow((value + 0.055) / 1.055, 2.4); };
+    const double luminance = 0.2126 * linear(color.redF()) + 0.7152 * linear(color.greenF()) + 0.0722 * linear(color.blueF());
+    return luminance > 0.179 ? QColor(Qt::black) : QColor(Qt::white);
+}
+
 }// namespace
 
 QString mode() {
@@ -68,20 +75,39 @@ bool isDark() {
 QStringList accentIds() {
     QStringList ids;
     for (const auto &def: kAccents) ids << QLatin1String(def.id);
+    ids << "custom";
     return ids;
 }
 
 QString accentId() {
-    return accentDef(QSettings().value("Appearance/accent", "sunset").toString()).id;
+    const QString id = QSettings().value("Appearance/accent", "sunset").toString();
+    return id == "custom" ? id : QString::fromLatin1(accentDef(id).id);
 }
 
 QColor accentColor(const QString &id, bool dark) {
+    if (id == "custom") return customOverrides(dark).value("accent", customSeed());
     const auto &def = accentDef(id);
     return {QLatin1String(dark ? def.dark : def.light)};
 }
 
 QColor accentColor() {
     return accentColor(accentId(), isDark());
+}
+
+QColor customSeed() {
+    const QColor seed(QSettings().value("Appearance/customAccent", "#d47b4a").toString());
+    return seed.isValid() ? seed : QColor("#d47b4a");
+}
+
+QHash<QString, QColor> customOverrides(bool dark) {
+    QSettings settings;
+    settings.beginGroup(dark ? "Appearance/customDark" : "Appearance/customLight");
+    QHash<QString, QColor> overrides;
+    for (const auto *key: {"window", "text", "focus", "accent"}) {
+        const QColor value(settings.value(key).toString());
+        if (value.isValid()) overrides.insert(key, value);
+    }
+    return overrides;
 }
 
 namespace {
@@ -102,9 +128,11 @@ double tintRatio(const QString &token, bool dark) {
 }
 
 // 当前主题的完整令牌表
-QHash<QString, QString> buildTokens(bool dark, const QString &id) {
+QHash<QString, QString> buildTokens(bool dark, const QString &id, const QColor &seed = {}, const QHash<QString, QColor> &overrides = {}) {
     const auto &accent = accentDef(id);
-    const QColor accentColor(QLatin1String(dark ? accent.dark : accent.light));
+    const auto custom = id == "custom" ? (seed.isValid() ? overrides : customOverrides(dark)) : QHash<QString, QColor>();
+    const QColor seedColor = id == "custom" ? (seed.isValid() ? seed : customSeed()) : Theme::accentColor(id, dark);
+    const QColor accentColor = custom.value("accent", seedColor);
 
     QHash<QString, QString> tokens;
     if (dark) {
@@ -177,8 +205,30 @@ QHash<QString, QString> buildTokens(bool dark, const QString &id) {
         // 背景、面板、边框等中性色混入少量种子色，整体氛围随主题色一起变化
         for (auto it = tokens.begin(); it != tokens.end(); ++it) {
             const double ratio = tintRatio(it.key(), dark);
-            if (ratio > 0) it.value() = mix(QColor(it.value()), accentColor, ratio).name();
+            if (ratio > 0) it.value() = mix(QColor(it.value()), seedColor, ratio).name();
         }
+    }
+
+    if (custom.contains("window")) {
+        const QColor background = custom.value("window");
+        const QColor foreground = contrastingText(background);
+        tokens["@window"] = background.name();
+        const QHash<QString, double> ratios = {
+                {"@surface", 0.02}, {"@panel", 0.05}, {"@panelAlt", 0.03}, {"@disabledBg", 0.04},
+                {"@border", 0.16}, {"@borderLight", 0.10}, {"@inputBorder", 0.20}, {"@cardBorder", 0.16},
+                {"@hover", 0.08}, {"@hoverBorder", 0.25}, {"@hoverSoft", 0.05}, {"@tabHover", 0.08},
+                {"@scrollbar", 0.20}, {"@scrollbarHover", 0.35}, {"@inputHoverBorder", 0.30}, {"@checkBorder", 0.30}};
+        for (auto it = ratios.cbegin(); it != ratios.cend(); ++it) tokens[it.key()] = mix(background, foreground, it.value()).name();
+    }
+    if (custom.contains("window") || custom.contains("text")) {
+        const QColor background(tokens.value("@window"));
+        const QColor foreground = custom.value("text", contrastingText(background));
+        tokens["@text"] = foreground.name();
+        tokens["@textStrong"] = foreground.name();
+        tokens["@textSecondary"] = mix(foreground, background, 0.20).name();
+        tokens["@textDim"] = mix(foreground, background, 0.35).name();
+        tokens["@textDisabled"] = mix(foreground, background, 0.60).name();
+        tokens["@textFaint"] = mix(foreground, background, 0.75).name();
     }
 
     tokens["@accent"] = accentColor.name();
@@ -195,11 +245,21 @@ QHash<QString, QString> buildTokens(bool dark, const QString &id) {
     tokens["@accentBorder"] = mix(surface, accentColor, dark ? 0.55 : 0.45).name();
     tokens["@onAccent"] = dark ? QString("#0f1114") : accent.onLight ? QString(QLatin1String(accent.onLight))
                                                                      : QString("#ffffff");
+    if (id == "custom") {
+        tokens["@onAccent"] = contrastingText(accentColor).name();
+    }
+    tokens["@focus"] = custom.value("focus", accentColor).name();
+    tokens["@focusBorder"] = custom.value("focus", QColor(tokens.value("@accentBorder"))).name();
+    tokens["@focusStrong"] = custom.value("focus", QColor(tokens.value("@text"))).name();
 
     return tokens;
 }
 
 }// namespace
+
+QColor customColor(const QString &token, const QColor &seed, const QHash<QString, QColor> &overrides, bool dark) {
+    return {buildTokens(dark, "custom", seed, overrides).value("@" + token)};
+}
 
 QColor color(const QString &token) {
     return color(token, accentId(), isDark());

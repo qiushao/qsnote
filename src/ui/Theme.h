@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QColor>
+#include <QHash>
 #include <QString>
 #include <QStringList>
 
@@ -17,6 +18,9 @@ QStringList accentIds();
 QString accentId();
 QColor accentColor(const QString &id, bool dark);
 QColor accentColor();
+QColor customSeed();
+QHash<QString, QColor> customOverrides(bool dark);
+QColor customColor(const QString &token, const QColor &seed, const QHash<QString, QColor> &overrides, bool dark);
 // 当前主题的令牌色值，token 为不含 @ 的令牌名，如 "window"、"accentSoft"
 QColor color(const QString &token);
 QColor color(const QString &token, const QString &id, bool dark);

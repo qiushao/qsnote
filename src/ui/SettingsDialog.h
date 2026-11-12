@@ -1,6 +1,9 @@
 #pragma once
 
 #include "OverlayDialog.h"
+#include <QColor>
+#include <QHash>
+#include <array>
 #include <functional>
 
 class QLabel;
@@ -16,5 +19,7 @@ signals:
     void updateCheckRequested(QLabel *status);
 
 private:
+    QColor customSeed_;
+    std::array<QHash<QString, QColor>, 2> customOverrides_;
     std::function<void()> apply_;
 };
