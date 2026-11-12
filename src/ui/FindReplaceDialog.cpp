@@ -8,6 +8,7 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSettings>
 #include <QShortcut>
 #include <QTabBar>
 #include <QTextBlock>
@@ -112,6 +113,8 @@ FindReplaceDialog::FindReplaceDialog(QWidget *editor, QTextDocument *document, s
             connect(shortcut, &QShortcut::activated, this, [this, backward] { find(backward); });
         }
     }
+    const auto history = QSettings().value("search/history").toStringList();
+    for (const auto &entry : history) query_->addItem(entry);
     editor_->installEventFilter(this);
 }
 
@@ -157,6 +160,14 @@ void FindReplaceDialog::remember(QComboBox *field) {
     if (!text.isEmpty() && field->findText(text) < 0) field->addItem(text);
 }
 
+void FindReplaceDialog::saveHistory() {
+    QStringList history;
+    history.reserve(query_->count());
+    for (int index = 0; index < query_->count(); ++index) history.append(query_->itemText(index));
+    while (history.size() > 100) history.removeLast();
+    QSettings().setValue("search/history", history);
+}
+
 void FindReplaceDialog::invalidate() {
     matches_.clear();
     status_->clear();
@@ -176,6 +187,7 @@ bool FindReplaceDialog::collect() {
         return false;
     }
     remember(query_);
+    saveHistory();
     const auto text = document_->toPlainText();
     const int start = selectionOnly_->isChecked() ? scope_.selectionStart() : 0;
     const auto end = selectionOnly_->isChecked() ? scope_.selectionEnd() : text.size();

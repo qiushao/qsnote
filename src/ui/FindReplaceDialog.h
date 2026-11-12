@@ -32,6 +32,7 @@ private:
     void showMatches();
     void selectMatch(int index);
     static void remember(QComboBox *field);
+    void saveHistory();
     void invalidate();
 
     QWidget *editor_;
