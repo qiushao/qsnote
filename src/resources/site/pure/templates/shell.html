@@ -107,7 +107,7 @@
 {{^view.about}}{{#postCount}}{{>recentWidget}}{{/postCount}}{{/view.about}}
 </div>
 </aside>
-{{#postToc}}<aside class="sidebar sidebar-toc collapse in" id="collapseToc" itemscope itemtype="http://schema.org/WPSideBar"><div class="slimContent"><nav id="toc" class="article-toc"><h3 class="toc-title">Catalogue</h3><ol class="toc">{{{postToc}}}</ol></nav></div></aside>{{/postToc}}<main id="main" class="main" role="main">{{{content}}}</main>
+{{#postToc}}<aside class="sidebar sidebar-toc collapse in" id="collapseToc" itemscope itemtype="http://schema.org/WPSideBar"><div class="slimContent"><nav id="toc" class="article-toc"><h3 class="toc-title">Catalogue</h3><ol class="toc">{{{postToc}}}</ol></nav></div></aside>{{/postToc}}<main id="main" class="main{{#view.post}} has-bottom-bar{{/view.post}}{{#pagination}} has-bottom-bar{{/pagination}}" role="main">{{{content}}}</main>
 <footer class="footer" itemscope="" itemtype="http://schema.org/WPFooter">
 <ul class="social-links">
 {{#githubSocial}}<li><a href="{{githubSocial}}" target="_blank" rel="noopener noreferrer" title="GitHub" aria-label="GitHub"><i class="icon icon-github"></i></a></li>{{/githubSocial}}

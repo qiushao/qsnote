@@ -1,3 +1,26 @@
+#main.has-bottom-bar {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  padding-bottom: 0;
+}
+
+#main.has-bottom-bar > .content {
+  flex: 1 0 auto;
+  min-height: 0;
+}
+
+#main > .bar-footer {
+  bottom: 0;
+  flex-shrink: 0;
+}
+
+@media (max-width: 767px) {
+  #main.has-bottom-bar {
+    min-height: calc(100vh - 53px);
+  }
+}
+
 .article-toc .toc-link.active {
   color: #6f5499;
   font-weight: bold;
@@ -152,7 +175,7 @@ html[data-theme="dark"] {
   border-color: var(--pure-border);
 }
 
-[data-theme="dark"] .main :is(.article-archives, .article-categories) .panel {
+[data-theme="dark"] .main :is(.article-archives, .article-categories, .article-tags) .panel {
   background: var(--pure-bg);
 }
 
