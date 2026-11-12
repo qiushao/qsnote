@@ -1,3 +1,51 @@
+/* Keep the left and main columns stable; the right sidebar absorbs the scrollbar. */
+@media (min-width: 768px) {
+  body.main-center {
+    --pure-left-width: 4.16667vw;
+    --pure-main-width: 62.5vw;
+  }
+
+  body.main-center .header,
+  body.main-center .footer {
+    width: var(--pure-left-width);
+  }
+
+  body.main-center .main {
+    margin-left: var(--pure-left-width);
+    width: var(--pure-main-width);
+  }
+
+  body.main-center .sidebar {
+    left: calc(var(--pure-left-width) + var(--pure-main-width));
+    right: 0;
+    width: auto;
+  }
+
+  body.no-sidebar.main-center .main {
+    margin-left: var(--pure-left-width);
+    width: calc(100% - var(--pure-left-width));
+  }
+}
+
+@media (min-width: 992px) {
+  body.main-center {
+    --pure-left-width: 16.66667vw;
+    --pure-main-width: 58.33333vw;
+  }
+}
+
+@media (min-width: 1200px) {
+  body.main-center {
+    --pure-main-width: 60.33333vw;
+  }
+}
+
+@media (min-width: 1440px) {
+  body.main-center {
+    --pure-main-width: 62.33333vw;
+  }
+}
+
 #main.has-bottom-bar {
   display: flex;
   flex-direction: column;
