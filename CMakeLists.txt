@@ -1,7 +1,28 @@
 cmake_minimum_required(VERSION 3.18)
 project(qsnote VERSION 1.0.0 LANGUAGES C CXX)
 
-set(APP_VERSION "${PROJECT_VERSION}" CACHE STRING "Application version")
+set(APP_VERSION "" CACHE STRING "Application version (empty to detect from Git)")
+if (NOT APP_VERSION)
+    find_package(Git QUIET)
+    if (GIT_FOUND)
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" describe --tags --abbrev=0
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            OUTPUT_VARIABLE APP_VERSION
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+            RESULT_VARIABLE GIT_VERSION_RESULT
+        )
+        if (GIT_VERSION_RESULT EQUAL 0)
+            string(REGEX REPLACE "^[vV]" "" APP_VERSION "${APP_VERSION}")
+        else ()
+            set(APP_VERSION "")
+        endif ()
+    endif ()
+    if (NOT APP_VERSION)
+        set(APP_VERSION "${PROJECT_VERSION}")
+    endif ()
+endif ()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
