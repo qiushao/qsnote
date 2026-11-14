@@ -485,8 +485,8 @@
         </message>
         <message>
             <location line="-1331" />
-            <source>搜索当前笔记本 (Ctrl+Shift+F)</source>
-            <translation>Search this notebook (Ctrl+Shift+F)</translation>
+            <source>搜索当前笔记本</source>
+            <translation>Search this notebook</translation>
         </message>
         <message>
             <location line="+1" />
@@ -1283,22 +1283,22 @@
         </message>
         <message>
             <location line="+3" />
-            <source>普通笔记本（目录 + 元数据文件）</source>
+            <source>普通笔记本</source>
             <translation>Notebook (directory + metadata file)</translation>
         </message>
         <message>
             <location line="+1" />
-            <source>静态站点（Pure）</source>
+            <source>静态站点</source>
             <translation>Static Site (Pure)</translation>
         </message>
         <message>
             <location line="+1" />
-            <source>电子书（章节目录 · 多格式导出）</source>
+            <source>电子书</source>
             <translation>Ebook (chapters · multiple export formats)</translation>
         </message>
         <message>
             <location line="+1" />
-            <source>Todo List（分类 · 待办事项）</source>
+            <source>Todo List</source>
             <translation>Todo List (categories · tasks)</translation>
         </message>
         <message>

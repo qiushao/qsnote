@@ -374,7 +374,7 @@ void MainWindow::buildUi() {
     headerLeftLayout->addStretch(1);
     search_ = new QLineEdit(header);
     search_->setObjectName("search");
-    search_->setPlaceholderText(tr("搜索当前笔记本 (Ctrl+Shift+F)"));
+    search_->setPlaceholderText(tr("搜索当前笔记本"));
     search_->setAccessibleName(tr("搜索当前笔记本"));
     search_->setMinimumWidth(320);
     search_->setMaximumWidth(520);
@@ -1184,10 +1184,10 @@ void MainWindow::createNotebook() {
     name->setPlaceholderText(tr("笔记本名称"));
     auto *type = new QComboBox(&dialog);
     type->setObjectName("notebookType");
-    type->addItem(tr("普通笔记本（目录 + 元数据文件）"), "normal");
-    type->addItem(tr("静态站点（Pure）"), "site");
-    type->addItem(tr("电子书（章节目录 · 多格式导出）"), "ebook");
-    type->addItem(tr("Todo List（分类 · 待办事项）"), "todo");
+    type->addItem(tr("普通笔记本"), "normal");
+    type->addItem(tr("静态站点"), "site");
+    type->addItem(tr("电子书"), "ebook");
+    type->addItem(tr("Todo List"), "todo");
     QString locationRoot = NotebookStore::defaultRoot();
     auto *location = new QLineEdit(&dialog);
     location->setObjectName("notebookLocation");
