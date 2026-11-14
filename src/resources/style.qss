@@ -53,6 +53,7 @@ QSpinBox::up-arrow, QDoubleSpinBox::up-arrow { image: url(:/icons/up.svg); width
 QSpinBox::down-arrow, QDoubleSpinBox::down-arrow { image: url(:/icons/caret.svg); width: 8px; height: 6px; }
 QComboBox::drop-down, QDateEdit::drop-down { border: none; width: 24px; }
 QComboBox::down-arrow, QDateEdit::down-arrow { image: url(:/icons/caret.svg); width: 8px; height: 6px; }
+QComboBox { combobox-popup: 0; }
 QComboBox QAbstractItemView { background: @surface; border: 1px solid @inputBorder; selection-background-color: @accentSoft; selection-color: @accent; padding: 5px; outline: none; }
 QWidget#notebookPicker { background: @panel; border: 1px solid transparent; border-radius: 8px; }
 QComboBox#notebooks { background: transparent; border: none; font-weight: 600; }
