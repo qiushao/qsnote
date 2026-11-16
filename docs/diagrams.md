@@ -296,3 +296,49 @@ cos(x) # 余弦
 解析回归检查：在仓库根目录执行 `node tests/plot.test.cjs`。
 
 滚轮交互回归检查：用浏览器打开 `tests/plot-interaction.html`，页面应显示 PASS。
+
+## Python / matplotlib 绘图（pyplot）
+
+`pyplot` 代码块执行真实 Python，适合 NumPy 数据分析和 matplotlib 图表。普通 `python` 代码块仍然只显示源码。也可从“更多 Markdown 语法”插入 Python 绘图示例。
+
+### 环境和全局开关
+
+在“设置 → Python 绘图”选择 Python 3 解释器；留空时从系统 PATH 查找 `python3`，再查找 `python`。虚拟环境应选择其中的 `bin/python`（Windows 为 `Scripts/python.exe`）。显式指定的路径无效时会报错，不切换到其他环境。
+
+点击“检查 Python 环境”检查版本及 matplotlib、NumPy。缺少依赖时，使用检查结果中的命令安装，例如：
+
+```sh
+"/path/to/venv/bin/python" -m pip install matplotlib numpy
+```
+
+应用不会自动安装依赖。Windows 命令提示符可使用同样的带引号形式；PowerShell 需要在带引号的解释器路径前加 `&`。
+
+在“设置 → Python 绘图”中勾选“启用 Python 绘图”即可全局启用，默认关闭，无需逐笔记本授权或风险确认。开关仅保存在本机，立即生效，不受设置页“取消”影响。关闭会停止正在运行的绘图并清空预览结果。未启用时保留源码，导出会明确提示先启用。不属于已登记笔记本的外部 Markdown 文件仍不执行 Python。
+
+代码块禁止直接导入 `os`、`sys`、`posix`、`nt`、`subprocess`、`ctypes` 和 `multiprocessing`，包括 `from ... import ...` 和直接调用 `__import__()`。matplotlib、NumPy 等库自身的内部导入不受影响，可继续读取相对路径下的 CSV。这只是直接导入限制，不是 Python 沙箱。
+
+### 示例与执行规则
+
+````markdown
+```pyplot
+import numpy as np
+import matplotlib.pyplot as plt
+
+x = np.linspace(0, 2 * np.pi, 200)
+fig, axes = plt.subplots(1, 2, figsize=(8, 3))
+axes[0].plot(x, np.sin(x))
+axes[1].plot(x, np.cos(x))
+fig.tight_layout()
+plt.show()
+```
+````
+
+每块在新进程中独立运行，变量不能跨块共享，依赖需自行导入。显示最后创建且未关闭的 figure；该 figure 可以包含多个子图。`plt.show()` 不阻塞、不关闭图片，也可以省略。如果没有未关闭的 figure，会显示错误。
+
+工作目录为当前笔记所在目录，预览和导出一致，因此可用 `np.loadtxt('data.csv', delimiter=',')` 读取旁边的数据文件。Python 异常包含类型和代码块内行号；单块最多运行 30 秒。编辑器内嵌预览失败时保留源码，并在工作区状态栏显示原因；独立预览会在源码旁显示原因。
+
+使用 Agg 后端生成静态 PNG，默认 figure DPI 为 150，可用 `plt.figure(dpi=...)` 或 matplotlib 配置覆盖。字体使用本机 matplotlib 配置；中文需要在 Python 环境中配置合适的字体。预览不提供交互工具栏或动画。
+
+预览仅缓存本次会话中的结果。修改外部 CSV 等数据文件后，点击“设置 → Python 绘图”中的“重新绘图”；它会清空会话绘图缓存并刷新两种预览。缩放窗口复用已有图片。HTML、PDF、EPUB、CHM 和静态站点导出会重新运行代码并打包 PNG，阅读端不需要 Python；绘图失败会终止导出，并报告笔记和代码块行号。CHM 仍需 Windows CHM 编译器。
+
+开发验证：`python3 -m unittest discover -s tests -p test_pyplot.py`；进程和正文导出集成测试使用 `cmake -S tests -B build/pyplot-tests`、`cmake --build build/pyplot-tests` 和 `ctest --test-dir build/pyplot-tests --output-on-failure`。测试需要 Python 3、matplotlib、NumPy、PlantUML、Graphviz 及 Qt 6 Test/WebEngine 开发组件。

@@ -121,6 +121,7 @@
         const bridge = channel.objects.inplaceBridge;
         bridge.highlightRequested.connect((index, timeStamp, text) => {
             const match = /^(`{3,}|~{3,})[^\S\n]*(\S+)?[^\n]*\n([\s\S]*)\n\1\s*$/.exec(text);
+            if (match && match[2]?.toLowerCase() === 'pyplot') match[2] = 'python';
             let html = '';
             if (match && match[2] && Prism.languages[match[2]]) {
                 const container = document.createElement('div');

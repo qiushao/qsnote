@@ -611,3 +611,7 @@ QMenu *MarkdownEditor::createEditorMenu(QWidget *parent) {
     menu->addAction(tr("编辑器设置…"), this, &MarkdownEditor::showSettings);
     return menu;
 }
+
+void MarkdownEditor::setPyplotContext(const QString &root, const QString &directory) {
+    inplacePreview_->setPyplotContext(root, directory);
+}

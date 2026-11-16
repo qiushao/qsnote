@@ -1,4 +1,8 @@
 #include "SettingsDialog.h"
+#include "core/PyplotRenderer.h"
+#include <QFileDialog>
+#include <QLineEdit>
+#include <QTimer>
 #include "FlowLayout.h"
 #include "MarkdownEditor.h"
 #include "Theme.h"
@@ -349,6 +353,62 @@ SettingsDialog::SettingsDialog(MarkdownEditor *editor, QWidget *parent) : Overla
     editorCard->addWidget(label(QCoreApplication::translate("MainWindow", "应用于所有笔记。"), body, true));
     editorCard->addWidget(settingsEditor->createSettingsPage(body, applyEditor));
 
+    auto *python = section("pyplotSettingsCard", tr("Python 绘图"));
+    auto *enablePython = new QCheckBox(tr("启用 Python 绘图"), body);
+    enablePython->setObjectName("enablePyplot");
+    enablePython->setChecked(PyplotEnvironment::enabled());
+    python->addWidget(enablePython);
+    connect(enablePython, &QCheckBox::toggled, this, [](bool enabled) { PyplotEnvironment::instance().setEnabled(enabled); });
+    auto *redrawPython = button(tr("重新绘图"), "refreshPyplot", body);
+    redrawPython->setEnabled(PyplotEnvironment::enabled());
+    python->addWidget(redrawPython, 0, Qt::AlignLeft);
+    connect(redrawPython, &QPushButton::clicked, this, [] { PyplotEnvironment::instance().refresh(); });
+    connect(&PyplotEnvironment::instance(), &PyplotEnvironment::changed, this, [enablePython, redrawPython] {
+        enablePython->setChecked(PyplotEnvironment::enabled());
+        redrawPython->setEnabled(PyplotEnvironment::enabled());
+    });
+    auto *pythonPath = new QLineEdit(settings.value("pyplot/interpreter").toString(), body);
+    pythonPath->setPlaceholderText(tr("留空自动查找 Python 3，可选择虚拟环境中的解释器"));
+    python->addWidget(label(tr("Python 解释器路径"), body));
+    python->addWidget(pythonPath);
+    auto *browsePython = button(tr("选择解释器…"), "browsePython", body);
+    python->addWidget(browsePython, 0, Qt::AlignLeft);
+    connect(browsePython, &QPushButton::clicked, this, [this, pythonPath] {
+        const auto path = QFileDialog::getOpenFileName(this, tr("选择 Python 解释器"), pythonPath->text());
+        if (!path.isEmpty()) pythonPath->setText(path);
+    });
+    auto *checkPython = button(tr("检查 Python 环境"), "checkPython", body);
+    python->addWidget(checkPython, 0, Qt::AlignLeft);
+    auto *pythonStatus = label({}, body, true);
+    pythonStatus->setTextFormat(Qt::PlainText);
+    pythonStatus->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    python->addWidget(pythonStatus);
+    connect(checkPython, &QPushButton::clicked, this, [this, pythonPath, pythonStatus, checkPython] {
+        const auto executable = PyplotEnvironment::interpreter(pythonPath->text().trimmed());
+        if (executable.isEmpty()) { pythonStatus->setText(tr("未找到 Python 3，请选择解释器。")); return; }
+        auto *process = new QProcess(this);
+        auto *timeout = new QTimer(process);
+        timeout->setSingleShot(true);
+        connect(timeout, &QTimer::timeout, process, &QProcess::kill);
+        connect(this, &QDialog::finished, process, [process] { process->kill(); });
+        const auto complete = [this, process, pythonStatus, checkPython, executable](const QString &error) {
+            pythonStatus->setText(error.isEmpty() ? QString::fromUtf8(process->readAllStandardOutput()) :
+                error + '\n' + QString::fromUtf8(process->readAllStandardError()) + '\n' + tr("安装依赖（在终端运行）：") +
+                "\n\"" + executable + "\" -m pip install matplotlib numpy");
+            checkPython->setEnabled(true);
+            process->deleteLater();
+        };
+        connect(process, &QProcess::errorOccurred, this, [complete, process](QProcess::ProcessError error) {
+            if (error == QProcess::FailedToStart) complete(process->errorString());
+        });
+        connect(process, &QProcess::finished, this, [this, complete](int code, QProcess::ExitStatus status) {
+            complete(code == 0 && status == QProcess::NormalExit ? QString() : tr("Python 环境检查失败。需要 Python 3、matplotlib 和 NumPy。"));
+        });
+        checkPython->setEnabled(false);
+        pythonStatus->setText(tr("正在检查…"));
+        timeout->start(15000);
+        process->start(executable, {"-c", "import sys; assert sys.version_info.major == 3; import matplotlib, numpy; print(sys.executable); print(sys.version); print('matplotlib ' + matplotlib.__version__); print('NumPy ' + numpy.__version__)"});
+    });
     auto *about = section("aboutSettingsCard", QCoreApplication::translate("MainWindow", "关于"));
     about->addWidget(label("qsnote", body));
     about->addWidget(label(QCoreApplication::translate("MainWindow", "版本 %1").arg(QCoreApplication::applicationVersion()), body, true));
@@ -383,7 +443,7 @@ SettingsDialog::SettingsDialog(MarkdownEditor *editor, QWidget *parent) : Overla
     connect(close, &QPushButton::clicked, this, &QDialog::reject);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    apply_ = [this, language, font, fontSize, tray, updates, modeGroup, swatchGroup, applyEditor] {
+    apply_ = [this, language, font, fontSize, tray, updates, modeGroup, swatchGroup, applyEditor, pythonPath] {
         QSettings settings;
         settings.setValue("General/language", language->currentData());
         settings.setValue("General/uiFontFamily", font->currentFont().family());
@@ -400,6 +460,7 @@ SettingsDialog::SettingsDialog(MarkdownEditor *editor, QWidget *parent) : Overla
             settings.endGroup();
         }
         settings.sync();
+        PyplotEnvironment::instance().setInterpreter(pythonPath->text().trimmed());
         applyEditor();
     };
 }

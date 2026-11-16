@@ -4,12 +4,14 @@
 #include <QCache>
 #include <QHash>
 #include <QObject>
+#include <QPointer>
 #include <QTimer>
 #include <QVariantMap>
 #include <vtextedit/preview.h>
 #include <vtextedit/previewmgr.h>
 
 class MarkdownEditor;
+class PyplotRenderer;
 class QWebEnginePage;
 
 class InplacePreview : public QObject {
@@ -17,6 +19,7 @@ class InplacePreview : public QObject {
 public:
     explicit InplacePreview(MarkdownEditor *editor);
     void refresh();
+    void setPyplotContext(const QString &root, const QString &directory);
 
 public slots:
     void ready(const QVariantMap &styles);
@@ -52,6 +55,9 @@ private:
     void attach(int index, const Image &image);
     void ensurePage();
 
+    QString notebookRoot_;
+    QString directory_;
+    QPointer<PyplotRenderer> pyplot_;
     MarkdownEditor *editor_;
     QWebEnginePage *page_ = nullptr;
     QTimer renderTimer_;

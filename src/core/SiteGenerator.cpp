@@ -280,7 +280,7 @@ private:
     [[nodiscard]] QString href(const QString &route) const { return urlPath(root_ + route); }
     bool render(SitePage &page) {
         QDomDocument document;
-        if (!renderer_.render(page.body, QDir(book_.path).relativeFilePath(page.source), document, error_)) {
+        if (!renderer_.render(page.body, QDir(book_.path).relativeFilePath(page.source), QFileInfo(page.source).absolutePath(), document, error_)) {
             *error_ = page.title + "：" + *error_;
             return false;
         }

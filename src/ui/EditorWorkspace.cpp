@@ -270,7 +270,7 @@ EditorWorkspace::EditorWorkspace(NotebookStore &store, std::function<bool()> sav
     previewTimer_->setSingleShot(true);
     previewTimer_->setInterval(180);
     connect(previewTimer_, &QTimer::timeout, this, [this] {
-        if (const auto *note = documentNote(currentNoteId()); note && note->kind == Note::Kind::Markdown) preview_->setMarkdown(note->content, note->id, noteDirectory(note->id));
+        if (const auto *note = documentNote(currentNoteId()); note && note->kind == Note::Kind::Markdown) preview_->setMarkdown(note->content, note->id, noteDirectory(note->id), pyplotRoot(note->id));
     });
     connect(preview_, &MarkdownPreview::sourceLineChanged, this, [this](int line) {
         if (!editor_ || !preview_->matchesDocument(editor_->toPlainText(), currentNoteId())) return;
@@ -520,6 +520,7 @@ height: 300
 sin(x) # sin(x)
 cos(x) # cos(x))plot",
              "plot"},
+            {tr("Python 绘图（pyplot）"), "import numpy as np\nimport matplotlib.pyplot as plt\n\nx = np.linspace(0, 2 * np.pi, 200)\nplt.plot(x, np.sin(x), label='sin(x)')\nplt.legend()\nplt.grid(True)\nplt.show()", "pyplot"},
             {QCoreApplication::translate("MainWindow", "函数绘图（function-plot）"), R"plot({
   grid: true,
   xAxis: { label: 'x', domain: [-6, 6] },
@@ -821,10 +822,12 @@ void EditorWorkspace::deactivateEditor() {
         auto &previous = editorSessions_[activeEditorId_];
         previous.verticalScroll = editor_->verticalScrollBar()->value();
         previous.horizontalScroll = editor_->horizontalScrollBar()->value();
+        markdownEditor_->setPyplotContext({}, {});
         markdownEditor_->setObjectName("inactiveMarkdownEditor");
         editor_->setObjectName("inactiveEditor");
     }
     previewTimer_->stop();
+    preview_->cancelPyplot();
     activeEditorId_.clear();
     markdownEditor_ = nullptr;
     editor_ = nullptr;
@@ -909,6 +912,9 @@ void EditorWorkspace::activateEditor(const QString &id) {
                     }
                     if (activeEditorId_ == id) refreshOutline();
                 });
+        connect(documentEditor, &MarkdownEditor::pyplotError, this, [this, id](const QString &error) {
+            if (activeEditorId_ == id) showStatus(error);
+        });
         documentEditor->setBasePath(noteDirectory(id));
         documentEditor->setText(documentNote(id)->content);
         connect(textEdit, &QTextEdit::textChanged, this, [this, id, textEdit] {
@@ -923,6 +929,7 @@ void EditorWorkspace::activateEditor(const QString &id) {
             }
             if (activeEditorId_ == id) {
                 updateStatus();
+                preview_->cancelPyplot();
                 if (viewMode_ != ViewMode::Edit) previewTimer_->start();
             }
             emit saveRequested();
@@ -938,6 +945,7 @@ void EditorWorkspace::activateEditor(const QString &id) {
     auto &session = editorSessions_[id];
     activeEditorId_ = id;
     markdownEditor_ = session.editor;
+    markdownEditor_->setPyplotContext(pyplotRoot(id), noteDirectory(id));
     editor_ = markdownEditor_->getTextEdit();
     undo_->setEnabled(editor_->document()->isUndoAvailable());
     redo_->setEnabled(editor_->document()->isRedoAvailable());
@@ -1026,7 +1034,7 @@ void EditorWorkspace::setViewMode(ViewMode mode) {
     editorSessions_[activeEditorId_].mode = mode;
     preview_->setVisible(mode != ViewMode::Edit);
     pages_->setCurrentIndex(1);
-    if (mode != ViewMode::Edit) preview_->setMarkdown(note->content, note->id, noteDirectory(note->id));
+    if (mode != ViewMode::Edit) preview_->setMarkdown(note->content, note->id, noteDirectory(note->id), pyplotRoot(note->id));
     else
         previewTimer_->stop();
     if (mode == ViewMode::Split && oldMode != ViewMode::Split) {
@@ -1386,12 +1394,13 @@ bool EditorWorkspace::saveExternalFilesAndSync() {
             cursor.setPosition(qMin(position, end), QTextCursor::KeepAnchor);
             it->editor->getTextEdit()->setTextCursor(cursor);
         }
+        if (it.key() == activeEditorId_) it->editor->setPyplotContext(pyplotRoot(it.key()), directory);
         if (it->editor->getBasePath() == directory) continue;
         it->editor->setBasePath(directory);
         it->editor->getPreviewMgr()->refreshPreview();
     }
     if (viewMode_ != ViewMode::Edit) {
-        if (const auto *note = documentNote(currentNoteId()); note && note->kind == Note::Kind::Markdown) preview_->setMarkdown(note->content, note->id, noteDirectory(note->id));
+        if (const auto *note = documentNote(currentNoteId()); note && note->kind == Note::Kind::Markdown) preview_->setMarkdown(note->content, note->id, noteDirectory(note->id), pyplotRoot(note->id));
     }
     for (int index = 0; index < tabs_->count(); ++index) {
         if (const auto *note = documentNote(tabs_->tabData(index).toString())) {
@@ -1550,4 +1559,9 @@ void EditorWorkspace::reloadSettings() {
 
 void EditorWorkspace::showStatus(const QString &text) {
     status_->setText(text);
+}
+
+QString EditorWorkspace::pyplotRoot(const QString &id) const {
+    const auto *owner = store_.owner(id);
+    return owner ? owner->path : QString();
 }

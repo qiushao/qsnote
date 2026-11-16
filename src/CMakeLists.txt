@@ -73,6 +73,8 @@ add_executable(qsnote WIN32 MACOSX_BUNDLE
         core/MathStylesheet.h
         core/EbookExporter.cpp
         core/EbookExporter.h
+        core/PyplotRenderer.cpp
+        core/PyplotRenderer.h
         core/PlantUmlRenderer.cpp
         core/PlantUmlRenderer.h
         core/DiagramRuntime.cpp

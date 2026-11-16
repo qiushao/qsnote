@@ -355,7 +355,7 @@ QString EbookExporter::exportBook(const Notebook &book, const QString &noteId, F
         const auto source = QDir(book.path).absoluteFilePath(note.path.isEmpty() ? "document.md" : note.path);
         const auto base = QUrl::fromLocalFile(source);
         QDomDocument document;
-        if (!renderer.render(note.folder ? QString() : note.content, note.id, document, error)) {
+        if (!renderer.render(note.folder ? QString() : note.content, note.id, QFileInfo(source).absolutePath(), document, error)) {
             *error = QCoreApplication::translate("EbookExporter", "无法渲染章节（%1）：%2").arg(note.title, *error);
             return {};
         }

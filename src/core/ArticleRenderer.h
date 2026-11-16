@@ -13,7 +13,7 @@ public:
     // foreground 为导出正文的前景色，用于栅格化的公式；同一条笔记按不同前景色分别缓存。
     ArticleRenderer(const QString &notebookPath, const QString &cacheGroup, QString foreground = {});
     ~ArticleRenderer();
-    bool render(const QString &markdown, const QString &documentId, QDomDocument &document, QString *error);
+    bool render(const QString &markdown, const QString &documentId, const QString &directory, QDomDocument &document, QString *error);
     void removeCache(const QString &documentId);
     void clearCache();
     static QString stylesheet();
@@ -22,8 +22,9 @@ public:
 
 private:
     [[nodiscard]] QString cachePath(const QString &documentId) const;
-    bool renderUncached(const QString &markdown, QDomDocument &document, QString *error);
+    bool renderUncached(const QString &markdown, const QString &directory, QDomDocument &document, QString *error, bool &cacheable);
     QFile logFile_;
+    QString notebookRoot_;
     QString cacheDirectory_;
     QString foreground_;
     std::unique_ptr<QWebEnginePage> browser_;

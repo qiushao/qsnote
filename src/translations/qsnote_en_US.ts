@@ -67,6 +67,10 @@
             <source>第 %1 行</source>
             <translation>Line %1</translation>
         </message>
+        <message>
+            <source>Python 绘图（pyplot）</source>
+            <translation>Python plot (pyplot)</translation>
+        </message>
     </context>
     <context>
         <name>SourceOutline</name>
@@ -153,6 +157,10 @@
             <location line="+3" />
             <source>无法读取正文渲染结果。</source>
             <translation>Unable to read the rendered article.</translation>
+        </message>
+        <message>
+            <source>pyplot 代码块（行 %1）：%2</source>
+            <translation>pyplot code block (line %1): %2</translation>
         </message>
     </context>
     <context>
@@ -3591,6 +3599,102 @@ Waiting for transfer to finish; byte progress is unavailable with SCP.</translat
         <message>
             <source>（原文已修改或关闭，请重新查找）</source>
             <translation> (Document changed or closed; search again)</translation>
+        </message>
+    </context>
+    <context>
+        <name>PyplotEnvironment</name>
+        <message>
+            <source>Python 绘图仅支持已登记笔记本内的笔记。</source>
+            <translation>Python plots are only supported for notes inside registered notebooks.</translation>
+        </message>
+        <message>
+            <source>请先在“设置 → Python 绘图”中启用 Python 绘图。</source>
+            <translation>Enable Python plots in Settings → Python plots first.</translation>
+        </message>
+    </context>
+    <context>
+        <name>PyplotRenderer</name>
+        <message>
+            <source>Python 绘图超时（30 秒）。</source>
+            <translation>Python plot timed out (30 seconds).</translation>
+        </message>
+        <message>
+            <source>无法启动 Python：</source>
+            <translation>Unable to start Python: </translation>
+        </message>
+        <message>
+            <source>Python 绘图失败：未生成有效 PNG。</source>
+            <translation>Python plot failed: no valid PNG was generated.</translation>
+        </message>
+        <message>
+            <source>Python 绘图已取消。</source>
+            <translation>Python plot cancelled.</translation>
+        </message>
+        <message>
+            <source>未找到 Python 3，请在设置中选择解释器。</source>
+            <translation>Python 3 was not found. Select an interpreter in Settings.</translation>
+        </message>
+        <message>
+            <source>无法创建 Python 绘图运行环境。</source>
+            <translation>Unable to prepare the Python plot environment.</translation>
+        </message>
+    </context>
+    <context>
+        <name>PreviewBridge</name>
+        <message>
+            <source>Python 绘图已取消。</source>
+            <translation>Python plot cancelled.</translation>
+        </message>
+    </context>
+    <context>
+        <name>SettingsDialog</name>
+        <message>
+            <source>启用 Python 绘图</source>
+            <translation>Enable Python plots</translation>
+        </message>
+        <message>
+            <source>重新绘图</source>
+            <translation>Redraw plots</translation>
+        </message>
+        <message>
+            <source>Python 绘图</source>
+            <translation>Python plots</translation>
+        </message>
+        <message>
+            <source>留空自动查找 Python 3，可选择虚拟环境中的解释器</source>
+            <translation>Leave empty to find Python 3 automatically, or select a virtual environment interpreter</translation>
+        </message>
+        <message>
+            <source>Python 解释器路径</source>
+            <translation>Python interpreter path</translation>
+        </message>
+        <message>
+            <source>选择解释器…</source>
+            <translation>Choose interpreter…</translation>
+        </message>
+        <message>
+            <source>选择 Python 解释器</source>
+            <translation>Choose Python interpreter</translation>
+        </message>
+        <message>
+            <source>检查 Python 环境</source>
+            <translation>Check Python environment</translation>
+        </message>
+        <message>
+            <source>未找到 Python 3，请选择解释器。</source>
+            <translation>Python 3 was not found. Select an interpreter.</translation>
+        </message>
+        <message>
+            <source>安装依赖（在终端运行）：</source>
+            <translation>Install dependencies (run in a terminal):</translation>
+        </message>
+        <message>
+            <source>Python 环境检查失败。需要 Python 3、matplotlib 和 NumPy。</source>
+            <translation>Python environment check failed. Python 3, matplotlib and NumPy are required.</translation>
+        </message>
+        <message>
+            <source>正在检查…</source>
+            <translation>Checking…</translation>
         </message>
     </context>
 </TS>

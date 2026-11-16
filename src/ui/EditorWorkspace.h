@@ -120,6 +120,7 @@ private:
     QPixmap imagePixmap_;
     QString imageId_;
     qreal imageScale_ = 0;// Zero fits the viewport without enlarging small images.
+    QString pyplotRoot(const QString &id) const;
     QString activeEditorId_;
     MarkdownEditor *markdownEditor_ = nullptr;
     vte::VTextEdit *editor_ = nullptr;

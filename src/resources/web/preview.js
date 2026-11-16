@@ -210,6 +210,15 @@
                 lineCount = request.text.split('\n').length;
                 await qsnoteArticle.graphs(root, {
                     cancelled: () => request.revision !== requestedRevision,
+                    pyplot: (source, id) => new Promise(resolve => {
+                        const receive = (generation, renderedId, data, error) => {
+                            if (generation !== request.revision || renderedId !== id) return;
+                            bridge.pyplotRendered.disconnect(receive);
+                            resolve({data, error});
+                        };
+                        bridge.pyplotRendered.connect(receive);
+                        bridge.renderPyplot(source, request.revision, id);
+                    }),
                     plantUml: (source, id) => new Promise(resolve => {
                         const receive = (generation, renderedId, data, error) => {
                             if (generation !== request.revision || renderedId !== id) return;

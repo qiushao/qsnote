@@ -2,6 +2,7 @@
 #include "Theme.h"
 #include "UiStyle.h"
 #include "core/PlantUmlRenderer.h"
+#include "core/PyplotRenderer.h"
 #include "core/WebTranslations.h"
 #include <QDesktopServices>
 #include <QApplication>
@@ -92,6 +93,29 @@ QString PreviewBridge::localImage(const QString &url) { // NOLINT(readability-co
     return "data:" + mime + ";base64," + QString::fromLatin1(file.readAll().toBase64());
 }
 
+void PreviewBridge::setPyplotContext(const QString &root, const QString &directory, int revision) {
+    revision_ = revision;
+    notebookRoot_ = root;
+    directory_ = directory;
+    if (pyplot_) pyplot_->cancel();
+}
+
+void PreviewBridge::renderPyplot(const QString &source, int revision, int id) {
+    if (revision != revision_) {
+        emit pyplotRendered(revision, id, {}, tr("Python 绘图已取消。"));
+        return;
+    }
+    if (pyplot_) pyplot_->cancel();
+    auto *renderer = new PyplotRenderer(this);
+    pyplot_ = renderer;
+    connect(renderer, &PyplotRenderer::finished, this, [this, renderer, revision, id](const QByteArray &png, const QString &error) {
+        pyplot_.clear();
+        emit pyplotRendered(revision, id, QString::fromLatin1(png.toBase64()), error);
+        renderer->deleteLater();
+    });
+    renderer->render(source, notebookRoot_, directory_);
+}
+
 void PreviewBridge::renderPlantUml(const QString &source, int revision, int id) {
     auto *renderer = new PlantUmlRenderer(this);
     connect(renderer, &PlantUmlRenderer::finished, this, [this, renderer, revision, id](const QByteArray &png, const QString &error) {
@@ -102,6 +126,7 @@ void PreviewBridge::renderPlantUml(const QString &source, int revision, int id) 
 }
 
 MarkdownPreview::MarkdownPreview(QWidget *parent) : QWebEngineView(parent), bridge_(new PreviewBridge(this)) {
+    connect(&PyplotEnvironment::instance(), &PyplotEnvironment::changed, this, &MarkdownPreview::invalidatePyplot);
     setObjectName("preview");
     setPage(new PreviewPage(this));
     installWebTranslations(page());
@@ -460,9 +485,9 @@ void MarkdownPreview::hideEvent(QHideEvent *event) {
     QWebEngineView::hideEvent(event);
 }
 
-void MarkdownPreview::setMarkdown(const QString &markdown, const QString &documentId, const QString &directory) {
+void MarkdownPreview::setMarkdown(const QString &markdown, const QString &documentId, const QString &directory, const QString &notebookRoot) {
     const auto baseUrl = directory.isEmpty() ? QString() : QUrl::fromLocalFile(directory + '/').toString(QUrl::FullyEncoded);
-    if (loading_ && markdown == markdown_ && documentId == documentId_ && baseUrl == baseUrl_) return;
+    if (!pyplotCancelled_ && loading_ && markdown == markdown_ && documentId == documentId_ && baseUrl == baseUrl_ && notebookRoot == notebookRoot_) return;
     if (headingDialog_) headingDialog_->close();
     const bool reset = documentId != documentId_;
     if (reset) {
@@ -472,7 +497,11 @@ void MarkdownPreview::setMarkdown(const QString &markdown, const QString &docume
     markdown_ = markdown;
     documentId_ = documentId;
     baseUrl_ = baseUrl;
+    directory_ = directory;
+    notebookRoot_ = notebookRoot;
+    pyplotCancelled_ = false;
     ++revision_;
+    bridge_->setPyplotContext(notebookRoot_, directory_, revision_);
     ++findRequest_;
     if (!loading_) {
         loading_ = true;
@@ -496,4 +525,17 @@ void MarkdownPreview::scrollToLine(int line, bool center) {
         pendingLine_ = qMax(0, line);
         pendingLineCentered_ = center;
     }
+}
+
+void MarkdownPreview::invalidatePyplot() {
+    if (pyplotCancelled_) return;
+    ++revision_;
+    bridge_->setPyplotContext(notebookRoot_, directory_, revision_);
+    if (ready_) emit bridge_->documentChanged(markdown_, revision_, false, baseUrl_);
+}
+
+void MarkdownPreview::cancelPyplot() {
+    pyplotCancelled_ = true;
+    ++revision_;
+    bridge_->setPyplotContext({}, {}, revision_);
 }

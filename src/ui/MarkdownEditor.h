@@ -16,12 +16,14 @@ public:
     void showSettings();
     QWidget *createSettingsPage(QWidget *parent, std::function<void()> &apply);
     void reloadSettings();
+    void setPyplotContext(const QString &root, const QString &directory);
     void setSplitMode(bool enabled);
     void zoom(int delta) override;
     QMenu *createEditorMenu(QWidget *parent);
 
 signals:
     void settingsChanged();
+    void pyplotError(const QString &error);
     void imageDirectoryRequested(QString *directory);
 
 protected:

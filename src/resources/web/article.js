@@ -188,12 +188,12 @@ window.qsnoteArticle = (() => {
                     const result = await mermaid.render(`mermaid-${graphId}`, source);
                     if (options.cancelled?.()) return;
                     graph.innerHTML = result.svg;
-                } else if (language === 'plantuml') {
-                    const result = await options.plantUml(source, graphId);
+                } else if (language === 'plantuml' || language === 'pyplot') {
+                    const result = await (language === 'pyplot' ? options.pyplot : options.plantUml)(source, graphId);
                     if (options.cancelled?.()) return;
                     if (result.error) throw new Error(result.error);
                     const image = new Image();
-                    image.alt = qsnoteTranslations.plantUml;
+                    image.alt = language === 'pyplot' ? 'Python / matplotlib' : qsnoteTranslations.plantUml;
                     await new Promise((resolve, reject) => {
                         image.onload = resolve;
                         image.onerror = () => reject(new Error(qsnoteTranslations.plantUmlImageError));
@@ -226,6 +226,11 @@ window.qsnoteArticle = (() => {
                 parent.replaceWith(graph);
             } catch (error) {
                 if (options.strict) throw new Error(`${language === 'mermaid' ? 'Mermaid' : language} ${qsnoteTranslations.diagramError}${error.message || error}`);
+                if (language === 'pyplot') {
+                    code.classList.replace('language-pyplot', 'language-python');
+                    Prism.highlightElement(code);
+                    decorateCode(code, language);
+                }
                 graph.remove();
                 const message = document.createElement('p');
                 message.className = 'render-error';

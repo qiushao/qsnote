@@ -6,15 +6,20 @@ window.qsnoteExport = {
         console.info("Export: Markdown parse begin");
         const root = qsnoteArticle.markdown(text, true);
         document.getElementById('content').replaceChildren(root);
-        return [...root.querySelectorAll('pre > code')]
-            .filter(code => qsnoteArticle.codeLanguage(code) === 'plantuml').map(code => code.textContent);
+        const codes = [...root.querySelectorAll('pre > code')];
+        return {
+            plantUml: codes.filter(code => qsnoteArticle.codeLanguage(code) === 'plantuml').map(code => code.textContent),
+            pyplot: codes.filter(code => qsnoteArticle.codeLanguage(code) === 'pyplot')
+                .map((code, index) => ({source: code.textContent, line: code.dataset.sourceLine || 0, index: String(index)}))
+        };
     },
-    async finish(plantUml, mathCss, foreground) {
+    async finish(plantUml, pyplot, mathCss, foreground) {
         try {
             const root = document.querySelector('.qsnote-article');
             window.exportStage = qsnoteTranslations.diagram;
             console.info("Export: graphs begin");
-            await qsnoteArticle.graphs(root, {strict: true, log: details => console.info("Export graph: " + JSON.stringify(details)), plantUml: async source => ({data: plantUml[source]})});
+            let pyplotIndex = 0;
+            await qsnoteArticle.graphs(root, {strict: true, log: details => console.info("Export graph: " + JSON.stringify(details)), plantUml: async source => ({data: plantUml[source]}), pyplot: async () => ({data: pyplot[String(pyplotIndex++)]})});
             console.info("Export: graphs completed; rasterization begin");
             // Freeze generated graphics for readers without JavaScript or SVG support.
             for (const node of root.querySelectorAll('eq,eqn,.diagram svg')) {

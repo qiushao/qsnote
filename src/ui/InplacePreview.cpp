@@ -3,6 +3,7 @@
 #include "core/DiagramRuntime.h"
 #include "core/MathStylesheet.h"
 #include "core/PlantUmlRenderer.h"
+#include "core/PyplotRenderer.h"
 #include "core/WebTranslations.h"
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -24,12 +25,18 @@ namespace {
 
 QString graphLanguage(const QString &info) {
     const auto language = info.section(QRegularExpression("\\s+"), 0, 0).toLower();
-    static const QStringList languages = {"plot", "function-plot", "mermaid", "flow", "flowchart", "dot", "graphviz", "neato", "twopi", "circo", "fdp", "sfdp", "osage", "patchwork", "wave", "wavedrom", "plantuml", "puml", "mathjax"};
+    static const QStringList languages = {"pyplot", "plot", "function-plot", "mermaid", "flow", "flowchart", "dot", "graphviz", "neato", "twopi", "circo", "fdp", "sfdp", "osage", "patchwork", "wave", "wavedrom", "plantuml", "puml", "mathjax"};
     return languages.contains(language) ? language : QString();
 }
 }// namespace
 
 InplacePreview::InplacePreview(MarkdownEditor *editor) : QObject(editor), editor_(editor) {
+    connect(&PyplotEnvironment::instance(), &PyplotEnvironment::changed, this, [this] {
+        cache_.clear();
+        activeImages_.clear();
+        refresh();
+        publish();
+    });
     graphWidth_ = graphWidth();
     editor_->getTextEdit()->viewport()->installEventFilter(this);
     renderTimer_.setSingleShot(true);
@@ -76,7 +83,24 @@ bool InplacePreview::eventFilter(QObject *watched, QEvent *event) {
     return QObject::eventFilter(watched, event);
 }
 
+void InplacePreview::setPyplotContext(const QString &root, const QString &directory) {
+    if (notebookRoot_ == root && directory_ == directory) return;
+    notebookRoot_ = root;
+    directory_ = directory;
+    cache_.clear();
+    activeImages_.clear();
+    refresh();
+    publish();
+}
+
 void InplacePreview::invalidate() {
+    if (pyplot_) {
+        pyplot_->disconnect(this);
+        pyplot_->cancel();
+        pyplot_->deleteLater();
+        pyplot_.clear();
+        busy_ = false;
+    }
     ++generation_;
     revision_ = 0;
     requests_.clear();
@@ -99,7 +123,9 @@ void InplacePreview::refresh() {
 }
 
 void InplacePreview::update(const QVector<QSharedPointer<const vte::Preview>> &previews) {
-    ++generation_;
+    const auto revision = revision_;
+    invalidate();
+    revision_ = revision;
     const auto previousImages = activeImages_;
     activeImages_.clear();
     requests_.clear();
@@ -131,7 +157,12 @@ void InplacePreview::update(const QVector<QSharedPointer<const vte::Preview>> &p
         } else {
             continue;
         }
-        const QJsonObject identity{{"language", request.language}, {"text", request.text}, {"display", request.display}, {"font", fontSize}, {"baseFont", editor_->baseEditorFontPointSize()}, {"dpi", editor_->logicalDpiY()}, {"color", color}, {"scale", scale}, {"graphWidth", graphWidth()}};
+        if (request.language == "pyplot" && !PyplotEnvironment::executionError(notebookRoot_, directory_).isEmpty()) continue;
+        QJsonObject identity{{"language", request.language}, {"text", request.text}, {"display", request.display}, {"font", fontSize}, {"baseFont", editor_->baseEditorFontPointSize()}, {"dpi", editor_->logicalDpiY()}, {"color", color}, {"scale", scale}, {"graphWidth", graphWidth()}};
+        if (request.language == "pyplot") {
+            identity.insert("directory", directory_);
+            identity.insert("interpreter", PyplotEnvironment::interpreter());
+        }
         request.key = QString::fromLatin1(QCryptographicHash::hash(QJsonDocument(identity).toJson(QJsonDocument::Compact), QCryptographicHash::Sha256).toHex());
         requests_.append(request);
         const auto previous = previousImages.constFind(request.key);
@@ -189,6 +220,21 @@ void InplacePreview::renderNext() {
         return;
     }
     const auto &request = requests_[next_];
+    if (request.language == "pyplot") {
+        busy_ = true;
+        auto *renderer = new PyplotRenderer(this);
+        pyplot_ = renderer;
+        connect(renderer, &PyplotRenderer::finished, this,
+                [this, renderer, generation = generation_, index = next_](const QByteArray &png, const QString &error) {
+                    pyplot_.clear();
+                    const auto image = QImage::fromData(png);
+                    rendered(generation, index, QString::fromLatin1(png.toBase64()), image.width(), image.height(), error);
+                    if (!error.isEmpty()) emit editor_->pyplotError(error);
+                    renderer->deleteLater();
+                });
+        renderer->render(request.text, notebookRoot_, directory_);
+        return;
+    }
     if (request.language == "sfdp") {
         busy_ = true;
         const auto executable = DiagramRuntime::graphviz();
@@ -238,7 +284,7 @@ void InplacePreview::renderNext() {
         return;
     }
     busy_ = true;
-    const QJsonObject data{{"generation", generation_}, {"index", next_}, {"language", request.language}, {"text", request.text}, {"display", request.display}, {"fontSize", editor_->editorFontPointSize() * editor_->logicalDpiY() / 72.0}, {"zoom", static_cast<double>(editor_->editorFontPointSize()) / editor_->baseEditorFontPointSize()}, {"color", QColor(editor_->theme()->editorStyle(vte::Theme::Text).m_textColor).name()}, {"scale", editor_->devicePixelRatioF()}, {"graphWidth", graphWidth()}};
+    const QJsonObject data{{"generation", generation_}, {"index", next_}, {"directory", directory_}, {"interpreter", PyplotEnvironment::interpreter()}, {"language", request.language}, {"text", request.text}, {"display", request.display}, {"fontSize", editor_->editorFontPointSize() * editor_->logicalDpiY() / 72.0}, {"zoom", static_cast<double>(editor_->editorFontPointSize()) / editor_->baseEditorFontPointSize()}, {"color", QColor(editor_->theme()->editorStyle(vte::Theme::Text).m_textColor).name()}, {"scale", editor_->devicePixelRatioF()}, {"graphWidth", graphWidth()}};
     emit renderRequested(QString::fromUtf8(QJsonDocument(data).toJson(QJsonDocument::Compact)));
 }
 
@@ -250,7 +296,7 @@ void InplacePreview::rendered(int generation, int index, const QString &png, int
         if (!image.pixmap.isNull() && width > 0 && height > 0) {
             // Native PNGs have no editor zoom applied yet.
             const auto &language = requests_[index].language;
-            if (language == "plantuml" || language == "puml" || language == "sfdp") {
+            if (language == "pyplot" || language == "plantuml" || language == "puml" || language == "sfdp") {
                 image.size *= static_cast<double>(editor_->editorFontPointSize()) / editor_->baseEditorFontPointSize();
             }
             attach(index, image);
