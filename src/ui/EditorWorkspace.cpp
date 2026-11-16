@@ -513,6 +513,13 @@ void EditorWorkspace::buildToolbar() {
         QString language = "mermaid";
     };
     const QList<Diagram> diagrams = {
+            {QCoreApplication::translate("MainWindow", "函数绘图（plot）"), R"plot(title: sin(x) / cos(x)
+x: -2*pi..2*pi
+y: -2..2
+height: 300
+sin(x) # sin(x)
+cos(x) # cos(x))plot",
+             "plot"},
             {QCoreApplication::translate("MainWindow", "函数绘图（function-plot）"), R"plot({
   grid: true,
   xAxis: { label: 'x', domain: [-6, 6] },

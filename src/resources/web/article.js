@@ -181,9 +181,9 @@ window.qsnoteArticle = (() => {
             const parent = code.parentElement;
             options.log?.({id: graph.id, language, sourceLine: code.dataset.sourceLine, source});
             try {
-                if (language === 'function-plot') {
+                if (language === 'function-plot' || language === 'plot') {
                     parent.after(graph);
-                    qsnotePlot(graph, source, parent.parentElement.clientWidth || 800, !options.strict);
+                    qsnotePlot(graph, source, parent.parentElement.clientWidth || 800, !options.strict, language);
                 } else if (language === 'mermaid') {
                     const result = await mermaid.render(`mermaid-${graphId}`, source);
                     if (options.cancelled?.()) return;

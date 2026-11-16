@@ -52,8 +52,8 @@
     async function graph(request) {
         root.style.cssText = `display:block;width:${request.graphWidth}px;padding:0;background:white;color:black`;
         const id = `inplace-${++serial}`;
-        if (request.language === 'function-plot') {
-            qsnotePlot(root, request.text, request.graphWidth, false);
+        if (request.language === 'function-plot' || request.language === 'plot') {
+            qsnotePlot(root, request.text, request.graphWidth, false, request.language);
         } else if (request.language === 'mermaid') {
             // Render inside the sized host: the hidden page has no viewport width.
             const result = await mermaid.render(id, request.text, root);

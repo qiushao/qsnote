@@ -289,6 +289,7 @@
     </context>
     <context>
         <name>MainWindow</name>
+        <message><source>函数绘图（plot）</source><translation>Function plot (plot)</translation></message>
         <message><source>函数绘图（function-plot）</source><translation>Function plot (function-plot)</translation></message>
         <message><source>编辑 Slug</source><translation>Edit slug</translation></message>
         <message><source>分类 Slug：</source><translation>Category slug:</translation></message>

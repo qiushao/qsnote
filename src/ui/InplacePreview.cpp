@@ -24,7 +24,7 @@ namespace {
 
 QString graphLanguage(const QString &info) {
     const auto language = info.section(QRegularExpression("\\s+"), 0, 0).toLower();
-    static const QStringList languages = {"function-plot", "mermaid", "flow", "flowchart", "dot", "graphviz", "neato", "twopi", "circo", "fdp", "sfdp", "osage", "patchwork", "wave", "wavedrom", "plantuml", "puml", "mathjax"};
+    static const QStringList languages = {"plot", "function-plot", "mermaid", "flow", "flowchart", "dot", "graphviz", "neato", "twopi", "circo", "fdp", "sfdp", "osage", "patchwork", "wave", "wavedrom", "plantuml", "puml", "mathjax"};
     return languages.contains(language) ? language : QString();
 }
 }// namespace
