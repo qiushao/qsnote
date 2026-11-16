@@ -108,10 +108,12 @@
             const text = line.trim();
             if (!text || text.startsWith('//')) return;
             try {
-                const option = /^(title|x|y|height)\s*:\s*(.*)$/i.exec(text);
+                const option = /^(title|x|y|height|xlabel|ylabel)\s*:\s*(.*)$/i.exec(text);
                 if (option) {
                     const key = option[1].toLowerCase(), value = option[2].trim();
                     if (key === 'title') options.title = value.slice(0, 60);
+                    else if (key === 'xlabel') options.xLabel = value.slice(0, 60);
+                    else if (key === 'ylabel') options.yLabel = value.slice(0, 60);
                     else if (key === 'x') xRange = range(value);
                     else if (key === 'y') yRange = range(value);
                     else {
@@ -156,8 +158,8 @@
                 throw new Error('plot: cannot determine y range; specify y: a..b');
             }
         }
-        options.xAxis = {label: 'x', domain: xRange};
-        options.yAxis = {label: 'y', domain: yRange};
+        options.xAxis = {domain: xRange};
+        options.yAxis = {domain: yRange};
         return options;
     };
 

@@ -46,17 +46,29 @@ window.qsnotePlot = (host, source, availableWidth, interactive, language = 'func
         const style = create('style', {});
         style.textContent = `
             #${id} { font-family: system-ui, sans-serif; }
-            #${id} .axis text { fill: #93a0cc; font-size: 11px; }
+            #${id} .axis text { fill: #ccd6f6; font-size: 11px; }
             #${id} .axis path, #${id} .axis line { stroke: #7896f0; opacity: .22; }
             #${id} .origin { stroke: #8fa3e8; opacity: .65; }
-            #${id} .axis-label { fill: #93a0cc; font-size: 13px; }
+            #${id} .axis-label { fill: #ccd6f6; font-size: 13px; }
             #${id} .title { fill: #e9edff; font-size: 16px; font-weight: 600; }
             #${id} .tip text { font: 12px system-ui, sans-serif; }
             #${id} .graph { filter: url(#${id}-glow); }
         `;
         svg.prepend(style);
         // Include labels in the SVG so they survive inline previews and raster exports.
-        let x = 16, y = options.height + 10;
+        // Matplotlib-style placement: x label centered below the plot, y label
+        // rotated on the left side of the plot.
+        const xLabelText = options.xLabel || 'x', yLabelText = options.yLabel || 'y';
+        const xLabel = create('text', {x: options.width / 2, y: options.height + 18,
+            'text-anchor': 'middle', class: 'axis-label'});
+        xLabel.textContent = xLabelText;
+        svg.append(xLabel);
+        const yCenter = options.height / 2;
+        const yLabel = create('text', {x: 14, y: yCenter, 'text-anchor': 'middle',
+            class: 'axis-label', transform: `rotate(-90 14 ${yCenter})`});
+        yLabel.textContent = yLabelText;
+        svg.append(yLabel);
+        let x = 16, y = options.height + 34;
         for (const curve of options.data) {
             const label = create('text', {fill: '#e9edff', 'font-size': 11, 'font-family': 'monospace'});
             label.textContent = curve.title;
