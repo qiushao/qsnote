@@ -289,6 +289,7 @@
     </context>
     <context>
         <name>MainWindow</name>
+        <message><source>函数绘图（function-plot）</source><translation>Function plot (function-plot)</translation></message>
         <message><source>编辑 Slug</source><translation>Edit slug</translation></message>
         <message><source>分类 Slug：</source><translation>Category slug:</translation></message>
         <message><source>分类 Slug 只能包含字母、数字、下划线和连字符。</source><translation>Category slugs may only contain letters, numbers, underscores and hyphens.</translation></message>

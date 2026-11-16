@@ -513,6 +513,16 @@ void EditorWorkspace::buildToolbar() {
         QString language = "mermaid";
     };
     const QList<Diagram> diagrams = {
+            {QCoreApplication::translate("MainWindow", "函数绘图（function-plot）"), R"plot({
+  grid: true,
+  xAxis: { label: 'x', domain: [-6, 6] },
+  yAxis: { label: 'y', domain: [-2, 2] },
+  data: [
+    { fn: 'sin(x)' },
+    { fn: 'cos(x)' }
+  ]
+})plot",
+             "function-plot"},
             {QCoreApplication::translate("MainWindow", "流程图"), "flowchart TD\n    A[开始] --> B{是否完成？}\n    B -->|是| C[结束]\n    B -->|否| D[继续处理]\n    D --> B"},
             {QCoreApplication::translate("MainWindow", "时序图"), "sequenceDiagram\n    participant U as 用户\n    participant S as 系统\n    U->>S: 发送请求\n    S-->>U: 返回结果"},
             {QCoreApplication::translate("MainWindow", "类图"), "classDiagram\n    Animal <|-- Cat\n    class Animal {\n        +String name\n        +eat()\n    }\n    class Cat {\n        +meow()\n    }"},

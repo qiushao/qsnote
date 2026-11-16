@@ -231,3 +231,41 @@ QSNote --> User: Show preview
 | PlantUML 提示命令缺失 | 检查 Java、PlantUML、Graphviz 及应用能看到的 PATH，安装后重启应用 |
 | 预览能阅读但导出失败 | 查看报错对应的公式或图表，导出/站点生成对渲染错误检查更严格 |
 | 离线图片不显示 | 图表运行库是本地资源，但正文引用的远程图片仍需网络 |
+
+## 函数绘图（function-plot）
+
+在编辑器工具栏点击“更多 Markdown 语法” → “函数绘图（function-plot）”，即可插入示例。代码块语言名为 `function-plot`。
+
+使用离线打包的 function-plot 1.26.0，配置支持 JSON 和 [JSON5](https://json5.org/)（无引号键名、单引号、注释及尾逗号），不支持 JavaScript 回调或表达式求值；数学公式仍写在 fn 字符串中。
+
+~~~markdown
+```function-plot
+{
+  "grid": true,
+  "xAxis": {"label": "x", "domain": [-6, 6]},
+  "yAxis": {"label": "y", "domain": [-2, 2]},
+  "data": [{"fn": "sin(x)"}, {"fn": "cos(x)"}]
+}
+```
+~~~
+
+阅读预览默认关闭绘图交互，鼠标位于图中时滚轮仍滚动文章。如需缩放和平移，可在配置顶层显式设置 `disableZoom: false`；修改源码后恢复初始范围。就地预览、文档导出和生成站点为静态图片，按源码配置渲染。默认高度 400，可使用正数 width、height 设置尺寸；窄窗口按比例显示。target、id 及插件由应用管理。错误配置在预览中提示，导出时报错。
+
+直接复制官方配置对象也可以，例如：
+
+~~~markdown
+```function-plot
+{
+  target: '#domain',
+  yAxis: { label: 'y', domain: [-1, 1] },
+  xAxis: { label: 'x', domain: [8, 24] },
+  data: [{ fn: 'sin(x)' }]
+}
+```
+~~~
+
+配置中的 target 会被忽略，由应用指定绘图容器，无需创建 #domain 元素。也兼容复制示例时对象闭括号后的一个逗号；代码块中只放配置对象，不要包含 functionPlot(...) 调用。
+
+解析回归检查：在仓库根目录执行 `node tests/plot.test.cjs`。
+
+滚轮交互回归检查：用浏览器打开 `tests/plot-interaction.html`，页面应显示 PASS。
