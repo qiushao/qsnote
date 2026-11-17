@@ -293,6 +293,7 @@
     </context>
     <context>
         <name>MainWindow</name>
+        <message><source>分层架构图</source><translation>Layered architecture</translation></message>
         <message><source>函数绘图</source><translation>Function plots</translation></message>
         <message><source>plot</source><translation>plot</translation></message>
         <message><source>function plot</source><translation>function plot</translation></message>

@@ -342,3 +342,49 @@ plt.show()
 预览仅缓存本次会话中的结果。修改外部 CSV 等数据文件后，点击“设置 → Python 绘图”中的“重新绘图”；它会清空会话绘图缓存并刷新两种预览。缩放窗口复用已有图片。HTML、PDF、EPUB、CHM 和静态站点导出会重新运行代码并打包 PNG，阅读端不需要 Python；绘图失败会终止导出，并报告笔记和代码块行号。CHM 仍需 Windows CHM 编译器。
 
 开发验证：`python3 -m unittest discover -s tests -p test_pyplot.py`；进程和正文导出集成测试使用 `cmake -S tests -B build/pyplot-tests`、`cmake --build build/pyplot-tests` 和 `ctest --test-dir build/pyplot-tests --output-on-failure`。测试需要 Python 3、matplotlib、NumPy、PlantUML、Graphviz 及 Qt 6 Test/WebEngine 开发组件。
+
+
+## 分层架构图（layer-arch）
+
+从“更多 Markdown 语法 → 分层架构图”插入模板，或使用以下代码块。实现遵循 [LayerArch 1.0 语法规范](layer-arch-syntax-spec.md)，支持本地编辑器内嵌预览、阅读预览和导出。
+
+````markdown
+```layer-arch
+@title 分层架构图
+@theme azure
+# 应用层 @color(mint) @label(show)
+- Web 应用 | 浏览器
+- 桌面应用 | Qt
+-->
+# 服务层 @color(blue)
+## 业务服务 @cols(2)
+- 用户服务
+- 笔记服务
+- 业务集群 @span(2) @cols(2) @border(dashed)
+  - 同步服务
+  - 搜索服务
+## 基础服务 @fill(soft)
+- 身份认证
+- 消息通知
+-->
+# 存储层 @color(purple) @label(show)
+- 数据库
+- 缓存 @fill(none)
+```
+````
+
+- `#` 创建顶层区块：直接包含 `-` 时为横向卡片行，默认隐藏层名；包含 `##` 时为带标题的容器，两种形式不能混用。
+- `##` 创建模块行，默认隐藏行名；`@label(show)` / `@label(hide)` 控制当前层、行或嵌套容器的标题显示。
+- `- 标题 | 副标题` 创建组件。子组件每级缩进恰好两个空格，自动形成可继续嵌套的容器，禁止 Tab 缩进。
+- `@cols(2)` 按两列逐行排布，`@stack` 纵向排列，二者不能同时使用。`@span(2)` 在直接父级显式声明的网格中占两列。
+- `@color(blue)` 或 `@color(#B5D4F4)` 设置颜色；内置色名为 blue、mint、purple、orange、slate、gray、green、pink、yellow。`@fill(soft|solid|none)` 设置填充；颜色与填充就近继承。
+- `@border(solid|dashed|none)` 仅控制当前卡片或顶层容器边框，不继承，不能用于 `##` 结构行。
+- 仅单独一行、不缩进的 `-->` 连接相邻顶层区块；没有 `-->` 就没有箭头。不支持箭头标签、连续箭头或首尾箭头。
+- `@title`、`@desc`、`@theme azure|light|dark` 和全局 `@color(...)` 必须放在首个 `#` 前。标题与说明写入 SVG 无障碍元数据。
+- 属性仅在行尾识别。`\|` 显示字面竖线，`\@` 显示属性位置的 @，`\\` 显示反斜线；正文里的邮件地址无需转义，所有文字均按纯文本渲染。
+
+图宽随可用空间调整；复杂嵌套会扩大图的最小宽度，阅读预览可横向滚动。文字自动换行，容器随内容增高。
+
+旧 demo 的 `@azure`、`@solid`、`@w2`、`@ghost`、`@width`、`---`、`..>`、`==>` 等不属于 1.0，需改用上述正式语法。语法错误会显示错误代码和代码块内行号，并保留源码，不会静默丢弃组件。
+
+开发验证：`node --test tests/layer-arch.test.cjs`。完整的投屏 SDK、多级微服务示例见语法规范第 9、10 节。

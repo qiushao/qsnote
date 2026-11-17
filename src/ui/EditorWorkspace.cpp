@@ -513,6 +513,27 @@ void EditorWorkspace::buildToolbar() {
         QString language = "mermaid";
     };
     const QList<Diagram> diagrams = {
+            {QCoreApplication::translate("MainWindow", "分层架构图"), R"arch(@title 分层架构图
+@theme azure
+# 应用层 @color(mint) @label(show)
+- Web 应用 | 浏览器
+- 桌面应用 | Qt
+-->
+# 服务层 @color(blue)
+## 业务服务 @cols(2)
+- 用户服务
+- 笔记服务
+- 业务集群 @span(2) @cols(2) @border(dashed)
+  - 同步服务
+  - 搜索服务
+## 基础服务 @fill(soft)
+- 身份认证
+- 消息通知
+-->
+# 存储层 @color(purple) @label(show)
+- 数据库
+- 缓存 @fill(none))arch",
+             "layer-arch"},
             {QCoreApplication::translate("MainWindow", "流程图"), "flowchart TD\n    A[开始] --> B{是否完成？}\n    B -->|是| C[结束]\n    B -->|否| D[继续处理]\n    D --> B"},
             {QCoreApplication::translate("MainWindow", "时序图"), "sequenceDiagram\n    participant U as 用户\n    participant S as 系统\n    U->>S: 发送请求\n    S-->>U: 返回结果"},
             {QCoreApplication::translate("MainWindow", "类图"), "classDiagram\n    Animal <|-- Cat\n    class Animal {\n        +String name\n        +eat()\n    }\n    class Cat {\n        +meow()\n    }"},

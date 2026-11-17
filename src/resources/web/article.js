@@ -188,6 +188,8 @@ window.qsnoteArticle = (() => {
                 if (language === 'function-plot' || language === 'plot') {
                     parent.after(graph);
                     qsnotePlot(graph, source, parent.parentElement.clientWidth || 800, !options.strict, language);
+                } else if (language === 'layer-arch') {
+                    qsnoteLayerArch(graph, source, parent.parentElement.clientWidth || 680);
                 } else if (language === 'mermaid') {
                     const result = await mermaid.render(`mermaid-${graphId}`, source);
                     if (options.cancelled?.()) return;
