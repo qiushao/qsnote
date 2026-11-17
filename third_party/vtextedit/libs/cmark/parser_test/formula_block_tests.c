@@ -101,7 +101,29 @@ int test_formula_block_empty_html() {
       CMARK_OPT_DEFAULT);
 }
 
+int test_formula_block_numbered_heading() {
+  const char *inputs[] = {
+      "$$\nE=mc^2\n$$ (1)\n\n### After formula\n",
+      "$$\r\nE=mc^2\r\n$$ (A.1)  \r\n\r\n### After formula\r\n",
+      "$$\nE=mc^2\n$$\t(label)\t\n\n### After formula\n"};
+  for (size_t i = 0; i < sizeof(inputs) / sizeof(inputs[0]); ++i) {
+    int result = test_xml(inputs[i],
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+      "<!DOCTYPE document SYSTEM \"CommonMark.dtd\">\n"
+      "<document xmlns=\"http://commonmark.org/xml/1.0\">\n"
+      "  <formula_block xml:space=\"preserve\">E=mc^2\n</formula_block>\n"
+      "  <heading level=\"3\">\n"
+      "    <text xml:space=\"preserve\">After formula</text>\n"
+      "  </heading>\n"
+      "</document>\n",
+      CMARK_OPT_DEFAULT);
+    if (!result) return 0;
+  }
+  return 1;
+}
+
 int main() {
+  CASE(test_formula_block_numbered_heading);
   CASE(test_formula_block_simple);
   CASE(test_formula_block_raw);
   CASE(test_formula_block_multiple);

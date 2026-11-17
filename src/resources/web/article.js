@@ -74,6 +74,10 @@ window.qsnoteArticle = (() => {
         const root = document.createElement('article');
         root.className = 'qsnote-article';
         root.innerHTML = md.render(text);
+        // Preserve font colors across the article stylesheet's all: revert reset.
+        root.querySelectorAll('font[color]').forEach(font => {
+            font.style.color = font.getAttribute('color');
+        });
         // GitHub-style alerts: a blockquote whose first line is [!NOTE] etc.
         // becomes the same alert aside as the "alert-..." container syntax.
         for (const quote of [...root.querySelectorAll('blockquote')]) {

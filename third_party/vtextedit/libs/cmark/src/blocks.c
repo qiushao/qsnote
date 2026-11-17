@@ -1157,17 +1157,39 @@ static bool parse_frontmatter_prefix(cmark_parser *parser, cmark_chunk *input,
   return res;
 }
 
+// Match the optional equation label used by the reading renderer: $$ (label).
+static bufsize_t numbered_formula_end(cmark_chunk *input, bufsize_t offset) {
+  bufsize_t pos = offset;
+  if (peek_at(input, pos) != '$' || peek_at(input, pos + 1) != '$')
+    return 0;
+  pos += 2;
+  while (S_is_space_or_tab(peek_at(input, pos))) pos++;
+  if (peek_at(input, pos++) != '(') return 0;
+  bufsize_t label_start = pos;
+  while (pos < input->len && peek_at(input, pos) != ')' &&
+         !cmark_isspace(peek_at(input, pos))) pos++;
+  if (pos == label_start || peek_at(input, pos++) != ')') return 0;
+  while (S_is_space_or_tab(peek_at(input, pos))) pos++;
+  if (peek_at(input, pos) == '\r') pos++;
+  return peek_at(input, pos) == '\n' ? pos + 1 - offset : 0;
+}
+
 static bool parse_formula_block_prefix(cmark_parser *parser, cmark_chunk *input,
                                        cmark_node *container, bool *should_continue) {
   bool res = false;
   bufsize_t matched = 0;
+  bool numbered = false;
 
   if (parser->indent <= 3) {
     matched = scan_formula_block_end(input, parser->first_nonspace);
+    if (!matched && container->as.formula.fence_length == 3) {
+      matched = numbered_formula_end(input, parser->first_nonspace);
+      numbered = matched != 0;
+    }
   }
 
   if (matched &&
-      (matched == container->as.formula.fence_length ||
+      (numbered || matched == container->as.formula.fence_length ||
        matched == container->as.formula.fence_length - 2)) {
     // closing fence - and since we're at
     // the end of a line, we can stop processing it:

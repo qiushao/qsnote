@@ -14,6 +14,10 @@
 | 高级 | [静态站点与发布](static-sites.md) | 写文章、预览网站、发布到 GitHub Pages 或 SSH 服务器 |
 | 扩展 | [自定义站点主题](site-themes.md) | 从示例主题开始调整模板和样式 |
 
+## 语法参考
+
+[Markdown 语法完整参考](markdown-syntax.md)：通用 Markdown、GFM、VTextEdit 与 QSNote 扩展，每项包含使用场景、源码和实际渲染示例。
+
 ## 按功能查找
 
 - 创建、打开、关闭笔记本，目录拖拽、多标签、外部文件、搜索、保存、备份： [首次使用与笔记管理](getting-started.md)。
