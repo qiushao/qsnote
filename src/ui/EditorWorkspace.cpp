@@ -513,24 +513,6 @@ void EditorWorkspace::buildToolbar() {
         QString language = "mermaid";
     };
     const QList<Diagram> diagrams = {
-            {QCoreApplication::translate("MainWindow", "函数绘图（plot）"), R"plot(title: sin(x) / cos(x)
-x: -2*pi..2*pi
-y: -2..2
-height: 300
-sin(x) # sin(x)
-cos(x) # cos(x))plot",
-             "plot"},
-            {tr("Python 绘图（pyplot）"), "import numpy as np\nimport matplotlib.pyplot as plt\n\nx = np.linspace(0, 2 * np.pi, 200)\nplt.plot(x, np.sin(x), label='sin(x)')\nplt.legend()\nplt.grid(True)\nplt.show()", "pyplot"},
-            {QCoreApplication::translate("MainWindow", "函数绘图（function-plot）"), R"plot({
-  grid: true,
-  xAxis: { label: 'x', domain: [-6, 6] },
-  yAxis: { label: 'y', domain: [-2, 2] },
-  data: [
-    { fn: 'sin(x)' },
-    { fn: 'cos(x)' }
-  ]
-})plot",
-             "function-plot"},
             {QCoreApplication::translate("MainWindow", "流程图"), "flowchart TD\n    A[开始] --> B{是否完成？}\n    B -->|是| C[结束]\n    B -->|否| D[继续处理]\n    D --> B"},
             {QCoreApplication::translate("MainWindow", "时序图"), "sequenceDiagram\n    participant U as 用户\n    participant S as 系统\n    U->>S: 发送请求\n    S-->>U: 返回结果"},
             {QCoreApplication::translate("MainWindow", "类图"), "classDiagram\n    Animal <|-- Cat\n    class Animal {\n        +String name\n        +eat()\n    }\n    class Cat {\n        +meow()\n    }"},
@@ -604,6 +586,38 @@ cos(x) # cos(x))plot",
         setPreview(false);
         markdownEditor_->type(Type::TypeMathBlock);
     });
+    auto *functionPlotMenu = diagramMenu->addMenu(QCoreApplication::translate("MainWindow", "函数绘图"));
+    const QList<Diagram> functionPlots = {
+            {QCoreApplication::translate("MainWindow", "plot"), R"plot(title: sin(x) / cos(x)
+x: -2*pi..2*pi
+y: -2..2
+height: 300
+sin(x) # sin(x)
+cos(x) # cos(x))plot",
+             "plot"},
+            {QCoreApplication::translate("MainWindow", "function plot"), R"plot({
+  grid: true,
+  xAxis: { label: 'x', domain: [-6, 6] },
+  yAxis: { label: 'y', domain: [-2, 2] },
+  data: [
+    { fn: 'sin(x)' },
+    { fn: 'cos(x)' }
+  ]
+})plot",
+             "function-plot"},
+            {QCoreApplication::translate("MainWindow", "pyplot"), "import numpy as np\nimport matplotlib.pyplot as plt\n\nx = np.linspace(0, 2 * np.pi, 200)\nplt.plot(x, np.sin(x), label='sin(x)')\nplt.legend()\nplt.grid(True)\nplt.show()", "pyplot"}};
+    for (const auto &diagram: functionPlots) {
+        functionPlotMenu->addAction(diagram.title, this, [this, diagram] {
+            if (!documentNote(currentNoteId())) return;
+            setPreview(false);
+            auto cursor = editor_->textCursor();
+            cursor.beginEditBlock();
+            cursor.insertText("\n\n```" + diagram.language + "\n" + diagram.source + "\n```\n\n");
+            cursor.endEditBlock();
+            editor_->setTextCursor(cursor);
+            editor_->setFocus();
+        });
+    }
     layout->addWidget(more);
     syntaxActions_.append(more);
     auto *modes = new QWidget(toolbar_);
