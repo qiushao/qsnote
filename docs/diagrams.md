@@ -373,7 +373,7 @@ plt.show()
 ```layer-arch
 @title 分层架构图
 @theme azure
-# 应用层 @color(mint) @label(show)
+# 应用层 @color(mint)
 - Web 应用 | 浏览器
 - 桌面应用 | Qt
 -->
@@ -384,22 +384,22 @@ plt.show()
 - 业务集群 @span(2) @cols(2) @border(dashed)
   - 同步服务
   - 搜索服务
-## 基础服务 @fill(soft)
+## 基础服务 @fill(soft) @border(dashed)
 - 身份认证
 - 消息通知
 -->
-# 存储层 @color(purple) @label(show)
+# 存储层 @color(purple)
 - 数据库
 - 缓存 @fill(none)
 ```
 ````
 
-- `#` 创建顶层区块：直接包含 `-` 时为横向卡片行，默认隐藏层名；包含 `##` 时为带标题的容器，两种形式不能混用。
-- `##` 创建模块行，默认隐藏行名；`@label(show)` / `@label(hide)` 控制当前层、行或嵌套容器的标题显示。
+- `#` 创建顶层容器。直接写 `-` 时，模块默认横向并排；直接写 `##` 时，子容器纵向排列。同一容器内的直接子项须使用同一种形式。
+- `@label(left|center|right|hide)` 控制当前容器标题的左对齐、居中、右对齐或隐藏，默认居中。适用于 `#`、`##` 和带子项的 `-`。
 - `- 标题 | 副标题` 创建组件。子组件每级缩进恰好两个空格，自动形成可继续嵌套的容器，禁止 Tab 缩进。
 - `@cols(2)` 按两列逐行排布，`@stack` 纵向排列，二者不能同时使用。`@span(2)` 在直接父级显式声明的网格中占两列。
 - `@color(blue)` 或 `@color(#B5D4F4)` 设置颜色；内置色名为 blue、mint、purple、orange、slate、gray、green、pink、yellow。`@fill(soft|solid|none)` 设置填充；颜色与填充就近继承。
-- `@border(solid|dashed|none)` 仅控制当前卡片或顶层容器边框，不继承，不能用于 `##` 结构行。
+- `@border(solid|dashed|none)` 分别为实线（默认）、虚线和无边框，适用于 `#`、`##` 和 `-`。容器使用 `@border(none)` 时内边距为零，子模块之间仍有间距。
 - 仅单独一行、不缩进的 `-->` 连接相邻顶层区块；没有 `-->` 就没有箭头。不支持箭头标签、连续箭头或首尾箭头。
 - `@title`、`@desc`、`@theme azure|light|dark` 和全局 `@color(...)` 必须放在首个 `#` 前。标题与说明写入 SVG 无障碍元数据。
 - 属性仅在行尾识别。`\|` 显示字面竖线，`\@` 显示属性位置的 @，`\\` 显示反斜线；正文里的邮件地址无需转义，所有文字均按纯文本渲染。

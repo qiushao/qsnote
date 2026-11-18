@@ -515,7 +515,7 @@ void EditorWorkspace::buildToolbar() {
     const QList<Diagram> diagrams = {
             {QCoreApplication::translate("MainWindow", "分层架构图"), R"arch(@title 分层架构图
 @theme azure
-# 应用层 @color(mint) @label(show)
+# 应用层 @color(mint)
 - Web 应用 | 浏览器
 - 桌面应用 | Qt
 -->
@@ -526,11 +526,11 @@ void EditorWorkspace::buildToolbar() {
 - 业务集群 @span(2) @cols(2) @border(dashed)
   - 同步服务
   - 搜索服务
-## 基础服务 @fill(soft)
+## 基础服务 @fill(soft) @border(dashed)
 - 身份认证
 - 消息通知
 -->
-# 存储层 @color(purple) @label(show)
+# 存储层 @color(purple)
 - 数据库
 - 缓存 @fill(none))arch",
              "layer-arch"},

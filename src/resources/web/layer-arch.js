@@ -29,7 +29,7 @@
                 if (name === 'color' && !Object.hasOwn(colors, value) && !/^#[\da-fA-F]{6}$/.test(value)) {
                     fail(line, 'E004', 'Color must be a predefined name or #RRGGBB');
                 }
-                const enums = {fill: ['soft', 'solid', 'none'], border: ['solid', 'dashed', 'none'], label: ['show', 'hide']};
+                const enums = {fill: ['soft', 'solid', 'none'], border: ['solid', 'dashed', 'none'], label: ['left', 'center', 'right', 'hide', 'show']};
                 if (enums[name] && !enums[name].includes(value)) fail(line, 'E008', `Invalid @${name}(${value})`);
                 if (name === 'cols' || name === 'span') {
                     if (!/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(Number(value))) fail(line, 'E006', `@${name} requires a positive integer`);
@@ -127,12 +127,11 @@
         if (!diagram.children.length) fail(1, 'E009', 'Expected a # block with at least one component');
         function validate(node, parent) {
             if (node.kind === 'connector') return;
-            const a = node.attrs, group = node.kind === 'block' && node.children[0]?.kind === 'row';
+            const a = node.attrs;
             if (node.kind !== 'node' && !node.children.length) fail(node.line, 'E009', 'Block or row requires at least one child');
-            const allowed = ['color', 'fill'];
+            const allowed = ['color', 'fill', 'border'];
             if (node.kind === 'row' || (node.kind === 'node' && node.children.length)) allowed.push('cols', 'stack', 'label');
             if (node.kind === 'block') allowed.push('label');
-            if (group || node.kind === 'node') allowed.push('border');
             if (node.kind === 'node') allowed.push('span');
             for (const name of Object.keys(a)) {
                 if (!allowed.includes(name)) fail(node.line, 'E008', `@${name} is not valid on this ${node.kind}`);
@@ -178,37 +177,36 @@
         if (line.trim()) lines.push(line.trimEnd());
         return lines;
     }
-    function container(node) {
-        return node.kind === 'node' && node.children.length > 0 || node.kind === 'block' && node.children[0]?.kind === 'row';
-    }
     function columns(node) {
+        if (node.children[0]?.kind === 'row') return 1;
         return node.attrs.cols || (node.attrs.stack ? 1 : node.children.length);
     }
+    function nodePadding(node) {
+        return node.children.length && node.attrs.border === 'none' ? 0 : 16;
+    }
     function minimumWidth(node) {
-        const padding = container(node) ? 16 : 0;
         let width = 112;
         if (node.children.length) {
-            const units = node.kind === 'block' && container(node) ? 1 : columns(node);
+            const units = columns(node);
             const unitWidth = Math.max(...node.children.map(child => (minimumWidth(child) + gap) / (child.attrs.span || 1))) - gap;
-            width = Math.max(width, units * (unitWidth + gap) - gap + 2 * padding);
+            width = Math.max(width, units * (unitWidth + gap) - gap + 2 * nodePadding(node));
         }
         return width;
     }
     function layout(node, width, inherited, background, dark) {
-        const grouped = container(node), card = node.kind === 'node';
+        const padding = nodePadding(node);
+        const card = node.kind === 'node';
         const color = node.attrs.color || inherited.color, fill = node.attrs.fill || inherited.fill;
         let base = colors[color] || color;
         if (dark && Object.hasOwn(colors, color)) base = mix(base, '#101827', .32);
-        const surface = grouped && !card ? mix(base, background, .35) :
-            card ? (fill === 'none' ? background : fill === 'soft' ? mix(base, background, .35) : base) : background;
-        const padding = grouped || card ? 16 : 0;
-        const visible = card && !grouped || (node.attrs.label ? node.attrs.label === 'show' : grouped);
-        const title = visible ? wrap(node.title, width - 2 * Math.max(padding, 4), 14, 600) : [];
-        const subtitle = visible ? wrap(node.subtitle, width - 2 * Math.max(padding, 4), 12, 400) : [];
+        const surface = !card || fill === 'soft' ? mix(base, background, .35) : fill === 'none' ? background : base;
+        const visible = node.attrs.label !== 'hide';
+        const title = visible ? wrap(node.title, width - 2 * padding, 14, 600) : [];
+        const subtitle = visible ? wrap(node.subtitle, width - 2 * padding, 12, 400) : [];
         const textHeight = title.length * 20 + subtitle.length * 18;
         const children = [];
         let y = padding + textHeight + (textHeight && node.children.length ? 10 : 0);
-        const cols = node.kind === 'block' && grouped ? 1 : columns(node);
+        const cols = columns(node);
         const unit = (width - 2 * padding - gap * (cols - 1)) / cols;
         let column = 0, rowHeight = 0;
         for (const child of node.children) {
@@ -224,8 +222,8 @@
         for (const child of children) rowHeights.set(child.y, Math.max(rowHeights.get(child.y) || 0, child.box.height));
         for (const child of children) child.box.height = rowHeights.get(child.y);
         const height = Math.max(card ? 52 : 0, y + rowHeight + padding);
-        return {node, width, height, padding, title, subtitle, children, surface, ink: ink(surface),
-            fill: card && fill === 'none' ? 'none' : surface, border: node.attrs.border || 'solid', grouped, card};
+        return {node, width, height, title, subtitle, children, surface, ink: ink(surface),
+            fill: card && fill === 'none' ? 'none' : surface, border: node.attrs.border || 'solid'};
     }
     function render(source, availableWidth) {
         const diagram = parse(source);
@@ -236,16 +234,23 @@
         const uid = `layer-arch-${++serial}`, parts = [];
         const rounded = value => Math.round(value * 100) / 100;
         function draw(box, x, y) {
-            const {node, padding} = box;
+            const {node} = box;
             parts.push(`<g class="${node.kind === 'node' ? 'node' : node.kind === 'block' ? 'layerbox' : 'layer-row'}" aria-label="${escape(node.title)}">`);
-            if (box.card || box.grouped) {
-                parts.push(`<rect x="${rounded(x)}" y="${rounded(y)}" width="${rounded(box.width)}" height="${rounded(box.height)}" rx="8" fill="${box.fill}" stroke="${box.border === 'none' ? 'none' : mix(box.surface, box.ink, .55)}"${box.border === 'dashed' ? ' stroke-dasharray="5 4"' : ''}/>`);
-            }
+            parts.push(`<rect x="${rounded(x)}" y="${rounded(y)}" width="${rounded(box.width)}" height="${rounded(box.height)}" rx="8" fill="${box.fill}" stroke="${box.border === 'none' ? 'none' : mix(box.surface, box.ink, .55)}"${box.border === 'dashed' ? ' stroke-dasharray="5 4"' : ''}/>`);
             const textHeight = box.title.length * 20 + box.subtitle.length * 18;
-            let textY = y + (box.card && !box.grouped ? (box.height - textHeight) / 2 : padding);
+            const padding = nodePadding(node);
+            let textX = x + box.width / 2, anchor = 'middle';
+            if (node.attrs.label === 'left') {
+                textX = x + padding;
+                anchor = 'start';
+            } else if (node.attrs.label === 'right') {
+                textX = x + box.width - padding;
+                anchor = 'end';
+            }
+            let textY = y + (box.children.length ? padding : (box.height - textHeight) / 2);
             for (const [lines, size, lineHeight, weight] of [[box.title, 14, 20, 600], [box.subtitle, 12, 18, 400]]) {
                 for (const line of lines) {
-                    parts.push(`<text x="${rounded(x + (box.card && !box.grouped ? box.width / 2 : Math.max(padding, 4)))}" y="${rounded(textY + lineHeight / 2)}" text-anchor="${box.card && !box.grouped ? 'middle' : 'start'}" dominant-baseline="central" font-size="${size}" font-weight="${weight}" fill="${box.ink}">${escape(line)}</text>`);
+                    parts.push(`<text x="${rounded(textX)}" y="${rounded(textY + lineHeight / 2)}" text-anchor="${anchor}" dominant-baseline="central" font-size="${size}" font-weight="${weight}" fill="${box.ink}">${escape(line)}</text>`);
                     textY += lineHeight;
                 }
             }
