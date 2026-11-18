@@ -147,6 +147,15 @@ void InplacePreview::update(const QVector<QSharedPointer<const vte::Preview>> &p
             const auto math = preview.staticCast<const vte::MathPreview>();
             request.language = "math";
             request.text = math->expression();
+            const auto &source = math->sourceMarkdown();
+            if (source.startsWith("\\begin{")) {
+                // cmark strips the environment along with the Markdown container prefixes.
+                const auto opening = source.section('\n', 0, 0);
+                const auto closing = source.section('\n', -1);
+                const auto end = closing.indexOf("\\end{");
+                request.text.prepend(opening + '\n');
+                if (end >= 0) request.text.append(closing.mid(end));
+            }
             request.display = math->isDisplayMath();
         } else if (preview->type() == vte::PreviewElementType::Code) {
             const auto code = preview.staticCast<const vte::CodePreview>();
