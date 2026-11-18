@@ -56,6 +56,8 @@
             qsnotePlot(root, request.text, request.graphWidth, false, request.language);
         } else if (request.language === 'layer-arch') {
             qsnoteLayerArch(root, request.text, request.graphWidth);
+        } else if (request.language === 'markmap') {
+            await qsnoteMarkmap.snapshot(root, request.text);
         } else if (request.language === 'mermaid') {
             // Render inside the sized host: the hidden page has no viewport width.
             const result = await mermaid.render(id, request.text, root);

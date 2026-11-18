@@ -2,6 +2,7 @@
 
 (() => {
     const content = document.getElementById('content');
+    const markmaps = [];
     let bridge;
     let revision = -1;
     let requestedRevision = -1;
@@ -206,9 +207,12 @@
                 }
                 if (request.revision !== requestedRevision) continue;
                 ignoreScroll = true;
+                for (const map of markmaps) map.destroy();
+                markmaps.length = 0;
                 content.replaceChildren(root);
                 lineCount = request.text.split('\n').length;
                 await qsnoteArticle.graphs(root, {
+                    markmapPreview: (host, source) => markmaps.push(qsnoteMarkmap.preview(host, source)),
                     cancelled: () => request.revision !== requestedRevision,
                     pyplot: (source, id) => new Promise(resolve => {
                         const receive = (generation, renderedId, data, error) => {

@@ -719,6 +719,10 @@
             <translation>Mind Map</translation>
         </message>
         <message>
+            <source>Markmap 思维导图</source>
+            <translation>Markmap Mind Map</translation>
+        </message>
+        <message>
             <source>坐标轴图</source>
             <translation>XY Chart</translation>
         </message>

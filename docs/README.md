@@ -22,7 +22,7 @@
 
 - 创建、打开、关闭笔记本，目录拖拽、多标签、外部文件、搜索、保存、备份： [首次使用与笔记管理](getting-started.md)。
 - 标题、格式、列表、任务框、代码、图片、表格、脚注、提示块、查找替换、阅读折叠、大纲、输入模式、拼写、快捷键、语言、托盘和更新： [Markdown 写作、阅读与设置](editing.md)。
-- KaTeX、Mermaid、Flowchart、Graphviz、WaveDrom、PlantUML： [公式与图表](diagrams.md)。
+- KaTeX、Markmap、Mermaid、Flowchart、Graphviz、WaveDrom、PlantUML： [公式与图表](diagrams.md)。
 - 待办分类、状态、排序、搜索、分页、删除： [待办清单](todo.md)。
 - 章节排序与层级、自动编号、整本与单篇导出： [电子书与导出](ebook-export.md)。
 - 文章属性、草稿、分类标签、SEO、内置主题、头像、友链、评论、独立页面、统计、自定义代码、部署： [静态站点与发布](static-sites.md)。

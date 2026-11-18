@@ -20,7 +20,7 @@
 ### 公式与图表，离线也能看
 
 - 支持 KaTeX 行内与块级公式。
-- 支持 Mermaid、Flowchart、Graphviz、WaveDrom 与 PlantUML 图表。
+- 支持 Markmap、Mermaid、Flowchart、Graphviz、WaveDrom 与 PlantUML 图表。
 - 编辑时就地预览，阅读与导出时无需联网。
 - 脚注、代码高亮、提示块等 Markdown 扩展一应俱全。
 

@@ -840,7 +840,7 @@ y &= 3+4
 
 ## 五、图表代码块扩展
 
-以下都使用围栏代码块。Mermaid、Flowchart、Graphviz、WaveDrom 使用打包的浏览器运行库；PlantUML 和 pyplot 还有本地依赖。代码围栏是 Markdown，围栏内部是对应引擎的语言。
+以下都使用围栏代码块。Markmap、Mermaid、Flowchart、Graphviz、WaveDrom 使用打包的浏览器运行库；PlantUML 和 pyplot 还有本地依赖。代码围栏是 Markdown，围栏内部是对应引擎的语言。
 
 
 ### 38. flowchart TD

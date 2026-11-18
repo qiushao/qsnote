@@ -190,6 +190,13 @@ window.qsnoteArticle = (() => {
                     qsnotePlot(graph, source, parent.parentElement.clientWidth || 800, !options.strict, language);
                 } else if (language === 'layer-arch') {
                     qsnoteLayerArch(graph, source, parent.parentElement.clientWidth || 680);
+                } else if (language === 'markmap') {
+                    if (options.markmapPreview) {
+                        parent.after(graph);
+                        options.markmapPreview(graph, source);
+                    } else {
+                        await qsnoteMarkmap.snapshot(graph, source);
+                    }
                 } else if (language === 'mermaid') {
                     const result = await mermaid.render(`mermaid-${graphId}`, source);
                     if (options.cancelled?.()) return;
